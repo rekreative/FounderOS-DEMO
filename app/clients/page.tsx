@@ -40,7 +40,7 @@ export default function ClientsPage() {
         <ClientsList clients={clients} />
       </section>
 
-      {showNew && <ClientsForm onCancel={() => setShowNew(false)} onCreate={handleCreate} />}
+      {showNew && <ClientsForm mode="create" onCancel={() => setShowNew(false)} onCreate={handleCreate} />}
     </div>
   );
 }
