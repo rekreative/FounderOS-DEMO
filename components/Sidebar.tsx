@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { PanelLeft } from 'lucide-react';
 import { OsMark } from '@/components/OsMark';
 import { usePathname } from 'next/navigation';
-import { NAV_OPERATE, NAV_AGENTS, NAV_INTELLIGENCE, NAV_SYSTEM, NAV_LIBRARY, type NavItem } from '@/lib/nav';
+import { NAV_OPERATE, NAV_AGENTS, NAV_INTELLIGENCE, NAV_SYSTEM, NAV_LIBRARY, REKREATIVE_PRIMARY, type NavItem } from '@/lib/nav';
 
 function NavGroup({
   title,
@@ -186,11 +186,8 @@ export function Sidebar() {
         </button>
       </div>
       <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2.5 pb-2">
-        <NavGroup title="Operate" items={NAV_OPERATE} pathname={pathname} collapsed={collapsed} onTip={setTip} />
-        <NavGroup title="Agents" items={NAV_AGENTS} pathname={pathname} collapsed={collapsed} onTip={setTip} />
-        <NavGroup title="Intelligence" items={NAV_INTELLIGENCE} pathname={pathname} collapsed={collapsed} onTip={setTip} />
-        <NavGroup title="System" items={NAV_SYSTEM} pathname={pathname} collapsed={collapsed} onTip={setTip} />
-        <NavGroup title="Variants" items={NAV_LIBRARY} pathname={pathname} collapsed={collapsed} onTip={setTip} />
+        {/* REKREATIVE OS primary rail: agency-focused ordering */}
+        <NavGroup title="Main" items={REKREATIVE_PRIMARY} pathname={pathname} collapsed={collapsed} onTip={setTip} />
       </nav>
       <div
         className={`flex flex-col gap-2 border-t border-os-border py-3.5 ${

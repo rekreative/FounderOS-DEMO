@@ -35,8 +35,23 @@ export const NAV_OPERATE: NavItem[] = [
   { href: '/finances', label: 'Finances', icon: Wallet },
 ];
 
+// REKREATIVE primary menu (visible rail for the agency). Keeps original NAV_* intact for tests and CommandPalette.
+export const REKREATIVE_PRIMARY: NavItem[] = [
+  { href: '/', label: 'Home', icon: Home },
+  { href: '/clients', label: 'Clients', icon: Users },
+  { href: '/leads', label: 'Leads', icon: Filter },
+  { href: '/meta-ads', label: 'Meta Ads', icon: LayoutGrid },
+  { href: '/automations', label: 'Automations', icon: Workflow },
+  { href: '/agents', label: 'Agents', icon: Users },
+  { href: '/content', label: 'Content', icon: Clapperboard },
+  { href: '/finances', label: 'Finances', icon: Wallet },
+  { href: '/brain', label: 'G-Brain', icon: Brain },
+  { href: '/analytics', label: 'Analytics', icon: BarChart3 },
+];
+
 // The agent workforce: the roster and the org chart that maps how they report.
 export const NAV_AGENTS: NavItem[] = [
+  // Keep agents-related internals accessible but not duplicated in the primary rail
   { href: '/agents', label: 'Agents', icon: Users },
   { href: '/tasks', label: 'Tasks', icon: ListChecks },
   { href: '/skills', label: 'Skills', icon: Sparkles },
@@ -47,9 +62,9 @@ export const NAV_AGENTS: NavItem[] = [
 export const NAV_INTELLIGENCE: NavItem[] = [{ href: '/brain', label: 'G-Brain', icon: Brain }];
 
 export const NAV_SYSTEM: NavItem[] = [
+  // Keep less-frequent system views reachable but out of the primary operate list
   { href: '/integrations', label: 'Connections', icon: Plug },
   { href: '/roadmap', label: 'Roadmap', icon: Map },
-  { href: '/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/reference', label: 'Reference Model', icon: LayoutGrid },
 ];
 
