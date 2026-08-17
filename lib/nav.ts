@@ -27,6 +27,17 @@ export type NavItem = { href: string; label: string; icon: typeof Home };
 
 export const NAV_OPERATE: NavItem[] = [
   { href: '/', label: 'Home', icon: Home },
+  { href: '/comms', label: 'Comms', icon: MessageSquare },
+  { href: '/funnel', label: 'Funnel', icon: Filter },
+  { href: '/workflows', label: 'Workflows', icon: Workflow },
+  { href: '/social', label: 'Social', icon: Share2 },
+  { href: '/content', label: 'Content', icon: Clapperboard },
+  { href: '/finances', label: 'Finances', icon: Wallet },
+];
+
+// REKREATIVE primary menu (visible rail for the agency). Keeps original NAV_* intact for tests and CommandPalette.
+export const REKREATIVE_PRIMARY: NavItem[] = [
+  { href: '/', label: 'Home', icon: Home },
   { href: '/clients', label: 'Clients', icon: Users },
   { href: '/leads', label: 'Leads', icon: Filter },
   { href: '/meta-ads', label: 'Meta Ads', icon: LayoutGrid },
