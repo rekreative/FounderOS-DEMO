@@ -115,10 +115,53 @@ export function deleteClient(id: string): boolean {
   const next = all.filter((c) => c.id !== id);
   if (next.length === all.length) return false;
   writeStorage(next);
+  deleteClientNotes(id); // Also delete associated notes
   return true;
 }
 
 // Export seed for server-side or tests if needed
 export function getSeedClients(): Client[] {
   return SEED_CLIENTS.slice();
+}
+
+// ===== NOTES STORAGE (separate from Client model) =====
+
+const NOTES_STORAGE_KEY = 'rek_client_notes_v1';
+
+function readNotes(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(NOTES_STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, string>;
+  } catch (e) {
+    console.error('Failed to parse notes from localStorage', e);
+    return {};
+  }
+}
+
+function writeNotes(notes: Record<string, string>) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify(notes));
+  } catch (e) {
+    console.error('Failed to write notes to localStorage', e);
+  }
+}
+
+export function getClientNotes(clientId: string): string {
+  const notes = readNotes();
+  return notes[clientId] ?? '';
+}
+
+export function updateClientNotes(clientId: string, content: string): void {
+  const notes = readNotes();
+  notes[clientId] = content;
+  writeNotes(notes);
+}
+
+export function deleteClientNotes(clientId: string): void {
+  const notes = readNotes();
+  delete notes[clientId];
+  writeNotes(notes);
 }
