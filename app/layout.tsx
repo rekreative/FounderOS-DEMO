@@ -16,7 +16,7 @@ const fontMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'FOUNDER OS',
+  title: 'REKREATIVE OS',
   description: 'Personal operating system and AI agent command center',
 };
 
