@@ -14,6 +14,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   org: 'org-chart',
   brain: 'g-brain',
   integrations: 'conexiones',
+  connections: 'integraciones',
   roadmap: 'hoja de ruta',
   analytics: 'analítica',
   reference: 'modelo de referencia',
