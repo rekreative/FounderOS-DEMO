@@ -22,6 +22,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   leads: 'leads',
   'meta-ads': 'meta ads',
   automations: 'automatizaciones',
+  results: 'resultados',
 };
 
 export function openPalette() {

@@ -217,9 +217,19 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
         )}
 
         {activeTab === 'results' && (
-          <div className="p-4 border border-os-border bg-os-surface2 text-os-dim">
-            <h3 className="font-semibold mb-2">Módulo Resultados</h3>
-            <p className="text-sm">Este módulo se conectará en una futura iteración. Aquí aparecerán el análisis de rendimiento y los informes.</p>
+          <div className="flex flex-col items-start gap-3 border border-os-border bg-os-surface2 p-4">
+            <div>
+              <h3 className="mb-1 font-semibold text-os-text">Resultados</h3>
+              <p className="text-sm text-os-dim">
+                Gasto publicitario, funnel comercial, ingresos atribuidos, ROAS y CAC de {client.name} viven en su propio dashboard dedicado.
+              </p>
+            </div>
+            <Link
+              href={`/clients/${client.id}/results`}
+              className="border border-os-border bg-os-surface px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-text hover:border-os-border-strong hover:text-os-accent"
+            >
+              Abrir dashboard de resultados →
+            </Link>
           </div>
         )}
 
