@@ -10,6 +10,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   social: 'social',
   comms: 'comms',
   agents: 'agentes',
+  'ai-agents': 'agentes',
   org: 'org-chart',
   brain: 'g-brain',
   integrations: 'conexiones',
