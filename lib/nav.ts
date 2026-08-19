@@ -22,6 +22,7 @@ import {
   BarChart3,
   LayoutGrid,
   Layers,
+  TrendingUp,
 } from 'lucide-react';
 
 export type NavItem = { href: string; label: string; icon: typeof Home };
@@ -42,6 +43,7 @@ export const REKREATIVE_PRIMARY: NavItem[] = [
   { href: '/clients', label: 'Clientes', icon: Users },
   { href: '/leads', label: 'Leads', icon: Filter },
   { href: '/meta-ads', label: 'Meta Ads', icon: LayoutGrid },
+  { href: '/results', label: 'Resultados', icon: TrendingUp },
   { href: '/automations', label: 'Automatizaciones', icon: Workflow },
   { href: '/ai-agents', label: 'Agentes', icon: Users },
   { href: '/connections', label: 'Integraciones', icon: PlugZap },
