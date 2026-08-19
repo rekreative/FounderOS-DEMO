@@ -42,7 +42,7 @@ export const REKREATIVE_PRIMARY: NavItem[] = [
   { href: '/leads', label: 'Leads', icon: Filter },
   { href: '/meta-ads', label: 'Meta Ads', icon: LayoutGrid },
   { href: '/automations', label: 'Automatizaciones', icon: Workflow },
-  { href: '/agents', label: 'Agentes', icon: Users },
+  { href: '/ai-agents', label: 'Agentes', icon: Users },
   { href: '/content', label: 'Contenido', icon: Clapperboard },
   { href: '/finances', label: 'Finanzas', icon: Wallet },
   { href: '/brain', label: 'G-Brain', icon: Brain },
