@@ -17,7 +17,7 @@ import {
   type LeadStage,
 } from '@/lib/leads';
 
-const STAGE_FILTERS = [{ id: 'all', label: 'All' }, ...LEAD_STAGE_OPTIONS];
+const STAGE_FILTERS = [{ id: 'all', label: 'Todos' }, ...LEAD_STAGE_OPTIONS];
 
 type DraftLead = {
   clientId: string;
@@ -49,7 +49,7 @@ function formatDateTime(value: string | null): string {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleString('es-ES', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function formatRelative(value: string | null): string {
@@ -58,26 +58,26 @@ function formatRelative(value: string | null): string {
   if (Number.isNaN(date.getTime())) return '—';
   const diffHours = Math.max(0, (Date.now() - date.getTime()) / (1000 * 60 * 60));
   if (diffHours < 24) {
-    return `${Math.max(1, Math.round(diffHours))}h ago`;
+    return `hace ${Math.max(1, Math.round(diffHours))}h`;
   }
   const diffDays = Math.round(diffHours / 24);
-  return `${diffDays}d ago`;
+  return `hace ${diffDays}d`;
 }
 
 function eventLabel(type: LeadEvent['type']): string {
   const map: Record<LeadEvent['type'], string> = {
-    lead_received: 'Lead received',
-    ai_analyzed: 'AI analyzed',
-    whatsapp_sent: 'WhatsApp sent',
-    whatsapp_delivered: 'WhatsApp delivered',
-    lead_replied: 'Lead replied',
-    commercial_contacted: 'Commercial contacted',
-    appointment_booked: 'Appointment booked',
-    appointment_completed: 'Appointment completed',
-    converted: 'Converted',
-    disqualified: 'Disqualified',
-    manual_note: 'Manual note',
-    stage_changed: 'Stage changed',
+    lead_received: 'Lead recibido',
+    ai_analyzed: 'Analizado por IA',
+    whatsapp_sent: 'WhatsApp enviado',
+    whatsapp_delivered: 'WhatsApp entregado',
+    lead_replied: 'Lead respondió',
+    commercial_contacted: 'Contacto comercial',
+    appointment_booked: 'Cita reservada',
+    appointment_completed: 'Cita completada',
+    converted: 'Convertido',
+    disqualified: 'Descartado',
+    manual_note: 'Nota manual',
+    stage_changed: 'Etapa cambiada',
   };
   return map[type] ?? type;
 }
@@ -117,7 +117,7 @@ function LeadRow({
               </button>
               <div>
                 <div className="truncate text-[13px] font-semibold text-os-text">{lead.name}</div>
-                <div className="mt-0.5 text-[10px] text-os-dim">{lead.email || lead.phone || lead.whatsapp || 'No contact yet'}</div>
+                <div className="mt-0.5 text-[10px] text-os-dim">{lead.email || lead.phone || lead.whatsapp || 'Sin contacto'}</div>
               </div>
             </div>
           </div>
@@ -151,10 +151,10 @@ function LeadRow({
         <td className="px-3 py-3 text-right">
           <div className="flex justify-end gap-2">
             <button type="button" onClick={onAddNote} className="font-mono text-[9px] uppercase tracking-wide text-os-dim hover:text-os-accent">
-              add note
+              añadir nota
             </button>
             <button type="button" onClick={onEdit} className="font-mono text-[9px] uppercase tracking-wide text-os-muted hover:text-os-accent">
-              edit
+              editar
             </button>
           </div>
         </td>
@@ -163,12 +163,12 @@ function LeadRow({
         <tr>
           <td colSpan={9} className="border-t border-os-border bg-os-surface px-3 py-3">
             <div className="mb-2 flex items-center justify-between gap-3">
-              <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Relationship timeline</span>
-              <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">{events.length} events</span>
+              <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Línea de tiempo</span>
+              <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">{events.length} eventos</span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               {events.length === 0 ? (
-                <span className="font-mono text-[10px] text-os-dim">No timeline events yet.</span>
+                <span className="font-mono text-[10px] text-os-dim">Sin eventos en la línea de tiempo.</span>
               ) : (
                 events.map((event, index) => (
                   <span key={event.id} className="inline-flex items-center gap-1.5 rounded-sm-t border border-os-border bg-os-surface2 px-2 py-1">
@@ -341,7 +341,7 @@ export default function LeadsPage() {
             onClick={openCreateForm}
             className="border border-os-border bg-os-surface px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-text hover:border-os-border-strong hover:text-os-accent"
           >
-            New lead
+            Nuevo lead
           </button>
         </div>
       </div>
@@ -366,13 +366,13 @@ export default function LeadsPage() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Client</label>
+          <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
           <select
             value={clientFilter}
             onChange={(event) => setClientFilter(event.target.value)}
             className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
           >
-            <option value="all">All clients</option>
+            <option value="all">Todos los clientes</option>
             {clients.map((client) => (
               <option key={client.id} value={client.id}>
                 {client.name}
@@ -387,21 +387,21 @@ export default function LeadsPage() {
           <thead>
             <tr className="bg-os-surface2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">
               <th className="px-3 py-2 font-normal">Lead</th>
-              <th className="px-3 py-2 font-normal">Client</th>
-              <th className="px-3 py-2 font-normal">Stage</th>
-              <th className="px-3 py-2 font-normal">AI intent</th>
-              <th className="px-3 py-2 font-normal">Source</th>
-              <th className="px-3 py-2 font-normal">Campaign</th>
-              <th className="px-3 py-2 font-normal">Last activity</th>
-              <th className="px-3 py-2 font-normal">Contact</th>
-              <th className="px-3 py-2 font-normal text-right">Actions</th>
+              <th className="px-3 py-2 font-normal">Cliente</th>
+              <th className="px-3 py-2 font-normal">Etapa</th>
+              <th className="px-3 py-2 font-normal">Intención IA</th>
+              <th className="px-3 py-2 font-normal">Origen</th>
+              <th className="px-3 py-2 font-normal">Campaña</th>
+              <th className="px-3 py-2 font-normal">Última actividad</th>
+              <th className="px-3 py-2 font-normal">Contacto</th>
+              <th className="px-3 py-2 font-normal text-right">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {visibleLeads.length === 0 ? (
               <tr>
                 <td colSpan={9} className="px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-                  No leads in this segment.
+                  No hay leads en este segmento.
                 </td>
               </tr>
             ) : (
@@ -426,15 +426,15 @@ export default function LeadsPage() {
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-2xl rounded-sm-t border border-os-border bg-os-surface p-4">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold uppercase tracking-wide">{editingLeadId ? 'Edit lead' : 'New lead'}</h2>
+              <h2 className="text-lg font-semibold uppercase tracking-wide">{editingLeadId ? 'Editar lead' : 'Nuevo lead'}</h2>
               <button type="button" onClick={closeForm} className="font-mono text-[10px] uppercase tracking-wide text-os-dim hover:text-os-accent">
-                close
+                cerrar
               </button>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <label className="col-span-2">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Client</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
                 <select
                   value={draft.clientId}
                   onChange={(event) => setDraft((prev) => ({ ...prev, clientId: event.target.value }))}
@@ -449,7 +449,7 @@ export default function LeadsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Name</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Nombre</span>
                 <input
                   value={draft.name}
                   onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
@@ -458,7 +458,7 @@ export default function LeadsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Stage</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Etapa</span>
                 <select
                   value={draft.stage}
                   onChange={(event) => setDraft((prev) => ({ ...prev, stage: event.target.value as LeadStage }))}
@@ -482,7 +482,7 @@ export default function LeadsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Phone</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Teléfono</span>
                 <input
                   value={draft.phone}
                   onChange={(event) => setDraft((prev) => ({ ...prev, phone: event.target.value }))}
@@ -500,7 +500,7 @@ export default function LeadsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Source</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Origen</span>
                 <input
                   value={draft.source}
                   onChange={(event) => setDraft((prev) => ({ ...prev, source: event.target.value }))}
@@ -509,7 +509,7 @@ export default function LeadsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Campaign</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Campaña</span>
                 <input
                   value={draft.campaign}
                   onChange={(event) => setDraft((prev) => ({ ...prev, campaign: event.target.value }))}
@@ -518,7 +518,7 @@ export default function LeadsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Ad creative</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Creatividad del anuncio</span>
                 <input
                   value={draft.adCreative}
                   onChange={(event) => setDraft((prev) => ({ ...prev, adCreative: event.target.value }))}
@@ -527,7 +527,7 @@ export default function LeadsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Form</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Formulario</span>
                 <input
                   value={draft.form}
                   onChange={(event) => setDraft((prev) => ({ ...prev, form: event.target.value }))}
@@ -538,10 +538,10 @@ export default function LeadsPage() {
 
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={closeForm} className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim">
-                Cancel
+                Cancelar
               </button>
               <button type="button" onClick={submitLead} className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface">
-                {editingLeadId ? 'Save lead' : 'Create lead'}
+                {editingLeadId ? 'Guardar lead' : 'Crear lead'}
               </button>
             </div>
           </div>
@@ -552,9 +552,9 @@ export default function LeadsPage() {
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4">
           <div className="w-full max-w-xl rounded-sm-t border border-os-border bg-os-surface p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold uppercase tracking-wide">Add manual note</h3>
+              <h3 className="text-sm font-semibold uppercase tracking-wide">Añadir nota manual</h3>
               <button type="button" onClick={() => setNoteLeadId(null)} className="font-mono text-[10px] uppercase tracking-wide text-os-dim hover:text-os-accent">
-                close
+                cerrar
               </button>
             </div>
             <textarea
@@ -562,14 +562,14 @@ export default function LeadsPage() {
               onChange={(event) => setNoteDraft(event.target.value)}
               rows={4}
               className="w-full border border-os-border bg-os-surface2 p-2 text-sm text-os-text outline-none"
-              placeholder="Add a brief note about the lead..."
+              placeholder="Añade una breve nota sobre el lead..."
             />
             <div className="mt-3 flex justify-end gap-2">
               <button type="button" onClick={() => setNoteLeadId(null)} className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim">
-                Cancel
+                Cancelar
               </button>
               <button type="button" onClick={submitNote} className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface">
-                Save note
+                Guardar nota
               </button>
             </div>
           </div>

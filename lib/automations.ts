@@ -4,17 +4,20 @@ import { getClients } from '@/lib/clients';
 // Deliberately excludes "error": operational problems are DERIVED from run
 // state (see AutomationHealth below), never stored as a lifecycle value.
 export const AUTOMATION_STATUS_OPTIONS = [
-  { id: 'active', label: 'Active' },
-  { id: 'paused', label: 'Paused' },
-  { id: 'draft', label: 'Draft' },
+  { id: 'active', label: 'Activa' },
+  { id: 'paused', label: 'Pausada' },
+  { id: 'draft', label: 'Borrador' },
 ] as const;
 export type AutomationStatus = (typeof AUTOMATION_STATUS_OPTIONS)[number]['id'];
 
 // ── Health — always derived, never persisted (see getAutomationHealth) ─────
+// "Operativa" (health) is deliberately distinct from "Activa" (lifecycle
+// status above) — a paused automation is never healthy/unhealthy, and an
+// active one can still be unhealthy. Do not collapse the two vocabularies.
 export const AUTOMATION_HEALTH_OPTIONS = [
-  { id: 'healthy', label: 'Healthy' },
-  { id: 'needs_attention', label: 'Needs Attention' },
-  { id: 'never_run', label: 'Never Run' },
+  { id: 'healthy', label: 'Operativa' },
+  { id: 'needs_attention', label: 'Requiere atención' },
+  { id: 'never_run', label: 'Sin ejecuciones' },
 ] as const;
 export type AutomationHealth = (typeof AUTOMATION_HEALTH_OPTIONS)[number]['id'];
 
@@ -25,25 +28,25 @@ export const AUTOMATION_PLATFORM_OPTIONS = [
   { id: 'meta', label: 'Meta' },
   { id: 'openai', label: 'OpenAI' },
   { id: 'google_sheets', label: 'Google Sheets' },
-  { id: 'calendar', label: 'Calendar' },
-  { id: 'internal', label: 'Internal' },
+  { id: 'calendar', label: 'Calendario' },
+  { id: 'internal', label: 'Interno' },
 ] as const;
 export type AutomationPlatform = (typeof AUTOMATION_PLATFORM_OPTIONS)[number]['id'];
 
 export const AUTOMATION_TYPE_OPTIONS = [
-  { id: 'lead_response', label: 'Lead Response' },
-  { id: 'qualification', label: 'Qualification' },
-  { id: 'nurture', label: 'Nurture' },
-  { id: 'notification', label: 'Notification' },
-  { id: 'reporting', label: 'Reporting' },
-  { id: 'other', label: 'Other' },
+  { id: 'lead_response', label: 'Respuesta a lead' },
+  { id: 'qualification', label: 'Cualificación' },
+  { id: 'nurture', label: 'Nutrición' },
+  { id: 'notification', label: 'Notificación' },
+  { id: 'reporting', label: 'Informes' },
+  { id: 'other', label: 'Otro' },
 ] as const;
 export type AutomationType = (typeof AUTOMATION_TYPE_OPTIONS)[number]['id'];
 
 export const AUTOMATION_RUN_STATUS_OPTIONS = [
-  { id: 'success', label: 'Success' },
-  { id: 'failed', label: 'Failed' },
-  { id: 'running', label: 'Running' },
+  { id: 'success', label: 'Correcto' },
+  { id: 'failed', label: 'Fallido' },
+  { id: 'running', label: 'En curso' },
 ] as const;
 export type AutomationRunStatus = (typeof AUTOMATION_RUN_STATUS_OPTIONS)[number]['id'];
 

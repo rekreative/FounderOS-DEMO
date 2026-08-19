@@ -70,11 +70,11 @@ describe('getAutomationRunStats', () => {
 
 describe('label helpers', () => {
   it('resolve known ids to human labels', () => {
-    expect(getStatusLabel('active')).toBe('Active');
-    expect(getHealthLabel('needs_attention')).toBe('Needs Attention');
+    expect(getStatusLabel('active')).toBe('Activa');
+    expect(getHealthLabel('needs_attention')).toBe('Requiere atención');
     expect(getPlatformLabel('google_sheets')).toBe('Google Sheets');
-    expect(getTypeLabel('lead_response')).toBe('Lead Response');
-    expect(getRunStatusLabel('failed')).toBe('Failed');
+    expect(getTypeLabel('lead_response')).toBe('Respuesta a lead');
+    expect(getRunStatusLabel('failed')).toBe('Fallido');
   });
 
   it('falls back to the raw id for an unrecognized value rather than throwing', () => {

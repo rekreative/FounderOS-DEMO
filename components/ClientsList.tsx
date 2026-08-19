@@ -2,7 +2,11 @@
 
 import React from 'react';
 import Link from 'next/link';
-import type { Client } from '@/lib/clients';
+import { getClientStatusLabel, type Client } from '@/lib/clients';
+
+function formatBudget(value: number): string {
+  return `${Math.round(value).toLocaleString('es-ES')} €`;
+}
 
 export function ClientsList({ clients }: { clients: Client[] }) {
   return (
@@ -10,13 +14,13 @@ export function ClientsList({ clients }: { clients: Client[] }) {
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className="text-[12px] uppercase tracking-wide text-os-dim border-b border-os-border">
-            <th className="px-3 py-2">Client</th>
+            <th className="px-3 py-2">Cliente</th>
             <th className="px-3 py-2">Sector</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2">Service</th>
-            <th className="px-3 py-2">Meta Budget</th>
-            <th className="px-3 py-2">Start Date</th>
-            <th className="px-3 py-2">Owner</th>
+            <th className="px-3 py-2">Estado</th>
+            <th className="px-3 py-2">Servicio</th>
+            <th className="px-3 py-2">Presupuesto Meta</th>
+            <th className="px-3 py-2">Fecha de inicio</th>
+            <th className="px-3 py-2">Responsable</th>
           </tr>
         </thead>
         <tbody>
@@ -35,11 +39,11 @@ export function ClientsList({ clients }: { clients: Client[] }) {
                 <span className={`inline-block px-2 py-0.5 text-[11px] font-mono tracking-wide rounded-sm ${
                   c.status === 'active' ? 'text-os-ok border border-os-border bg-os-surface2' : c.status === 'paused' ? 'text-os-dim border border-os-border bg-os-surface2' : 'text-os-accent border border-os-border bg-os-surface2'
                 }`}>
-                  {c.status}
+                  {getClientStatusLabel(c.status)}
                 </span>
               </td>
               <td className="px-3 py-2 text-[13px] text-os-dim">{c.service}</td>
-              <td className="px-3 py-2 text-[13px] font-mono">${Math.round(c.metaBudgetMonthly).toLocaleString()}</td>
+              <td className="px-3 py-2 text-[13px] font-mono">{formatBudget(c.metaBudgetMonthly)}</td>
               <td className="px-3 py-2 text-[13px] text-os-dim">{c.startDate}</td>
               <td className="px-3 py-2 text-[13px] text-os-dim">{c.owner}</td>
             </tr>

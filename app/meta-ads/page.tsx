@@ -24,7 +24,7 @@ import {
   type MetaCampaignStatus,
 } from '@/lib/meta-ads';
 
-const STATUS_FILTERS = [{ id: 'all', label: 'All' }, ...CAMPAIGN_STATUS_OPTIONS];
+const STATUS_FILTERS = [{ id: 'all', label: 'Todas' }, ...CAMPAIGN_STATUS_OPTIONS];
 
 type DraftCampaign = {
   clientId: string;
@@ -61,24 +61,24 @@ const emptyDraft = (clientId = ''): DraftCampaign => ({
 });
 
 function formatCurrency(value: number): string {
-  return `€${Math.round(value).toLocaleString()}`;
+  return `${Math.round(value).toLocaleString('es-ES')} €`;
 }
 
 function formatNumber(value: number): string {
-  return value.toLocaleString();
+  return value.toLocaleString('es-ES');
 }
 
 function formatPercent(value: number | null): string {
-  return value == null ? '—' : `${(value * 100).toFixed(2)}%`;
+  return value == null ? '—' : `${(value * 100).toFixed(2).replace('.', ',')}%`;
 }
 
 function formatMoneyRate(value: number | null): string {
-  return value == null ? '—' : `€${value.toFixed(2)}`;
+  return value == null ? '—' : `${value.toFixed(2).replace('.', ',')} €`;
 }
 
 function formatBudget(campaign: Pick<MetaCampaign, 'budgetType' | 'dailyBudget' | 'lifetimeBudget'>): string {
   if (campaign.budgetType === 'daily') {
-    return campaign.dailyBudget != null ? `${formatCurrency(campaign.dailyBudget)}/day` : '—';
+    return campaign.dailyBudget != null ? `${formatCurrency(campaign.dailyBudget)}/día` : '—';
   }
   return campaign.lifetimeBudget != null ? `${formatCurrency(campaign.lifetimeBudget)} total` : '—';
 }
@@ -87,13 +87,13 @@ function formatDate(value: string | null): string {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
+  return date.toLocaleDateString('es-ES', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 const DATA_SOURCE_LABEL: Record<MetaCampaignDataSource, string> = {
   demo: 'Demo',
   manual: 'Manual',
-  meta_api: 'Meta API',
+  meta_api: 'API de Meta',
 };
 
 function DataSourceTag({ dataSource }: { dataSource: MetaCampaignDataSource }) {
@@ -170,7 +170,7 @@ function CampaignRow({
         <td className="px-3 py-3 text-left font-mono text-[10.5px] text-os-text">{formatMoneyRate(cpl)}</td>
         <td className="px-3 py-3 text-right">
           <button type="button" onClick={onEdit} className="font-mono text-[9px] uppercase tracking-wide text-os-muted hover:text-os-accent">
-            edit
+            editar
           </button>
         </td>
       </tr>
@@ -179,15 +179,15 @@ function CampaignRow({
           <td colSpan={12} className="border-t border-os-border bg-os-surface px-3 py-3">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
               <div>
-                <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Start date</div>
+                <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Fecha de inicio</div>
                 <div className="mt-1 font-mono text-[11px] text-os-text">{formatDate(campaign.startDate)}</div>
               </div>
               <div>
-                <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">End date</div>
+                <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Fecha de fin</div>
                 <div className="mt-1 font-mono text-[11px] text-os-text">{formatDate(campaign.endDate)}</div>
               </div>
               <div>
-                <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Reach</div>
+                <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Alcance</div>
                 <div className="mt-1 font-mono text-[11px] text-os-text">{formatNumber(campaign.reach)}</div>
               </div>
               <div>
@@ -195,7 +195,7 @@ function CampaignRow({
                 <div className="mt-1 font-mono text-[11px] text-os-text">{formatMoneyRate(cpc)}</div>
               </div>
               <div>
-                <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Data source</div>
+                <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Origen de datos</div>
                 <div className="mt-1">
                   <DataSourceTag dataSource={campaign.dataSource} />
                 </div>
@@ -327,7 +327,7 @@ export default function MetaAdsPage() {
     <div className="p-4">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="font-mono text-[9.5px] uppercase tracking-[0.24em] text-os-dim">REKREATIVE ADVERTISING</div>
+          <div className="font-mono text-[9.5px] uppercase tracking-[0.24em] text-os-dim">REKREATIVE PUBLICIDAD</div>
           <h1 className="mt-1 text-[25px] font-bold uppercase tracking-[0.06em] text-os-text">Meta Ads</h1>
         </div>
         <div className="flex items-center gap-2">
@@ -336,7 +336,7 @@ export default function MetaAdsPage() {
             onClick={openCreateForm}
             className="border border-os-border bg-os-surface px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-text hover:border-os-border-strong hover:text-os-accent"
           >
-            New campaign
+            Nueva campaña
           </button>
         </div>
       </div>
@@ -344,10 +344,10 @@ export default function MetaAdsPage() {
       {/* KPI summary */}
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {[
-          { label: 'Spend', value: formatCurrency(summary.spend) },
+          { label: 'Gasto', value: formatCurrency(summary.spend) },
           { label: 'Leads', value: formatNumber(summary.leads) },
           { label: 'CPL', value: formatMoneyRate(summary.cpl) },
-          { label: 'Impressions', value: formatNumber(summary.impressions) },
+          { label: 'Impresiones', value: formatNumber(summary.impressions) },
           { label: 'CTR', value: formatPercent(summary.ctr) },
         ].map((tile) => (
           <div key={tile.label} className="border border-os-border bg-os-surface px-3 py-3">
@@ -378,13 +378,13 @@ export default function MetaAdsPage() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Client</label>
+          <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
           <select
             value={clientFilter}
             onChange={(event) => setClientFilter(event.target.value)}
             className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
           >
-            <option value="all">All clients</option>
+            <option value="all">Todos los clientes</option>
             {clients.map((client) => (
               <option key={client.id} value={client.id}>
                 {client.name}
@@ -399,25 +399,25 @@ export default function MetaAdsPage() {
         <table className="w-full border-collapse text-left text-sm">
           <thead>
             <tr className="bg-os-surface2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">
-              <th className="px-3 py-2 font-normal">Campaign</th>
-              <th className="px-3 py-2 font-normal">Client</th>
-              <th className="px-3 py-2 font-normal">Status</th>
-              <th className="px-3 py-2 font-normal">Objective</th>
-              <th className="px-3 py-2 font-normal">Budget</th>
-              <th className="px-3 py-2 font-normal">Spend</th>
-              <th className="px-3 py-2 font-normal">Impressions</th>
-              <th className="px-3 py-2 font-normal">Clicks</th>
+              <th className="px-3 py-2 font-normal">Campaña</th>
+              <th className="px-3 py-2 font-normal">Cliente</th>
+              <th className="px-3 py-2 font-normal">Estado</th>
+              <th className="px-3 py-2 font-normal">Objetivo</th>
+              <th className="px-3 py-2 font-normal">Presupuesto</th>
+              <th className="px-3 py-2 font-normal">Gasto</th>
+              <th className="px-3 py-2 font-normal">Impresiones</th>
+              <th className="px-3 py-2 font-normal">Clics</th>
               <th className="px-3 py-2 font-normal">CTR</th>
               <th className="px-3 py-2 font-normal">Leads</th>
               <th className="px-3 py-2 font-normal">CPL</th>
-              <th className="px-3 py-2 font-normal text-right">Actions</th>
+              <th className="px-3 py-2 font-normal text-right">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {visibleCampaigns.length === 0 ? (
               <tr>
                 <td colSpan={12} className="px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-                  No campaigns in this segment.
+                  No hay campañas en este segmento.
                 </td>
               </tr>
             ) : (
@@ -441,15 +441,15 @@ export default function MetaAdsPage() {
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-sm-t border border-os-border bg-os-surface p-4">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold uppercase tracking-wide">{editingCampaignId ? 'Edit campaign' : 'New campaign'}</h2>
+              <h2 className="text-lg font-semibold uppercase tracking-wide">{editingCampaignId ? 'Editar campaña' : 'Nueva campaña'}</h2>
               <button type="button" onClick={closeForm} className="font-mono text-[10px] uppercase tracking-wide text-os-dim hover:text-os-accent">
-                close
+                cerrar
               </button>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <label className="col-span-2">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Client</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
                 <select
                   value={draft.clientId}
                   onChange={(event) => setDraft((prev) => ({ ...prev, clientId: event.target.value }))}
@@ -464,7 +464,7 @@ export default function MetaAdsPage() {
               </label>
 
               <label className="col-span-2">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Name</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Nombre</span>
                 <input
                   value={draft.name}
                   onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
@@ -473,7 +473,7 @@ export default function MetaAdsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Status</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Estado</span>
                 <select
                   value={draft.status}
                   onChange={(event) => setDraft((prev) => ({ ...prev, status: event.target.value as MetaCampaignStatus }))}
@@ -488,7 +488,7 @@ export default function MetaAdsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Objective</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Objetivo</span>
                 <select
                   value={draft.objective}
                   onChange={(event) => setDraft((prev) => ({ ...prev, objective: event.target.value as MetaCampaignObjective }))}
@@ -503,20 +503,20 @@ export default function MetaAdsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Budget type</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Tipo de presupuesto</span>
                 <select
                   value={draft.budgetType}
                   onChange={(event) => setDraft((prev) => ({ ...prev, budgetType: event.target.value as MetaCampaignBudgetType }))}
                   className="w-full border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-text"
                 >
-                  <option value="daily">Daily</option>
-                  <option value="lifetime">Lifetime</option>
+                  <option value="daily">Diario</option>
+                  <option value="lifetime">Total</option>
                 </select>
               </label>
 
               <label className="col-span-1">
                 <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">
-                  {draft.budgetType === 'daily' ? 'Daily budget' : 'Lifetime budget'}
+                  {draft.budgetType === 'daily' ? 'Presupuesto diario' : 'Presupuesto total'}
                 </span>
                 <input
                   type="number"
@@ -527,7 +527,7 @@ export default function MetaAdsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Spend</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Gasto</span>
                 <input
                   type="number"
                   value={draft.spend}
@@ -537,7 +537,7 @@ export default function MetaAdsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Impressions</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Impresiones</span>
                 <input
                   type="number"
                   value={draft.impressions}
@@ -547,7 +547,7 @@ export default function MetaAdsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Reach</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Alcance</span>
                 <input
                   type="number"
                   value={draft.reach}
@@ -557,7 +557,7 @@ export default function MetaAdsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Clicks</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Clics</span>
                 <input
                   type="number"
                   value={draft.clicks}
@@ -567,7 +567,7 @@ export default function MetaAdsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Leads (Meta-attributed)</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Leads (atribuidos por Meta)</span>
                 <input
                   type="number"
                   value={draft.leads}
@@ -577,7 +577,7 @@ export default function MetaAdsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Start date</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Fecha de inicio</span>
                 <input
                   type="date"
                   value={draft.startDate}
@@ -587,7 +587,7 @@ export default function MetaAdsPage() {
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">End date</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Fecha de fin</span>
                 <input
                   type="date"
                   value={draft.endDate}
@@ -597,11 +597,11 @@ export default function MetaAdsPage() {
               </label>
 
               <label className="col-span-2">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">External campaign ID (optional)</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">ID de campaña externa (opcional)</span>
                 <input
                   value={draft.externalCampaignId}
                   onChange={(event) => setDraft((prev) => ({ ...prev, externalCampaignId: event.target.value }))}
-                  placeholder="Populated once the live Meta Marketing API is wired"
+                  placeholder="Se completará cuando se conecte la API de Meta Marketing"
                   className="w-full border border-os-border bg-os-surface2 px-2 py-2 text-sm text-os-text outline-none"
                 />
               </label>
@@ -609,10 +609,10 @@ export default function MetaAdsPage() {
 
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={closeForm} className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim">
-                Cancel
+                Cancelar
               </button>
               <button type="button" onClick={submitCampaign} className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface">
-                {editingCampaignId ? 'Save campaign' : 'Create campaign'}
+                {editingCampaignId ? 'Guardar campaña' : 'Crear campaña'}
               </button>
             </div>
           </div>

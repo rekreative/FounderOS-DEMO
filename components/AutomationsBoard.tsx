@@ -30,8 +30,8 @@ import {
   type AutomationType,
 } from '@/lib/automations';
 
-const STATUS_FILTERS = [{ id: 'all', label: 'All' }, ...AUTOMATION_STATUS_OPTIONS];
-const PLATFORM_FILTERS = [{ id: 'all', label: 'All platforms' }, ...AUTOMATION_PLATFORM_OPTIONS];
+const STATUS_FILTERS = [{ id: 'all', label: 'Todas' }, ...AUTOMATION_STATUS_OPTIONS];
+const PLATFORM_FILTERS = [{ id: 'all', label: 'Todas las plataformas' }, ...AUTOMATION_PLATFORM_OPTIONS];
 
 type DraftStep = {
   id: string;
@@ -90,16 +90,16 @@ function formatDateTime(value: string | null): string {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleString('es-ES', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function formatRelative(value: string | null): string {
-  if (!value) return 'Never run';
+  if (!value) return 'Sin ejecuciones';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
   const diffHours = Math.max(0, (Date.now() - date.getTime()) / (1000 * 60 * 60));
-  if (diffHours < 24) return `${Math.max(1, Math.round(diffHours))}h ago`;
-  return `${Math.round(diffHours / 24)}d ago`;
+  if (diffHours < 24) return `hace ${Math.max(1, Math.round(diffHours))}h`;
+  return `hace ${Math.round(diffHours / 24)}d`;
 }
 
 function formatPercent(value: number | null): string {
@@ -163,7 +163,7 @@ function HealthBadge({ health }: { health: AutomationHealth }) {
 
 function DataSourceTag({ dataSource }: { dataSource: Automation['dataSource'] }) {
   const tone = dataSource === 'live' ? 'text-os-ok' : dataSource === 'manual' ? 'text-os-muted' : 'text-os-dim';
-  const label = dataSource === 'live' ? 'Live' : dataSource === 'manual' ? 'Manual' : 'Demo';
+  const label = dataSource === 'live' ? 'En vivo' : dataSource === 'manual' ? 'Manual' : 'Demo';
   return (
     <span className={`inline-block border border-os-border bg-os-surface2 px-1.5 py-0.5 font-mono text-[8.5px] uppercase tracking-wide ${tone}`}>
       {label}
@@ -210,7 +210,7 @@ function PlatformTags({ platforms, platformLogos }: { platforms: AutomationPlatf
 
 function RunHistory({ runs }: { runs: AutomationRun[] }) {
   if (runs.length === 0) {
-    return <span className="font-mono text-[10px] text-os-dim">Never run.</span>;
+    return <span className="font-mono text-[10px] text-os-dim">Sin ejecuciones.</span>;
   }
   return (
     <div className="flex flex-col gap-1.5">
@@ -300,19 +300,19 @@ function AutomationCard({
       {/* Compact operational summary */}
       <div className="mt-3 grid grid-cols-4 gap-2 border-t border-os-border pt-2.5">
         <div>
-          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Last Run</div>
+          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Última ejecución</div>
           <div className="mt-0.5 font-mono text-[10.5px] text-os-muted">{formatRelative(automation.lastRunAt)}</div>
         </div>
         <div>
-          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Runs</div>
+          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Ejecuciones</div>
           <div className="mt-0.5 font-mono text-[10.5px] text-os-muted">{stats.totalRuns}</div>
         </div>
         <div>
-          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Failures</div>
+          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Fallos</div>
           <div className={`mt-0.5 font-mono text-[10.5px] ${stats.failedRuns > 0 ? 'text-os-err' : 'text-os-muted'}`}>{stats.failedRuns}</div>
         </div>
         <div>
-          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Success</div>
+          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Éxito</div>
           <div className="mt-0.5 font-mono text-[10.5px] text-os-muted">{formatPercent(stats.successRate)}</div>
         </div>
       </div>
@@ -321,10 +321,10 @@ function AutomationCard({
         <DataSourceTag dataSource={automation.dataSource} />
         <div className="flex items-center gap-3">
           <button type="button" onClick={onEdit} className="font-mono text-[9px] uppercase tracking-wide text-os-muted hover:text-os-accent">
-            edit
+            editar
           </button>
           <button type="button" onClick={onToggle} className="font-mono text-[9px] uppercase tracking-wide text-os-dim hover:text-os-accent">
-            {expanded ? '− hide detail' : '+ detail'}
+            {expanded ? '− ocultar detalle' : '+ detalle'}
           </button>
         </div>
       </div>
@@ -332,16 +332,16 @@ function AutomationCard({
       {expanded && (
         <div className="mt-3 grid grid-cols-1 gap-4 border-t border-os-border pt-3 md:grid-cols-2">
           <div>
-            <div className="mb-1.5 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Trigger</div>
+            <div className="mb-1.5 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Disparador</div>
             <div className="border border-os-border bg-os-surface2 px-2.5 py-2">
               <PlatformLabel platform={automation.trigger.platform} platformLogos={platformLogos} className="font-mono text-[9px] uppercase tracking-wide text-os-accent" />
               <div className="mt-1 text-[11px] text-os-text">{automation.trigger.event}</div>
               <div className="mt-0.5 text-[10px] text-os-dim">{automation.trigger.description}</div>
             </div>
 
-            <div className="mb-1.5 mt-3 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Workflow steps</div>
+            <div className="mb-1.5 mt-3 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Pasos del flujo</div>
             {automation.steps.length === 0 ? (
-              <span className="font-mono text-[10px] text-os-dim">No steps recorded.</span>
+              <span className="font-mono text-[10px] text-os-dim">Sin pasos registrados.</span>
             ) : (
               <div className="flex flex-col gap-1.5">
                 {automation.steps
@@ -364,16 +364,16 @@ function AutomationCard({
 
             <div className="mt-3 grid grid-cols-2 gap-2 font-mono text-[9.5px] text-os-dim">
               <div>
-                <div className="uppercase tracking-wide">Created</div>
+                <div className="uppercase tracking-wide">Creado</div>
                 <div className="mt-0.5 text-os-muted">{formatDateTime(automation.createdAt)}</div>
               </div>
               <div>
-                <div className="uppercase tracking-wide">Updated</div>
+                <div className="uppercase tracking-wide">Actualizado</div>
                 <div className="mt-0.5 text-os-muted">{formatDateTime(automation.updatedAt)}</div>
               </div>
               {automation.externalProvider && (
                 <div className="col-span-2">
-                  <div className="uppercase tracking-wide">External reference</div>
+                  <div className="uppercase tracking-wide">Referencia externa</div>
                   <div className="mt-0.5">
                     <PlatformLabel platform={automation.externalProvider} platformLogos={platformLogos} className="text-os-muted" />
                     <span className="text-os-muted"> · {automation.externalAutomationId ?? '—'}</span>
@@ -385,13 +385,13 @@ function AutomationCard({
 
           <div>
             <div className="mb-1.5 flex items-center justify-between gap-3">
-              <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Recent run history</span>
-              <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">{stats.totalRuns} runs</span>
+              <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Historial de ejecuciones recientes</span>
+              <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">{stats.totalRuns} ejecuciones</span>
             </div>
             <RunHistory runs={runs} />
             {automation.description && (
               <>
-                <div className="mb-1.5 mt-3 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Description</div>
+                <div className="mb-1.5 mt-3 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Descripción</div>
                 <p className="text-[11px] text-os-muted">{automation.description}</p>
               </>
             )}
@@ -554,8 +554,8 @@ export function AutomationsBoard({
     <div className="p-4">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="font-mono text-[9.5px] uppercase tracking-[0.24em] text-os-dim">REKREATIVE OPERATIONS</div>
-          <h1 className="mt-1 text-[25px] font-bold uppercase tracking-[0.06em] text-os-text">Automations</h1>
+          <div className="font-mono text-[9.5px] uppercase tracking-[0.24em] text-os-dim">REKREATIVE OPERACIONES</div>
+          <h1 className="mt-1 text-[25px] font-bold uppercase tracking-[0.06em] text-os-text">Automatizaciones</h1>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -563,7 +563,7 @@ export function AutomationsBoard({
             onClick={openCreateForm}
             className="border border-os-border bg-os-surface px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-text hover:border-os-border-strong hover:text-os-accent"
           >
-            New automation
+            Nueva automatización
           </button>
         </div>
       </div>
@@ -571,11 +571,11 @@ export function AutomationsBoard({
       {/* KPI summary */}
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {[
-          { label: 'Active', value: String(summary.active) },
-          { label: 'Needs Attention', value: String(summary.needsAttention), tone: summary.needsAttention > 0 ? 'text-os-err' : undefined },
-          { label: 'Runs', value: String(summary.totalRuns) },
-          { label: 'Failures', value: String(summary.totalFailures), tone: summary.totalFailures > 0 ? 'text-os-err' : undefined },
-          { label: 'Success Rate', value: formatPercent(summary.successRate) },
+          { label: 'Activas', value: String(summary.active) },
+          { label: 'Requiere atención', value: String(summary.needsAttention), tone: summary.needsAttention > 0 ? 'text-os-err' : undefined },
+          { label: 'Ejecuciones', value: String(summary.totalRuns) },
+          { label: 'Fallos', value: String(summary.totalFailures), tone: summary.totalFailures > 0 ? 'text-os-err' : undefined },
+          { label: 'Tasa de éxito', value: formatPercent(summary.successRate) },
         ].map((tile) => (
           <div key={tile.label} className="border border-os-border bg-os-surface px-3 py-3">
             <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-os-dim">{tile.label}</div>
@@ -605,7 +605,7 @@ export function AutomationsBoard({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Platform</label>
+          <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Plataforma</label>
           <select
             value={platformFilter}
             onChange={(event) => setPlatformFilter(event.target.value as 'all' | AutomationPlatform)}
@@ -620,13 +620,13 @@ export function AutomationsBoard({
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Client</label>
+          <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
           <select
             value={clientFilter}
             onChange={(event) => setClientFilter(event.target.value)}
             className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
           >
-            <option value="all">All clients</option>
+            <option value="all">Todos los clientes</option>
             {clients.map((client) => (
               <option key={client.id} value={client.id}>
                 {client.name}
@@ -639,7 +639,7 @@ export function AutomationsBoard({
       {/* Automation cards — fast visual scanning: icon + name + client + health first */}
       {visibleAutomations.length === 0 ? (
         <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-          No automations in this segment.
+          No hay automatizaciones en este segmento.
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -663,15 +663,15 @@ export function AutomationsBoard({
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-sm-t border border-os-border bg-os-surface p-4">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold uppercase tracking-wide">{editingAutomationId ? 'Edit automation' : 'New automation'}</h2>
+              <h2 className="text-lg font-semibold uppercase tracking-wide">{editingAutomationId ? 'Editar automatización' : 'Nueva automatización'}</h2>
               <button type="button" onClick={closeForm} className="font-mono text-[10px] uppercase tracking-wide text-os-dim hover:text-os-accent">
-                close
+                cerrar
               </button>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <label className="col-span-2">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Client</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
                 <select
                   value={draft.clientId}
                   onChange={(event) => setDraft((prev) => ({ ...prev, clientId: event.target.value }))}
@@ -686,7 +686,7 @@ export function AutomationsBoard({
               </label>
 
               <label className="col-span-2">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Name</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Nombre</span>
                 <input
                   value={draft.name}
                   onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
@@ -695,7 +695,7 @@ export function AutomationsBoard({
               </label>
 
               <label className="col-span-2">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Description</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Descripción</span>
                 <textarea
                   value={draft.description}
                   onChange={(event) => setDraft((prev) => ({ ...prev, description: event.target.value }))}
@@ -704,7 +704,7 @@ export function AutomationsBoard({
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Status</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Estado</span>
                 <select
                   value={draft.status}
                   onChange={(event) => setDraft((prev) => ({ ...prev, status: event.target.value as AutomationStatus }))}
@@ -719,7 +719,7 @@ export function AutomationsBoard({
               </label>
 
               <label className="col-span-1">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Type</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Tipo</span>
                 <select
                   value={draft.type}
                   onChange={(event) => setDraft((prev) => ({ ...prev, type: event.target.value as AutomationType }))}
@@ -734,7 +734,7 @@ export function AutomationsBoard({
               </label>
 
               <div className="col-span-2">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Platforms</span>
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Plataformas</span>
                 <div className="flex flex-wrap gap-1.5">
                   {AUTOMATION_PLATFORM_OPTIONS.map((option) => {
                     const on = draft.platforms.includes(option.id);
@@ -756,10 +756,10 @@ export function AutomationsBoard({
               </div>
 
               <div className="col-span-2 border-t border-os-border pt-3">
-                <span className="mb-2 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Trigger</span>
+                <span className="mb-2 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Disparador</span>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="col-span-1">
-                    <span className="mb-1 block font-mono text-[9px] uppercase tracking-wide text-os-dim">Platform</span>
+                    <span className="mb-1 block font-mono text-[9px] uppercase tracking-wide text-os-dim">Plataforma</span>
                     <select
                       value={draft.triggerPlatform}
                       onChange={(event) => setDraft((prev) => ({ ...prev, triggerPlatform: event.target.value as AutomationPlatform }))}
@@ -773,16 +773,16 @@ export function AutomationsBoard({
                     </select>
                   </label>
                   <label className="col-span-1">
-                    <span className="mb-1 block font-mono text-[9px] uppercase tracking-wide text-os-dim">Event</span>
+                    <span className="mb-1 block font-mono text-[9px] uppercase tracking-wide text-os-dim">Evento</span>
                     <input
                       value={draft.triggerEvent}
                       onChange={(event) => setDraft((prev) => ({ ...prev, triggerEvent: event.target.value }))}
-                      placeholder="e.g. New Lead Ad form submission"
+                      placeholder="p. ej. Envío de formulario de anuncio de leads"
                       className="w-full border border-os-border bg-os-surface2 px-2 py-2 text-sm text-os-text outline-none"
                     />
                   </label>
                   <label className="col-span-2">
-                    <span className="mb-1 block font-mono text-[9px] uppercase tracking-wide text-os-dim">Description</span>
+                    <span className="mb-1 block font-mono text-[9px] uppercase tracking-wide text-os-dim">Descripción</span>
                     <input
                       value={draft.triggerDescription}
                       onChange={(event) => setDraft((prev) => ({ ...prev, triggerDescription: event.target.value }))}
@@ -794,21 +794,21 @@ export function AutomationsBoard({
 
               <div className="col-span-2 border-t border-os-border pt-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Workflow steps</span>
+                  <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Pasos del flujo</span>
                   <button type="button" onClick={addStep} className="font-mono text-[9px] uppercase tracking-wide text-os-dim hover:text-os-accent">
-                    + add step
+                    + añadir paso
                   </button>
                 </div>
                 {draft.steps.length === 0 ? (
-                  <span className="font-mono text-[10px] text-os-dim">No steps yet — descriptive only, not executed in V1.</span>
+                  <span className="font-mono text-[10px] text-os-dim">Sin pasos todavía — solo descriptivo, no se ejecuta en la V1.</span>
                 ) : (
                   <div className="flex flex-col gap-2">
                     {draft.steps.map((step, index) => (
                       <div key={step.id} className="border border-os-border bg-os-surface2 p-2">
                         <div className="mb-1.5 flex items-center justify-between">
-                          <span className="font-mono text-[9px] text-os-dim">Step {index + 1}</span>
+                          <span className="font-mono text-[9px] text-os-dim">Paso {index + 1}</span>
                           <button type="button" onClick={() => removeStep(step.id)} className="font-mono text-[9px] uppercase tracking-wide text-os-dim hover:text-os-err">
-                            remove
+                            eliminar
                           </button>
                         </div>
                         <div className="grid grid-cols-3 gap-2">
@@ -826,13 +826,13 @@ export function AutomationsBoard({
                           <input
                             value={step.action}
                             onChange={(event) => updateStep(step.id, { action: event.target.value })}
-                            placeholder="Action, e.g. Qualify lead"
+                            placeholder="Acción, p. ej. Calificar lead"
                             className="col-span-2 border border-os-border bg-os-surface px-2 py-1.5 text-[11px] text-os-text outline-none"
                           />
                           <input
                             value={step.description}
                             onChange={(event) => updateStep(step.id, { description: event.target.value })}
-                            placeholder="Description (optional)"
+                            placeholder="Descripción (opcional)"
                             className="col-span-3 border border-os-border bg-os-surface px-2 py-1.5 text-[11px] text-os-text outline-none"
                           />
                         </div>
@@ -843,10 +843,10 @@ export function AutomationsBoard({
               </div>
 
               <div className="col-span-2 border-t border-os-border pt-3">
-                <span className="mb-2 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">External reference (optional)</span>
+                <span className="mb-2 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Referencia externa (opcional)</span>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="col-span-1">
-                    <span className="mb-1 block font-mono text-[9px] uppercase tracking-wide text-os-dim">Provider</span>
+                    <span className="mb-1 block font-mono text-[9px] uppercase tracking-wide text-os-dim">Proveedor</span>
                     <select
                       value={draft.externalProvider}
                       onChange={(event) => {
@@ -856,7 +856,7 @@ export function AutomationsBoard({
                       }}
                       className="w-full border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-text"
                     >
-                      <option value="">None</option>
+                      <option value="">Ninguno</option>
                       {AUTOMATION_PLATFORM_OPTIONS.map((option) => (
                         <option key={option.id} value={option.id}>
                           {option.label}
@@ -865,12 +865,12 @@ export function AutomationsBoard({
                     </select>
                   </label>
                   <label className="col-span-1">
-                    <span className="mb-1 block font-mono text-[9px] uppercase tracking-wide text-os-dim">External ID</span>
+                    <span className="mb-1 block font-mono text-[9px] uppercase tracking-wide text-os-dim">ID externo</span>
                     <input
                       value={draft.externalAutomationId}
                       disabled={draft.externalProvider === ''}
                       onChange={(event) => setDraft((prev) => ({ ...prev, externalAutomationId: event.target.value }))}
-                      placeholder={draft.externalProvider === '' ? 'Select a provider first' : 'Populated once a live integration is wired'}
+                      placeholder={draft.externalProvider === '' ? 'Selecciona primero un proveedor' : 'Se completará cuando se conecte una integración en vivo'}
                       className="w-full border border-os-border bg-os-surface2 px-2 py-2 text-sm text-os-text outline-none disabled:cursor-not-allowed disabled:opacity-50"
                     />
                   </label>
@@ -880,10 +880,10 @@ export function AutomationsBoard({
 
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={closeForm} className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim">
-                Cancel
+                Cancelar
               </button>
               <button type="button" onClick={submitAutomation} className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface">
-                {editingAutomationId ? 'Save automation' : 'Create automation'}
+                {editingAutomationId ? 'Guardar automatización' : 'Crear automatización'}
               </button>
             </div>
           </div>

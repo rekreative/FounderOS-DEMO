@@ -1,5 +1,15 @@
 export type ClientStatus = 'active' | 'paused' | 'prospect';
 
+export const CLIENT_STATUS_OPTIONS = [
+  { id: 'active', label: 'Activo' },
+  { id: 'paused', label: 'Pausado' },
+  { id: 'prospect', label: 'Prospecto' },
+] as const;
+
+export function getClientStatusLabel(status: ClientStatus): string {
+  return CLIENT_STATUS_OPTIONS.find((option) => option.id === status)?.label ?? status;
+}
+
 export interface Client {
   id: string;
   name: string;
