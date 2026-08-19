@@ -6,16 +6,20 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { CONDUCTOR_OPEN_EVENT } from '@/components/ConductorPanel';
 
 const SEGMENT_LABELS: Record<string, string> = {
-  '': 'home',
+  '': 'inicio',
   social: 'social',
   comms: 'comms',
-  agents: 'agents',
+  agents: 'agentes',
   org: 'org-chart',
   brain: 'g-brain',
-  integrations: 'connections',
-  roadmap: 'roadmap',
-  analytics: 'analytics',
-  reference: 'reference-model',
+  integrations: 'conexiones',
+  roadmap: 'hoja de ruta',
+  analytics: 'analítica',
+  reference: 'modelo de referencia',
+  clients: 'clientes',
+  leads: 'leads',
+  'meta-ads': 'meta ads',
+  automations: 'automatizaciones',
 };
 
 export function openPalette() {

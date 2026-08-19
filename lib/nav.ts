@@ -37,16 +37,16 @@ export const NAV_OPERATE: NavItem[] = [
 
 // REKREATIVE primary menu (visible rail for the agency). Keeps original NAV_* intact for tests and CommandPalette.
 export const REKREATIVE_PRIMARY: NavItem[] = [
-  { href: '/', label: 'Home', icon: Home },
-  { href: '/clients', label: 'Clients', icon: Users },
+  { href: '/', label: 'Inicio', icon: Home },
+  { href: '/clients', label: 'Clientes', icon: Users },
   { href: '/leads', label: 'Leads', icon: Filter },
   { href: '/meta-ads', label: 'Meta Ads', icon: LayoutGrid },
-  { href: '/automations', label: 'Automations', icon: Workflow },
-  { href: '/agents', label: 'Agents', icon: Users },
-  { href: '/content', label: 'Content', icon: Clapperboard },
-  { href: '/finances', label: 'Finances', icon: Wallet },
+  { href: '/automations', label: 'Automatizaciones', icon: Workflow },
+  { href: '/agents', label: 'Agentes', icon: Users },
+  { href: '/content', label: 'Contenido', icon: Clapperboard },
+  { href: '/finances', label: 'Finanzas', icon: Wallet },
   { href: '/brain', label: 'G-Brain', icon: Brain },
-  { href: '/analytics', label: 'Analytics', icon: BarChart3 },
+  { href: '/analytics', label: 'Analítica', icon: BarChart3 },
 ];
 
 // The agent workforce: the roster and the org chart that maps how they report.

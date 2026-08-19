@@ -1,18 +1,18 @@
 import { getClients } from '@/lib/clients';
 
 export const CAMPAIGN_STATUS_OPTIONS = [
-  { id: 'active', label: 'Active' },
-  { id: 'paused', label: 'Paused' },
-  { id: 'ended', label: 'Ended' },
-  { id: 'draft', label: 'Draft' },
+  { id: 'active', label: 'Activa' },
+  { id: 'paused', label: 'Pausada' },
+  { id: 'ended', label: 'Finalizada' },
+  { id: 'draft', label: 'Borrador' },
 ] as const;
 
 export const CAMPAIGN_OBJECTIVE_OPTIONS = [
   { id: 'leads', label: 'Leads' },
-  { id: 'traffic', label: 'Traffic' },
-  { id: 'awareness', label: 'Awareness' },
-  { id: 'conversions', label: 'Conversions' },
-  { id: 'engagement', label: 'Engagement' },
+  { id: 'traffic', label: 'Tráfico' },
+  { id: 'awareness', label: 'Notoriedad' },
+  { id: 'conversions', label: 'Conversiones' },
+  { id: 'engagement', label: 'Interacción' },
 ] as const;
 
 export type MetaCampaignStatus = (typeof CAMPAIGN_STATUS_OPTIONS)[number]['id'];

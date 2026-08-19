@@ -92,12 +92,12 @@ export function CommandPalette({ commands }: { commands: Command[] }) {
               go(hits[index]);
             }
           }}
-          placeholder="Jump anywhere — views, agents, tools…"
+          placeholder="Buscar cualquier cosa — vistas, agentes, herramientas…"
           className="w-full border-b border-os-border bg-transparent px-[18px] py-4 font-mono text-sm text-os-text outline-none placeholder:text-os-dim"
         />
         <ul className="max-h-80 overflow-y-auto p-1.5">
           {hits.length === 0 && (
-            <li className="px-4 py-6 text-center font-mono text-xs text-os-dim">No matches</li>
+            <li className="px-4 py-6 text-center font-mono text-xs text-os-dim">Sin resultados</li>
           )}
           {hits.map((command, i) => (
             <li key={command.id}>

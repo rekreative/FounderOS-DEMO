@@ -1,13 +1,13 @@
 import { getClients, initializeStoreIfNeeded } from '@/lib/clients';
 
 export const LEAD_STAGE_OPTIONS = [
-  { id: 'new', label: 'New' },
-  { id: 'contacted', label: 'Contacted' },
-  { id: 'qualified', label: 'Qualified' },
-  { id: 'appointment', label: 'Appointment' },
-  { id: 'converted', label: 'Converted' },
-  { id: 'no_response', label: 'No Response' },
-  { id: 'disqualified', label: 'Disqualified' },
+  { id: 'new', label: 'Nuevo' },
+  { id: 'contacted', label: 'Contactado' },
+  { id: 'qualified', label: 'Cualificado' },
+  { id: 'appointment', label: 'Cita' },
+  { id: 'converted', label: 'Convertido' },
+  { id: 'no_response', label: 'Sin respuesta' },
+  { id: 'disqualified', label: 'Descartado' },
 ] as const;
 
 export type LeadStage = (typeof LEAD_STAGE_OPTIONS)[number]['id'];

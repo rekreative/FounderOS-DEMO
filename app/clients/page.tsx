@@ -26,15 +26,15 @@ export default function ClientsPage() {
   return (
     <div className="p-4">
       <div className="mb-4 flex items-center justify-between">
-        <SectionHead label="Clients" count={clients.length} />
+        <SectionHead label="Clientes" count={clients.length} />
         <div className="shrink-0">
           <button className="px-3 py-1 border border-os-border" onClick={() => setShowNew(true)}>
-            New Client
+            Nuevo cliente
           </button>
         </div>
       </div>
 
-      <p className="text-os-dim text-sm mb-2">{clients.length} clients</p>
+      <p className="text-os-dim text-sm mb-2">{clients.length} clientes</p>
 
       <section className="mt-2">
         <ClientsList clients={clients} />
