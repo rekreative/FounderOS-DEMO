@@ -5,19 +5,24 @@ import { describe, expect, test } from 'vitest';
 const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
 
 /**
- * /brain layout contract (Alex, 2026-07-12): the capture box is ONE
+ * /brain/legacy layout contract (Alex, 2026-07-12): the capture box is ONE
  * compact untitled part riding the right of the G-BRAIN header — text or
  * dropped documents — and the knowledge graph sits directly under the title.
+ *
+ * (2026-08-20: the FounderOS personal G-Brain page moved from app/brain/
+ * page.tsx to app/brain/legacy/page.tsx — /brain now renders REKREATIVE's
+ * structured KnowledgeBoard instead. This page's content is unchanged, only
+ * relocated, so this contract still applies verbatim at its new path.)
  */
-describe('/brain header capture + graph placement', () => {
+describe('/brain/legacy header capture + graph placement', () => {
   test('the compact dump rides the header right slot; no standalone dump section', () => {
-    const page = read('app/brain/page.tsx');
+    const page = read('app/brain/legacy/page.tsx');
     expect(page).toMatch(/right=\{<BrainDump compact \/>\}/);
     expect(page).not.toMatch(/<section[^>]*>\s*<BrainDump \/>/);
   });
 
   test('the knowledge graph is the first section after the header', () => {
-    const page = read('app/brain/page.tsx');
+    const page = read('app/brain/legacy/page.tsx');
     const header = page.indexOf('<PageHeader');
     const graph = page.indexOf('Knowledge graph');
     const firstSection = page.indexOf('<section', header);

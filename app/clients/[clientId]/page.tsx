@@ -16,6 +16,7 @@ import {
 } from '@/lib/client-integration-requirements';
 import { getRevenueRecords, initializeResultsStoreIfNeeded, sumAttributedRevenue, type RevenueRecord } from '@/lib/results';
 import { getContentItems, initializeContentStoreIfNeeded, summarizeContentItems, type ContentItem } from '@/lib/content-items';
+import { getKnowledgeEntries, initializeKnowledgeStoreIfNeeded, type KnowledgeEntry } from '@/lib/knowledge-entries';
 import { ClientsForm, type NewClientInput } from '@/components/ClientsForm';
 import { ClientOverviewPanel } from '@/components/ClientOverviewPanel';
 import { ClientMetaAdsPanel } from '@/components/ClientMetaAdsPanel';
@@ -24,11 +25,12 @@ import { ClientAutomationsPanel } from '@/components/ClientAutomationsPanel';
 import { ClientAgentsPanel } from '@/components/ClientAgentsPanel';
 import { ClientIntegrationsPanel } from '@/components/ClientIntegrationsPanel';
 import { ClientContentPanel } from '@/components/ClientContentPanel';
+import { ClientKnowledgePanel } from '@/components/ClientKnowledgePanel';
 import { ClientResultsPreview } from '@/components/ClientResultsPreview';
 import { ClientNotesPanel } from '@/components/ClientNotesPanel';
 import Link from 'next/link';
 
-type TabKey = 'overview' | 'meta-ads' | 'leads' | 'automations' | 'agents' | 'integrations' | 'content' | 'results' | 'notes';
+type TabKey = 'overview' | 'meta-ads' | 'leads' | 'automations' | 'agents' | 'integrations' | 'content' | 'knowledge' | 'results' | 'notes';
 
 const TAB_LABELS: Record<TabKey, string> = {
   overview: 'Resumen',
@@ -38,6 +40,7 @@ const TAB_LABELS: Record<TabKey, string> = {
   agents: 'Agentes IA',
   integrations: 'Integraciones',
   content: 'Contenido',
+  knowledge: 'Conocimiento',
   results: 'Resultados',
   notes: 'Notas',
 };
@@ -64,6 +67,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
   const [requirements, setRequirements] = useState<ClientIntegrationRequirement[]>([]);
   const [revenueRecords, setRevenueRecords] = useState<RevenueRecord[]>([]);
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
+  const [knowledgeEntries, setKnowledgeEntries] = useState<KnowledgeEntry[]>([]);
 
   useEffect(() => {
     initializeStoreIfNeeded();
@@ -75,6 +79,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     initializeClientIntegrationRequirementsStoreIfNeeded();
     initializeResultsStoreIfNeeded();
     initializeContentStoreIfNeeded();
+    initializeKnowledgeStoreIfNeeded();
 
     const c = getClientById(clientId);
     setClient(c);
@@ -90,6 +95,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     setRequirements(getClientIntegrationRequirements(clientId));
     setRevenueRecords(getRevenueRecords(clientId));
     setContentItems(getContentItems(clientId));
+    setKnowledgeEntries(getKnowledgeEntries(clientId));
   }, [clientId]);
 
   const leadCounts = useMemo(
@@ -158,7 +164,8 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     agents.length > 0 ||
     requirements.length > 0 ||
     revenueRecords.length > 0 ||
-    contentItems.length > 0;
+    contentItems.length > 0 ||
+    knowledgeEntries.length > 0;
 
   return (
     <div className="p-4">
@@ -210,7 +217,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
       {/* Tab Navigation */}
       <nav className="mb-6 border-b border-os-border">
         <ul className="flex gap-4 text-sm font-mono text-os-dim">
-          {(['overview', 'meta-ads', 'leads', 'automations', 'agents', 'integrations', 'content', 'results', 'notes'] as TabKey[]).map((tab) => (
+          {(['overview', 'meta-ads', 'leads', 'automations', 'agents', 'integrations', 'content', 'knowledge', 'results', 'notes'] as TabKey[]).map((tab) => (
             <li
               key={tab}
               className={`pb-2 cursor-pointer transition-colors ${
@@ -260,6 +267,14 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
           />
         )}
 
+        {activeTab === 'knowledge' && (
+          <ClientKnowledgePanel
+            clientId={clientId}
+            entries={knowledgeEntries}
+            onKnowledgeChanged={() => setKnowledgeEntries(getKnowledgeEntries(clientId))}
+          />
+        )}
+
         {activeTab === 'results' && (
           <ClientResultsPreview
             clientId={client.id}
@@ -302,7 +317,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
             </p>
             {hasRelatedRecords && (
               <p className="text-sm text-os-warn mb-4 border border-os-border bg-os-surface2 px-3 py-2">
-                Este cliente tiene leads, campañas, automatizaciones, agentes, integraciones o ingresos registrados.
+                Este cliente tiene leads, campañas, automatizaciones, agentes, integraciones, ingresos o conocimiento registrados.
                 Esos registros no se eliminarán automáticamente y quedarán asociados a un cliente inexistente.
               </p>
             )}
