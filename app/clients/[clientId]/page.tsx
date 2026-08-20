@@ -15,6 +15,7 @@ import {
   type ClientIntegrationRequirement,
 } from '@/lib/client-integration-requirements';
 import { getRevenueRecords, initializeResultsStoreIfNeeded, sumAttributedRevenue, type RevenueRecord } from '@/lib/results';
+import { getContentItems, initializeContentStoreIfNeeded, summarizeContentItems, type ContentItem } from '@/lib/content-items';
 import { ClientsForm, type NewClientInput } from '@/components/ClientsForm';
 import { ClientOverviewPanel } from '@/components/ClientOverviewPanel';
 import { ClientMetaAdsPanel } from '@/components/ClientMetaAdsPanel';
@@ -22,11 +23,12 @@ import { ClientLeadsPanel } from '@/components/ClientLeadsPanel';
 import { ClientAutomationsPanel } from '@/components/ClientAutomationsPanel';
 import { ClientAgentsPanel } from '@/components/ClientAgentsPanel';
 import { ClientIntegrationsPanel } from '@/components/ClientIntegrationsPanel';
+import { ClientContentPanel } from '@/components/ClientContentPanel';
 import { ClientResultsPreview } from '@/components/ClientResultsPreview';
 import { ClientNotesPanel } from '@/components/ClientNotesPanel';
 import Link from 'next/link';
 
-type TabKey = 'overview' | 'meta-ads' | 'leads' | 'automations' | 'agents' | 'integrations' | 'results' | 'notes';
+type TabKey = 'overview' | 'meta-ads' | 'leads' | 'automations' | 'agents' | 'integrations' | 'content' | 'results' | 'notes';
 
 const TAB_LABELS: Record<TabKey, string> = {
   overview: 'Resumen',
@@ -35,6 +37,7 @@ const TAB_LABELS: Record<TabKey, string> = {
   automations: 'Automatizaciones',
   agents: 'Agentes IA',
   integrations: 'Integraciones',
+  content: 'Contenido',
   results: 'Resultados',
   notes: 'Notas',
 };
@@ -60,6 +63,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
   const [allConnections, setAllConnections] = useState<IntegrationConnection[]>([]);
   const [requirements, setRequirements] = useState<ClientIntegrationRequirement[]>([]);
   const [revenueRecords, setRevenueRecords] = useState<RevenueRecord[]>([]);
+  const [contentItems, setContentItems] = useState<ContentItem[]>([]);
 
   useEffect(() => {
     initializeStoreIfNeeded();
@@ -70,6 +74,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     initializeIntegrationConnectionsStoreIfNeeded();
     initializeClientIntegrationRequirementsStoreIfNeeded();
     initializeResultsStoreIfNeeded();
+    initializeContentStoreIfNeeded();
 
     const c = getClientById(clientId);
     setClient(c);
@@ -84,6 +89,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     setAllConnections(getIntegrationConnections());
     setRequirements(getClientIntegrationRequirements(clientId));
     setRevenueRecords(getRevenueRecords(clientId));
+    setContentItems(getContentItems(clientId));
   }, [clientId]);
 
   const leadCounts = useMemo(
@@ -101,6 +107,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
 
   const automationsSummary = useMemo(() => summarizeAutomations(automations), [automations]);
   const agentsSummary = useMemo(() => summarizeAiAgents(agents), [agents]);
+  const contentSummary = useMemo(() => summarizeContentItems(contentItems), [contentItems]);
 
   const relevantConnectionsForOnboarding = useMemo(
     () => allConnections.filter((c) => c.clientId === clientId || c.scope === 'internal'),
@@ -150,7 +157,8 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     automations.length > 0 ||
     agents.length > 0 ||
     requirements.length > 0 ||
-    revenueRecords.length > 0;
+    revenueRecords.length > 0 ||
+    contentItems.length > 0;
 
   return (
     <div className="p-4">
@@ -202,7 +210,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
       {/* Tab Navigation */}
       <nav className="mb-6 border-b border-os-border">
         <ul className="flex gap-4 text-sm font-mono text-os-dim">
-          {(['overview', 'meta-ads', 'leads', 'automations', 'agents', 'integrations', 'results', 'notes'] as TabKey[]).map((tab) => (
+          {(['overview', 'meta-ads', 'leads', 'automations', 'agents', 'integrations', 'content', 'results', 'notes'] as TabKey[]).map((tab) => (
             <li
               key={tab}
               className={`pb-2 cursor-pointer transition-colors ${
@@ -226,6 +234,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
             automationsSummary={automationsSummary}
             agentsSummary={agentsSummary}
             onboardingSummary={onboardingSummary}
+            contentSummary={contentSummary}
             attributedRevenueAllTime={attributedRevenueAllTime}
             onOpenTab={(tab) => setActiveTab(tab)}
           />
@@ -241,6 +250,14 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
 
         {activeTab === 'integrations' && (
           <ClientIntegrationsPanel clientId={clientId} requirements={requirements} allConnections={allConnections} />
+        )}
+
+        {activeTab === 'content' && (
+          <ClientContentPanel
+            clientId={clientId}
+            items={contentItems}
+            onContentChanged={() => setContentItems(getContentItems(clientId))}
+          />
         )}
 
         {activeTab === 'results' && (

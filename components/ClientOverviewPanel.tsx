@@ -6,6 +6,7 @@ import { formatEUR } from '@/lib/results';
 import type { AutomationsSummary } from '@/lib/automations';
 import type { AiAgentsSummary } from '@/lib/agents-ai';
 import type { ClientOnboardingSummary } from '@/lib/client-integration-requirements';
+import type { ContentItemsSummary } from '@/lib/content-items';
 
 // Resumen tab — a compact operational snapshot, deliberately built ONLY from
 // counts/summaries that already exist elsewhere (summarizeAutomations,
@@ -17,7 +18,7 @@ import type { ClientOnboardingSummary } from '@/lib/client-integration-requireme
 export type ClientLeadCounts = { total: number; open: number };
 export type ClientMetaAdsCounts = { total: number; active: number };
 
-type ClientWorkspaceTab = 'meta-ads' | 'leads' | 'automations' | 'agents' | 'integrations';
+type ClientWorkspaceTab = 'meta-ads' | 'leads' | 'automations' | 'agents' | 'integrations' | 'content';
 
 function SummaryCard({
   title,
@@ -61,6 +62,7 @@ export function ClientOverviewPanel({
   automationsSummary,
   agentsSummary,
   onboardingSummary,
+  contentSummary,
   attributedRevenueAllTime,
   onOpenTab,
 }: {
@@ -70,6 +72,7 @@ export function ClientOverviewPanel({
   automationsSummary: AutomationsSummary;
   agentsSummary: AiAgentsSummary;
   onboardingSummary: ClientOnboardingSummary;
+  contentSummary: ContentItemsSummary;
   attributedRevenueAllTime: number;
   onOpenTab: (tab: ClientWorkspaceTab) => void;
 }) {
@@ -130,6 +133,11 @@ export function ClientOverviewPanel({
               label="Progreso"
               value={onboardingSummary.progressPercent == null ? '—' : `${onboardingSummary.progressPercent}%`}
             />
+          </SummaryCard>
+
+          <SummaryCard title="Contenido" onOpen={() => onOpenTab('content')}>
+            <Stat label="Piezas activas" value={String(contentSummary.active)} />
+            <Stat label="Listas" value={String(contentSummary.ready)} />
           </SummaryCard>
 
           <div className="flex flex-col justify-between border border-os-border bg-os-surface p-3">
