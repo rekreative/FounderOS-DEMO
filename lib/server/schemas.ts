@@ -129,3 +129,43 @@ export const AppendManualEventBodySchema = z
     summary: z.string().trim().min(1),
   })
   .strict();
+
+// Ingestion (Make → REKREATIVE OS) doesn't supply analyzedAt — that's set
+// server-side only when a real AI qualification pass runs, not this pass.
+const ingestLeadAiAnalysisSchema = z
+  .object({
+    summary: z.string().trim().min(1).nullable().optional(),
+    intent: LeadIntentSchema.nullable().optional(),
+    priority: LeadPrioritySchema.nullable().optional(),
+    qualification: z.record(z.string()).nullable().optional(),
+  })
+  .strict();
+
+/**
+ * POST /api/ingest/leads request shape. Deliberately has NO `stage` field —
+ * Make must never choose a lead's lifecycle state; every ingested lead
+ * starts at the repository's own default ('new'), and `.strict()` rejects
+ * the key outright if a caller sends one. clientId's existence and the
+ * scope/clientId invariant are NOT checked here — those are domain
+ * invariants enforced by leads-repo.ts's assertScopeInvariant (422), not
+ * shape validation (400).
+ */
+export const IngestLeadBodySchema = z
+  .object({
+    deliveryId: z.string().trim().min(1),
+    ingestionSource: z.string().trim().min(1),
+    externalLeadId: z.string().trim().min(1).nullable().optional(),
+    leadSource: z.string().trim().min(1),
+    scope: LeadScopeSchema,
+    clientId: z.string().trim().min(1).nullable().optional(),
+    name: z.string().trim().min(1),
+    email: z.string().trim().email().nullable().optional(),
+    phone: z.string().trim().min(1).nullable().optional(),
+    whatsapp: z.string().trim().min(1).nullable().optional(),
+    campaign: z.string().trim().min(1).nullable().optional(),
+    adCreative: z.string().trim().min(1).nullable().optional(),
+    form: z.string().trim().min(1).nullable().optional(),
+    qualificationAnswers: z.record(z.string()).nullable().optional(),
+    aiAnalysis: ingestLeadAiAnalysisSchema.nullable().optional(),
+  })
+  .strict();
