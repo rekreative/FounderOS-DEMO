@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime';
+import { ClientsProvider } from '@/components/ClientsProvider';
 
 // Pages read the DB path at first access, so point it at a fresh seeded temp DB
 // before any page module is imported. FUNNEL_PROVIDER keeps /funnel off the
@@ -95,12 +96,18 @@ describe('platform smoke — every page renders without throwing', () => {
       // 'use client' pages call hooks directly, so they need React's real
       // dispatcher — renderToStaticMarkup gives every child component one
       // without needing jsdom (useEffect simply never fires, same as any
-      // other SSR pass). A mock AppRouterContext covers the one hook
-      // (useRouter, in ClientDetailPage) that would otherwise throw for
-      // lack of a provider; next/link degrades gracefully without one.
+      // other SSR pass — so ClientsProvider's own fetch never actually runs
+      // here, same as app/layout.tsx wrapping every real page). A mock
+      // AppRouterContext covers the one hook (useRouter, in
+      // ClientDetailPage) that would otherwise throw for lack of a
+      // provider; next/link degrades gracefully without one.
       expect(() =>
         renderToStaticMarkup(
-          createElement(AppRouterContext.Provider, { value: mockRouter as any }, createElement(Page as any, props as any)),
+          createElement(
+            ClientsProvider,
+            null,
+            createElement(AppRouterContext.Provider, { value: mockRouter as any }, createElement(Page as any, props as any)),
+          ),
         ),
       ).not.toThrow();
     } else {

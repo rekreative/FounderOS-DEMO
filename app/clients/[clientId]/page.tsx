@@ -2,8 +2,13 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getClientById, initializeStoreIfNeeded, Client, updateClient, deleteClient, getClientNotes, updateClientNotes, getClientStatusLabel } from '@/lib/clients';
-import { getLeads, initializeLeadsStoreIfNeeded, type Lead } from '@/lib/leads';
+// Client identity is canonical PostgreSQL now (lib/api/clients.ts). Notes
+// stay localStorage in this pass — they were never named as a migrating
+// entity — so getClientNotes/updateClientNotes/getClientStatusLabel (a pure
+// label lookup, no storage) still come from lib/clients.ts.
+import { Client, getClientNotes, getClientStatusLabel, updateClientNotes } from '@/lib/clients';
+import { deleteClient, getClientById, updateClient } from '@/lib/api/clients';
+import { getLeads, type Lead } from '@/lib/api/leads';
 import { getCampaigns, initializeMetaCampaignsStoreIfNeeded, type MetaCampaign } from '@/lib/meta-ads';
 import { getAutomations, initializeAutomationsStoreIfNeeded, summarizeAutomations, type Automation } from '@/lib/automations';
 import { getAiAgents, initializeAiAgentsStoreIfNeeded, summarizeAiAgents, type AiAgent } from '@/lib/agents-ai';
@@ -68,6 +73,11 @@ function formatHeaderStartDate(value: string): string {
 export default function ClientDetailPage({ params }: { params: { clientId: string } }) {
   const clientId = params?.clientId ?? '';
   const [client, setClient] = useState<Client | null>(null);
+  // Distinguishes "still loading" from "genuinely not found" — without this
+  // the not-found screen would flash before the PostgreSQL fetch resolves.
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [showEditForm, setShowEditForm] = useState(false);
@@ -88,8 +98,26 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
   const [knowledgeEntries, setKnowledgeEntries] = useState<KnowledgeEntry[]>([]);
 
   useEffect(() => {
-    initializeStoreIfNeeded();
-    initializeLeadsStoreIfNeeded();
+    // Client identity + Leads: canonical PostgreSQL, async, cancellation-guarded.
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+
+    Promise.all([getClientById(clientId), getLeads({ clientId })])
+      .then(([loadedClient, clientLeads]) => {
+        if (cancelled) return;
+        setClient(loadedClient);
+        setLeads(clientLeads);
+        if (loadedClient) setNotes(getClientNotes(loadedClient.id));
+        setLoading(false);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoadError(error instanceof Error ? error.message : 'No se pudo cargar el cliente.');
+        setLoading(false);
+      });
+
+    // Everything else stays localStorage in this pass — unchanged, synchronous.
     initializeMetaCampaignsStoreIfNeeded();
     initializeAutomationsStoreIfNeeded();
     initializeAiAgentsStoreIfNeeded();
@@ -99,13 +127,6 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     initializeContentStoreIfNeeded();
     initializeKnowledgeStoreIfNeeded();
 
-    const c = getClientById(clientId);
-    setClient(c);
-    if (c) {
-      setNotes(getClientNotes(c.id));
-    }
-
-    setLeads(getLeads(clientId));
     setCampaigns(getCampaigns(clientId));
     setAutomations(getAutomations(clientId));
     setAgents(getAiAgents(clientId));
@@ -114,6 +135,10 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     setRevenueRecords(getRevenueRecords(clientId));
     setContentItems(getContentItems(clientId));
     setKnowledgeEntries(getKnowledgeEntries(clientId));
+
+    return () => {
+      cancelled = true;
+    };
   }, [clientId]);
 
   const leadCounts = useMemo(
@@ -144,6 +169,28 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
 
   const attributedRevenueAllTime = useMemo(() => sumAttributedRevenue(revenueRecords), [revenueRecords]);
 
+  if (loading) {
+    return (
+      <div className="p-4">
+        <div className="mb-4">
+          <Link href="/clients" className="text-os-dim">← Volver a clientes</Link>
+        </div>
+        <div className="text-os-dim">Cargando cliente…</div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="p-4">
+        <div className="mb-4">
+          <Link href="/clients" className="text-os-dim">← Volver a clientes</Link>
+        </div>
+        <div className="border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[11px] text-os-err">{loadError}</div>
+      </div>
+    );
+  }
+
   if (!client) {
     return (
       <div className="p-4">
@@ -155,18 +202,31 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     );
   }
 
-  function handleEditClient(data: NewClientInput) {
-    const updated = updateClient(clientId, data);
-    if (updated) {
-      setClient(updated);
-      setShowEditForm(false);
+  async function handleEditClient(data: NewClientInput) {
+    try {
+      const updated = await updateClient(clientId, data);
+      if (updated) {
+        setClient(updated);
+        setShowEditForm(false);
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'No se pudo actualizar el cliente.');
     }
   }
 
-  function handleConfirmDelete() {
-    const success = deleteClient(clientId);
-    if (success) {
-      router.push('/clients');
+  async function handleConfirmDelete() {
+    try {
+      const result = await deleteClient(clientId);
+      if (result.outcome === 'deleted') {
+        router.push('/clients');
+        return;
+      }
+      if (result.outcome === 'blocked') {
+        setShowDeleteConfirm(false);
+        setActionError(`No se puede eliminar: el cliente tiene ${result.leadCount} lead(s) registrados en el CRM.`);
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'No se pudo eliminar el cliente.');
     }
   }
 
@@ -187,6 +247,9 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
 
   return (
     <div className="p-4">
+      {actionError && (
+        <div className="mb-4 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[11px] text-os-err">{actionError}</div>
+      )}
       {/* Header — client identity always visible regardless of active tab */}
       <div className="mb-6 border-b border-os-border pb-4">
         <div className="flex items-start justify-between gap-4 mb-4">
@@ -333,9 +396,14 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
             <p className="text-sm text-os-dim mb-4">
               ¿Seguro que quieres eliminar a <strong>{client.name}</strong>? Esta acción no se puede deshacer.
             </p>
-            {hasRelatedRecords && (
+            {leads.length > 0 && (
               <p className="text-sm text-os-warn mb-4 border border-os-border bg-os-surface2 px-3 py-2">
-                Este cliente tiene leads, campañas, automatizaciones, agentes, integraciones, ingresos o conocimiento registrados.
+                Este cliente tiene {leads.length} lead(s) en el CRM. No se puede eliminar mientras tenga leads asociados.
+              </p>
+            )}
+            {leads.length === 0 && hasRelatedRecords && (
+              <p className="text-sm text-os-warn mb-4 border border-os-border bg-os-surface2 px-3 py-2">
+                Este cliente tiene campañas, automatizaciones, agentes, integraciones, ingresos o conocimiento registrados.
                 Esos registros no se eliminarán automáticamente y quedarán asociados a un cliente inexistente.
               </p>
             )}

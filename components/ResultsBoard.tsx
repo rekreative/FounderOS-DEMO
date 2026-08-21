@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { getClients, initializeStoreIfNeeded, type Client } from '@/lib/clients';
-import { getLeadEvents, getLeads, initializeLeadsStoreIfNeeded, type Lead, type LeadEvent } from '@/lib/leads';
+import { useClientsRegistry } from '@/components/ClientsProvider';
+import { getLeadEvents, getLeads, type Lead, type LeadEvent } from '@/lib/api/leads';
 import { getCampaigns, initializeMetaCampaignsStoreIfNeeded, type MetaCampaign } from '@/lib/meta-ads';
 import {
   PERIOD_PRESET_OPTIONS,
@@ -32,25 +32,42 @@ import { BarListChart, DemoDataBadge, FunnelBars, ResultsKpiStrip } from '@/comp
  * client navigates to its dedicated /clients/[clientId]/results dashboard;
  * this page never swaps into a per-client detail mode itself. */
 export function ResultsBoard() {
-  const [clients, setClients] = useState<Client[]>([]);
+  // Canonical PostgreSQL registry — same source /clients and /leads read.
+  const { clients, error: clientsError } = useClientsRegistry();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [events, setEvents] = useState<LeadEvent[]>([]);
+  const [leadsError, setLeadsError] = useState<string | null>(null);
   const [campaigns, setCampaigns] = useState<MetaCampaign[]>([]);
   const [revenueRecords, setRevenueRecords] = useState<RevenueRecord[]>([]);
 
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
   const [customRange, setCustomRange] = useState({ start: '', end: '' });
 
+  // Leads + their events: PostgreSQL, async, cancellation-guarded.
+  // computeClientResults filters by lead.clientId === client.id (unchanged),
+  // so REKREATIVE's own internal leads (clientId null) never match any real
+  // client and never leak into this client-only portfolio view.
   useEffect(() => {
-    initializeStoreIfNeeded();
-    initializeLeadsStoreIfNeeded();
+    let cancelled = false;
+    getLeads()
+      .then(async (loadedLeads) => {
+        if (cancelled) return;
+        setLeads(loadedLeads);
+        const eventLists = await Promise.all(loadedLeads.map((lead) => getLeadEvents(lead.id)));
+        if (!cancelled) setEvents(eventLists.flat());
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setLeadsError(error instanceof Error ? error.message : 'No se pudieron cargar los leads.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     initializeMetaCampaignsStoreIfNeeded();
     initializeResultsStoreIfNeeded();
 
-    setClients(getClients());
-    const loadedLeads = getLeads();
-    setLeads(loadedLeads);
-    setEvents(loadedLeads.flatMap((lead) => getLeadEvents(lead.id)));
     setCampaigns(getCampaigns());
     setRevenueRecords(getRevenueRecords());
 
@@ -126,6 +143,12 @@ export function ResultsBoard() {
         </p>
         {showDemoBadge && <DemoDataBadge />}
       </div>
+
+      {(clientsError || leadsError) && (
+        <div className="mb-5 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">
+          {clientsError ?? leadsError}
+        </div>
+      )}
 
       {/* Period controls */}
       <div className="mb-4 flex flex-wrap items-center gap-3">

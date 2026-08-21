@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { ClientsList } from '@/components/ClientsList';
 import { ClientsForm, NewClientInput } from '@/components/ClientsForm';
-import { initializeStoreIfNeeded, getClients, createClient, Client, ClientStatus, CLIENT_STATUS_OPTIONS } from '@/lib/clients';
+import { useClientsRegistry } from '@/components/ClientsProvider';
+import { createClient } from '@/lib/api/clients';
+import { ClientStatus, CLIENT_STATUS_OPTIONS } from '@/lib/clients';
 import { PageHeader } from '@/components/PageHeader';
 
 // UI-only filter state — never persisted, matches the same filter-bar
@@ -13,16 +15,13 @@ import { PageHeader } from '@/components/PageHeader';
 const STATUS_FILTERS = [{ id: 'all' as const, label: 'Todos' }, ...CLIENT_STATUS_OPTIONS];
 
 export default function ClientsPage() {
-  const [clients, setClients] = useState<Client[]>([]);
+  // Canonical PostgreSQL Client registry — the same source every other
+  // module reads, so /clients is never a second visible truth.
+  const { clients, loading, error, refresh } = useClientsRegistry();
   const [showNew, setShowNew] = useState(false);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | ClientStatus>('all');
-
-  useEffect(() => {
-    // Ensure seed is present on first load
-    initializeStoreIfNeeded();
-    setClients(getClients());
-  }, []);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const filteredClients = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -37,11 +36,15 @@ export default function ClientsPage() {
     });
   }, [clients, query, statusFilter]);
 
-  function handleCreate(data: NewClientInput) {
-    const created = createClient({ ...data });
-    setClients((s) => [created, ...s]);
-    setShowNew(false);
-    // push state is unnecessary; list updated in memory
+  async function handleCreate(data: NewClientInput) {
+    setCreateError(null);
+    try {
+      await createClient({ ...data });
+      setShowNew(false);
+      refresh(); // re-fetch the canonical registry so every module sees it
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'No se pudo crear el cliente.');
+    }
   }
 
   return (
@@ -60,7 +63,14 @@ export default function ClientsPage() {
         }
       />
 
-      <p className="text-os-dim text-sm mb-2">{clients.length} clientes</p>
+      <p className="text-os-dim text-sm mb-2">{loading ? 'Cargando clientes…' : `${clients.length} clientes`}</p>
+
+      {error && (
+        <div className="mb-4 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{error}</div>
+      )}
+      {createError && (
+        <div className="mb-4 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{createError}</div>
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative">
@@ -94,7 +104,13 @@ export default function ClientsPage() {
       </div>
 
       <section className="mt-2">
-        <ClientsList clients={filteredClients} />
+        {loading ? (
+          <div className="rounded-lg-t border border-dashed border-os-border bg-os-surface2 px-4 py-6 text-center font-mono text-[11px] text-os-dim">
+            Cargando clientes…
+          </div>
+        ) : (
+          <ClientsList clients={filteredClients} />
+        )}
       </section>
 
       {showNew && <ClientsForm mode="create" onCancel={() => setShowNew(false)} onCreate={handleCreate} />}

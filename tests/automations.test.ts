@@ -172,6 +172,16 @@ describe('getClientNameForAutomation', () => {
   it('returns Interno for a null clientId, never a fabricated client name', () => {
     expect(getClientNameForAutomation(null)).toBe('Interno');
   });
+
+  // Backend V1: boards pass the canonical PostgreSQL clients list explicitly
+  // (useClientsRegistry()) instead of relying on the legacy localStorage
+  // fallback — this is the mechanism that keeps Automations' client display
+  // in sync with the real registry without migrating Automation records.
+  it('resolves from an explicitly-passed clients list (the canonical registry), not just the local fallback', () => {
+    const clients = [{ id: 'client-acme', name: 'Acme Co' }];
+    expect(getClientNameForAutomation('client-acme', clients)).toBe('Acme Co');
+    expect(getClientNameForAutomation('client-does-not-exist', clients)).toBe('Cliente desconocido');
+  });
 });
 
 describe('CRUD + scope invariant (browser-like storage)', () => {

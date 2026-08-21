@@ -12,6 +12,7 @@ import {
   getAiAgentStatusLabel,
   getAiAgentUseCaseLabel,
   getAiAgents,
+  getClientNameForAiAgent,
   initializeAiAgentsStoreIfNeeded,
   summarizeAiAgents,
   type AiAgent,
@@ -167,6 +168,21 @@ describe('label helpers', () => {
 
   it('falls back to the raw id for an unrecognized value rather than throwing', () => {
     expect(getAiAgentChannelLabel('carrier_pigeon' as never)).toBe('carrier_pigeon');
+  });
+});
+
+describe('getClientNameForAiAgent', () => {
+  it('returns Interno for a null clientId, never a fabricated client name', () => {
+    expect(getClientNameForAiAgent(null)).toBe('Interno');
+  });
+
+  // Backend V1: AgentsAiBoard passes the canonical PostgreSQL clients list
+  // explicitly (useClientsRegistry()) instead of relying on the legacy
+  // localStorage fallback.
+  it('resolves from an explicitly-passed clients list (the canonical registry), not just the local fallback', () => {
+    const clients = [{ id: 'client-acme', name: 'Acme Co' }];
+    expect(getClientNameForAiAgent('client-acme', clients)).toBe('Acme Co');
+    expect(getClientNameForAiAgent('client-does-not-exist', clients)).toBe('Cliente desconocido');
   });
 });
 

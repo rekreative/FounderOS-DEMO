@@ -77,6 +77,15 @@ describe('getClientNameForCampaign', () => {
   it('returns Interno for a null clientId, never a fabricated client name', () => {
     expect(getClientNameForCampaign(null)).toBe('Interno');
   });
+
+  // Backend V1: /meta-ads passes the canonical PostgreSQL clients list
+  // explicitly (useClientsRegistry()) instead of relying on the legacy
+  // localStorage fallback.
+  it('resolves from an explicitly-passed clients list (the canonical registry), not just the local fallback', () => {
+    const clients = [{ id: 'client-acme', name: 'Acme Co' }];
+    expect(getClientNameForCampaign('client-acme', clients)).toBe('Acme Co');
+    expect(getClientNameForCampaign('client-does-not-exist', clients)).toBe('Cliente desconocido');
+  });
 });
 
 describe('CRUD + scope invariant (browser-like storage)', () => {

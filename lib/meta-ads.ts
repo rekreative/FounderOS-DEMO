@@ -411,9 +411,14 @@ export function setCampaignStatus(id: string, status: MetaCampaignStatus): MetaC
   return updateCampaign(id, { status });
 }
 
-export function getClientNameForCampaign(clientId: string | null): string {
+/** See lib/automations.ts's getClientNameForAutomation — same pattern: pass
+ *  the canonical PostgreSQL `clients` list when the caller has one loaded. */
+export function getClientNameForCampaign(
+  clientId: string | null,
+  clients: { id: string; name: string }[] = getClients(),
+): string {
   if (!clientId) return 'Interno';
-  const client = getClients().find((item) => item.id === clientId);
+  const client = clients.find((item) => item.id === clientId);
   return client?.name ?? 'Cliente desconocido';
 }
 

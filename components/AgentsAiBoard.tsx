@@ -2,7 +2,7 @@
 
 import { Search } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { getClients, initializeStoreIfNeeded, type Client } from '@/lib/clients';
+import { useClientsRegistry } from '@/components/ClientsProvider';
 import {
   AI_AGENT_CAPABILITY_OPTIONS,
   AI_AGENT_CHANNEL_OPTIONS,
@@ -312,7 +312,9 @@ export function AgentsAiBoard({
   channelIconsLarge: Record<string, ReactNode>;
   noChannelIcon: ReactNode;
 }) {
-  const [clients, setClients] = useState<Client[]>([]);
+  // Canonical PostgreSQL Client registry — Agent records themselves stay
+  // localStorage; only client identity/selection moved.
+  const { clients } = useClientsRegistry();
   const [agents, setAgents] = useState<AiAgent[]>([]);
   // Primary scope: REKREATIVE's own agents vs. client agents — conceptually
   // ABOVE client filtering, never a fake client. Defaults to REKREATIVE.
@@ -343,9 +345,7 @@ export function AgentsAiBoard({
   };
 
   useEffect(() => {
-    initializeStoreIfNeeded();
     initializeAiAgentsStoreIfNeeded();
-    setClients(getClients());
     setAgents(getAiAgents());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -369,7 +369,7 @@ export function AgentsAiBoard({
     const q = query.trim().toLowerCase();
     if (!q) return scopedAgents;
     return scopedAgents.filter((agent) => {
-      const clientName = getClientNameForAiAgent(agent.clientId).toLowerCase();
+      const clientName = getClientNameForAiAgent(agent.clientId, clients).toLowerCase();
       const providerLabel = agent.provider ? getAiAgentProviderLabel(agent.provider).toLowerCase() : '';
       const channelLabel = agent.channel ? getAiAgentChannelLabel(agent.channel).toLowerCase() : '';
       const useCaseLabel = agent.useCase ? getAiAgentUseCaseLabel(agent.useCase).toLowerCase() : '';
@@ -385,7 +385,7 @@ export function AgentsAiBoard({
         capabilityLabels.some((label) => label.includes(q))
       );
     });
-  }, [scopedAgents, query]);
+  }, [scopedAgents, query, clients]);
 
   const visibleAgents = useMemo(
     () =>
@@ -636,7 +636,7 @@ export function AgentsAiBoard({
             <AgentCard
               key={agent.id}
               agent={agent}
-              clientName={getClientNameForAiAgent(agent.clientId)}
+              clientName={getClientNameForAiAgent(agent.clientId, clients)}
               showClientName={showClientName}
               providerLogos={providerLogos}
               channelLogos={channelLogos}

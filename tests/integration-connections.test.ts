@@ -229,6 +229,15 @@ describe('label helpers', () => {
   it('getClientNameForIntegrationConnection returns "Interno" for null clientId', () => {
     expect(getClientNameForIntegrationConnection(null)).toBe('Interno');
   });
+
+  // Backend V1: IntegrationConnectionsBoard passes the canonical PostgreSQL
+  // clients list explicitly (useClientsRegistry()) instead of relying on
+  // the legacy localStorage fallback.
+  it('getClientNameForIntegrationConnection resolves from an explicitly-passed clients list', () => {
+    const clients = [{ id: 'client-acme', name: 'Acme Co' }];
+    expect(getClientNameForIntegrationConnection('client-acme', clients)).toBe('Acme Co');
+    expect(getClientNameForIntegrationConnection('client-does-not-exist', clients)).toBe('Cliente desconocido');
+  });
 });
 
 describe('platform enum', () => {

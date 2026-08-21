@@ -772,9 +772,19 @@ export function summarizeAutomations(automations: Automation[]): AutomationsSumm
 
 // ===== LABELS =====
 
-export function getClientNameForAutomation(clientId: string | null): string {
+/**
+ * Pass the caller's own already-loaded `clients` (the canonical PostgreSQL
+ * registry, e.g. from useClientsRegistry()) wherever one is available —
+ * that's what keeps this in sync with the real Client registry instead of
+ * the legacy localStorage seed. Automation records themselves stay
+ * localStorage; only client identity resolution moved.
+ */
+export function getClientNameForAutomation(
+  clientId: string | null,
+  clients: { id: string; name: string }[] = getClients(),
+): string {
   if (!clientId) return 'Interno';
-  const client = getClients().find((item) => item.id === clientId);
+  const client = clients.find((item) => item.id === clientId);
   return client?.name ?? 'Cliente desconocido';
 }
 

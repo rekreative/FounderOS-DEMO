@@ -481,9 +481,12 @@ export function summarizeKnowledgeEntries(entries: KnowledgeEntry[]): KnowledgeE
  * label at the call site (e.g. "REKREATIVE · Análisis"). Client entries keep
  * their name plain, same as before. Presentation only — scope/clientId
  * themselves are untouched. */
-export function getClientNameForKnowledgeEntry(clientId: string | null): string {
+export function getClientNameForKnowledgeEntry(
+  clientId: string | null,
+  clients: { id: string; name: string }[] = getClients(),
+): string {
   if (!clientId) return 'REKREATIVE';
-  const client = getClients().find((item) => item.id === clientId);
+  const client = clients.find((item) => item.id === clientId);
   return client?.name ?? 'Cliente desconocido';
 }
 

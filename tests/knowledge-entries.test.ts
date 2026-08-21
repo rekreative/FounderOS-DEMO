@@ -424,4 +424,13 @@ describe('CRUD + scope invariant (browser-like storage)', () => {
     expect(getClientNameForKnowledgeEntry('client-acme')).toBe('Acme Co');
     expect(getClientNameForKnowledgeEntry('client-does-not-exist')).toBe('Cliente desconocido');
   });
+
+  // Backend V1: KnowledgeBoard passes the canonical PostgreSQL clients list
+  // explicitly (useClientsRegistry()) instead of relying on the legacy
+  // localStorage fallback.
+  it('getClientNameForKnowledgeEntry resolves from an explicitly-passed clients list', () => {
+    const clients = [{ id: 'client-acme', name: 'Acme Co' }];
+    expect(getClientNameForKnowledgeEntry('client-acme', clients)).toBe('Acme Co');
+    expect(getClientNameForKnowledgeEntry('client-does-not-exist', clients)).toBe('Cliente desconocido');
+  });
 });

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
-import { getClients, initializeStoreIfNeeded, type Client } from '@/lib/clients';
+import { useClientsRegistry } from '@/components/ClientsProvider';
 import {
   CAMPAIGN_OBJECTIVE_OPTIONS,
   CAMPAIGN_STATUS_OPTIONS,
@@ -225,7 +225,9 @@ function CampaignRow({
 }
 
 export default function MetaAdsPage() {
-  const [clients, setClients] = useState<Client[]>([]);
+  // Canonical PostgreSQL Client registry — Meta Ads campaigns themselves
+  // stay localStorage; only client identity/selection moved.
+  const { clients } = useClientsRegistry();
   const [campaigns, setCampaigns] = useState<MetaCampaign[]>([]);
   // Primary scope: REKREATIVE's own campaigns vs. client campaigns —
   // conceptually ABOVE client filtering, never a fake client. Defaults to
@@ -253,9 +255,7 @@ export default function MetaAdsPage() {
   };
 
   useEffect(() => {
-    initializeStoreIfNeeded();
     initializeMetaCampaignsStoreIfNeeded();
-    setClients(getClients());
     setCampaigns(getCampaigns());
   }, []);
 
@@ -276,11 +276,11 @@ export default function MetaAdsPage() {
     const q = query.trim().toLowerCase();
     if (!q) return scopedCampaigns;
     return scopedCampaigns.filter((campaign) => {
-      const clientName = getClientNameForCampaign(campaign.clientId).toLowerCase();
+      const clientName = getClientNameForCampaign(campaign.clientId, clients).toLowerCase();
       const objective = getObjectiveLabel(campaign.objective).toLowerCase();
       return campaign.name.toLowerCase().includes(q) || clientName.includes(q) || objective.includes(q);
     });
-  }, [scopedCampaigns, query]);
+  }, [scopedCampaigns, query, clients]);
 
   // Status filter counts — computed from the already-loaded, search-filtered
   // campaigns (never a new metric/store); reacts live as the search narrows.
@@ -527,7 +527,7 @@ export default function MetaAdsPage() {
                 <CampaignRow
                   key={campaign.id}
                   campaign={campaign}
-                  clientName={getClientNameForCampaign(campaign.clientId)}
+                  clientName={getClientNameForCampaign(campaign.clientId, clients)}
                   showClientColumn={showClientColumn}
                   columnCount={columnCount}
                   expanded={Boolean(expanded[campaign.id])}

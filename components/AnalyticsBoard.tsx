@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { getClientStatusLabel, getClients, initializeStoreIfNeeded, type Client } from '@/lib/clients';
-import { getLeadEvents, getLeads, initializeLeadsStoreIfNeeded, type Lead, type LeadEvent, type LeadIntent, type LeadPriority } from '@/lib/leads';
+import { getClientStatusLabel } from '@/lib/clients';
+import { useClientsRegistry } from '@/components/ClientsProvider';
+import type { LeadIntent, LeadPriority } from '@/lib/leads';
+import { getLeadEvents, getLeads, type Lead, type LeadEvent } from '@/lib/api/leads';
 import {
   getCampaigns,
   getObjectiveLabel as getCampaignObjectiveLabel,
@@ -86,9 +88,11 @@ const fmtCount = (value: number) => String(value);
  * owns (attributed revenue, ROAS, CAC, period-scoped ad performance, the
  * Results funnel dashboard, Meta vs CRM comparison). */
 export function AnalyticsBoard() {
-  const [clients, setClients] = useState<Client[]>([]);
+  // Canonical PostgreSQL registry — same source /clients and /leads read.
+  const { clients, error: clientsError } = useClientsRegistry();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [events, setEvents] = useState<LeadEvent[]>([]);
+  const [leadsError, setLeadsError] = useState<string | null>(null);
   const [campaigns, setCampaigns] = useState<MetaCampaign[]>([]);
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [automationRuns, setAutomationRuns] = useState<AutomationRun[]>([]);
@@ -96,20 +100,35 @@ export function AnalyticsBoard() {
   const [connections, setConnections] = useState<IntegrationConnection[]>([]);
   const [requirements, setRequirements] = useState<ClientIntegrationRequirement[]>([]);
 
+  // Leads + their events: PostgreSQL, async, cancellation-guarded. Internal
+  // REKREATIVE leads must never leak into client-portfolio Analytics — every
+  // buildXxx() below that needs client-only leads already filters by
+  // lead.scope/clientId (unchanged), so fetching the full set here (both
+  // scopes) and letting those pure functions filter is correct, same as before.
   useEffect(() => {
-    initializeStoreIfNeeded();
-    initializeLeadsStoreIfNeeded();
+    let cancelled = false;
+    getLeads()
+      .then(async (loadedLeads) => {
+        if (cancelled) return;
+        setLeads(loadedLeads);
+        const eventLists = await Promise.all(loadedLeads.map((lead) => getLeadEvents(lead.id)));
+        if (!cancelled) setEvents(eventLists.flat());
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setLeadsError(error instanceof Error ? error.message : 'No se pudieron cargar los leads.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Everything else stays localStorage in this pass — unchanged, synchronous.
+  useEffect(() => {
     initializeMetaCampaignsStoreIfNeeded();
     initializeAutomationsStoreIfNeeded();
     initializeAiAgentsStoreIfNeeded();
     initializeIntegrationConnectionsStoreIfNeeded();
     initializeClientIntegrationRequirementsStoreIfNeeded();
-
-    setClients(getClients());
-
-    const loadedLeads = getLeads();
-    setLeads(loadedLeads);
-    setEvents(loadedLeads.flatMap((lead) => getLeadEvents(lead.id)));
 
     setCampaigns(getCampaigns());
 
@@ -193,6 +212,12 @@ export function AnalyticsBoard() {
           Patrones, fortalezas, debilidades y huecos operativos en la cartera de clientes de REKREATIVE. Complementa a
           Resultados — no repite ingresos, ROAS, CAC ni el rendimiento publicitario por periodo.
         </p>
+
+        {(clientsError || leadsError) && (
+          <div className="mb-8 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">
+            {clientsError ?? leadsError}
+          </div>
+        )}
 
         {/* ===== 1. Cartera ===== */}
         <section className="mb-12">

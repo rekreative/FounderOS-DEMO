@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { getClientById, initializeStoreIfNeeded, type Client } from '@/lib/clients';
-import { getLeadEvents, getLeads, initializeLeadsStoreIfNeeded, type Lead, type LeadEvent } from '@/lib/leads';
+import type { Client } from '@/lib/clients';
+import { getClientById } from '@/lib/api/clients';
+import { getLeadEvents, getLeads, type Lead, type LeadEvent } from '@/lib/api/leads';
 import { getCampaigns, initializeMetaCampaignsStoreIfNeeded, type MetaCampaign } from '@/lib/meta-ads';
 import {
   PERIOD_PRESET_OPTIONS,
@@ -71,6 +72,7 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
 
   const [client, setClient] = useState<Client | null>(null);
   const [notFoundChecked, setNotFoundChecked] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [events, setEvents] = useState<LeadEvent[]>([]);
   const [campaigns, setCampaigns] = useState<MetaCampaign[]>([]);
@@ -83,22 +85,39 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
   const [editingRevenueId, setEditingRevenueId] = useState<string | null>(null);
   const [revenueDraft, setRevenueDraft] = useState<RevenueDraft>(emptyRevenueDraft());
 
-  const refresh = () => {
+  // Client identity + Leads: canonical PostgreSQL. computeClientResults
+  // filters by lead.clientId === clientId (unchanged), so REKREATIVE's own
+  // internal leads never leak into this client-only dashboard.
+  const refresh = async () => {
     setCampaigns(getCampaigns());
     setRevenueRecords(getRevenueRecords());
-    const loadedLeads = getLeads();
-    setLeads(loadedLeads);
-    setEvents(loadedLeads.flatMap((lead) => getLeadEvents(lead.id)));
+    try {
+      const loadedLeads = await getLeads({ clientId });
+      setLeads(loadedLeads);
+      const eventLists = await Promise.all(loadedLeads.map((lead) => getLeadEvents(lead.id)));
+      setEvents(eventLists.flat());
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'No se pudieron cargar los leads.');
+    }
   };
 
   useEffect(() => {
-    initializeStoreIfNeeded();
-    initializeLeadsStoreIfNeeded();
+    let cancelled = false;
     initializeMetaCampaignsStoreIfNeeded();
     initializeResultsStoreIfNeeded();
 
-    setClient(getClientById(clientId));
-    setNotFoundChecked(true);
+    setLoadError(null);
+    getClientById(clientId)
+      .then((loadedClient) => {
+        if (cancelled) return;
+        setClient(loadedClient);
+        setNotFoundChecked(true);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoadError(error instanceof Error ? error.message : 'No se pudo cargar el cliente.');
+        setNotFoundChecked(true);
+      });
     refresh();
 
     if (forceAllPeriod) {
@@ -110,6 +129,9 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
         setCustomRange({ start: preference.start ?? '', end: preference.end ?? '' });
       }
     }
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
@@ -188,6 +210,19 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
     refresh();
     closeRevenueForm();
   };
+
+  if (loadError && !client) {
+    return (
+      <div className="p-4">
+        <div className="mb-4">
+          <Link href="/results" className="font-mono text-[10.5px] uppercase tracking-wide text-os-dim hover:text-os-accent">
+            ← Volver a resultados
+          </Link>
+        </div>
+        <div className="border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[11px] text-os-err">{loadError}</div>
+      </div>
+    );
+  }
 
   if (notFoundChecked && !client) {
     return (

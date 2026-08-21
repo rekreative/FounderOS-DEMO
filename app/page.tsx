@@ -6,8 +6,9 @@ import { ArrowUpRight } from 'lucide-react';
 import { PageHeader } from '@/components/PageHeader';
 import { Badge, Dot, Kbd, SectionHead } from '@/components/terminal';
 import { REKREATIVE_PRIMARY } from '@/lib/nav';
-import { getClients, initializeStoreIfNeeded, getClientStatusLabel, type Client } from '@/lib/clients';
-import { getLeads, initializeLeadsStoreIfNeeded, type Lead } from '@/lib/leads';
+import { getClientStatusLabel } from '@/lib/clients';
+import { useClientsRegistry } from '@/components/ClientsProvider';
+import { getLeads, type Lead } from '@/lib/api/leads';
 import { getCampaigns, initializeMetaCampaignsStoreIfNeeded, type MetaCampaign } from '@/lib/meta-ads';
 import {
   getAutomations,
@@ -105,19 +106,34 @@ function StatTile({
 }
 
 export default function HomePage() {
-  const [clients, setClients] = useState<Client[]>([]);
+  // Canonical PostgreSQL registry — same source /clients and /leads read.
+  const { clients, error: clientsError } = useClientsRegistry();
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [leadsError, setLeadsError] = useState<string | null>(null);
   const [campaigns, setCampaigns] = useState<MetaCampaign[]>([]);
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [agents, setAgents] = useState<AiAgent[]>([]);
   const [connections, setConnections] = useState<IntegrationConnection[]>([]);
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [revenueRecords, setRevenueRecords] = useState<RevenueRecord[]>([]);
-  const [requirementsByClient, setRequirementsByClient] = useState<Record<string, ClientIntegrationRequirement[]>>({});
 
+  // Leads: PostgreSQL, async, cancellation-guarded.
   useEffect(() => {
-    initializeStoreIfNeeded();
-    initializeLeadsStoreIfNeeded();
+    let cancelled = false;
+    getLeads()
+      .then((result) => {
+        if (!cancelled) setLeads(result);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setLeadsError(error instanceof Error ? error.message : 'No se pudieron cargar los leads.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Everything else stays localStorage in this pass — unchanged, synchronous.
+  useEffect(() => {
     initializeMetaCampaignsStoreIfNeeded();
     initializeAutomationsStoreIfNeeded();
     initializeAiAgentsStoreIfNeeded();
@@ -126,20 +142,22 @@ export default function HomePage() {
     initializeContentStoreIfNeeded();
     initializeResultsStoreIfNeeded();
 
-    const allClients = getClients();
-    setClients(allClients);
-    setLeads(getLeads());
     setCampaigns(getCampaigns());
     setAutomations(getAutomations());
     setAgents(getAiAgents());
     setConnections(getIntegrationConnections());
     setContentItems(getContentItems());
     setRevenueRecords(getRevenueRecords());
-
-    const reqByClient: Record<string, ClientIntegrationRequirement[]> = {};
-    for (const client of allClients) reqByClient[client.id] = getClientIntegrationRequirements(client.id);
-    setRequirementsByClient(reqByClient);
   }, []);
+
+  // Derived from the canonical `clients` list — recomputes whenever it
+  // changes (e.g. once the registry's fetch resolves), unlike the old
+  // one-time-on-mount version of this map.
+  const requirementsByClient = useMemo(() => {
+    const map: Record<string, ClientIntegrationRequirement[]> = {};
+    for (const client of clients) map[client.id] = getClientIntegrationRequirements(client.id);
+    return map;
+  }, [clients]);
 
   // ── Executive summary — honest counts only, no invented periods/rates ──
   const activeClients = clients.filter((c) => c.status === 'active').length;
@@ -159,11 +177,11 @@ export default function HomePage() {
           return {
             id: `automation-${a.id}`,
             clientId: a.clientId,
-            text: `${getClientNameForAutomation(a.clientId)} · ${name} — requiere atención${errorEs ? ` · ${errorEs}` : ''}.`,
+            text: `${getClientNameForAutomation(a.clientId, clients)} · ${name} — requiere atención${errorEs ? ` · ${errorEs}` : ''}.`,
             href: '/automations',
           };
         }),
-    [automations],
+    [automations, clients],
   );
 
   const attentionIntegrations: AttentionItem[] = useMemo(() => {
@@ -192,10 +210,10 @@ export default function HomePage() {
         .map((a) => ({
           id: `agent-${a.id}`,
           clientId: a.clientId,
-          text: `Agente IA "${a.name}" (${getClientNameForAiAgent(a.clientId)}) tiene configuración incompleta`,
+          text: `Agente IA "${a.name}" (${getClientNameForAiAgent(a.clientId, clients)}) tiene configuración incompleta`,
           href: '/ai-agents',
         })),
-    [agents],
+    [agents, clients],
   );
 
   const attentionContent: AttentionItem[] = useMemo(
@@ -250,6 +268,12 @@ export default function HomePage() {
   return (
     <div>
       <PageHeader eyebrow="REKREATIVE OS" title="Centro de operaciones" caret right={<Kbd>⌘K</Kbd>} />
+
+      {(clientsError || leadsError) && (
+        <div className="mb-[22px] border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">
+          {clientsError ?? leadsError}
+        </div>
+      )}
 
       {/* Executive summary */}
       <section className="mb-[22px] grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">

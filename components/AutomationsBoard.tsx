@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
-import { getClients, initializeStoreIfNeeded, type Client } from '@/lib/clients';
+import { useClientsRegistry } from '@/components/ClientsProvider';
 import {
   AUTOMATION_PLATFORM_OPTIONS,
   AUTOMATION_SCOPE_OPTIONS,
@@ -492,7 +492,9 @@ export function AutomationsBoard({
   platformLogos: Record<string, ReactNode>;
   platformIconsLarge: Record<string, ReactNode>;
 }) {
-  const [clients, setClients] = useState<Client[]>([]);
+  // Canonical PostgreSQL Client registry — Automation records themselves
+  // stay localStorage; only client identity/selection moved.
+  const { clients } = useClientsRegistry();
   const [automations, setAutomations] = useState<Automation[]>([]);
   // Primary scope: REKREATIVE's own automations vs. client automations —
   // conceptually ABOVE client filtering, never a fake client. Defaults to
@@ -521,9 +523,7 @@ export function AutomationsBoard({
   };
 
   useEffect(() => {
-    initializeStoreIfNeeded();
     initializeAutomationsStoreIfNeeded();
-    setClients(getClients());
     setAutomations(getAutomations());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -548,7 +548,7 @@ export function AutomationsBoard({
     const q = query.trim().toLowerCase();
     if (!q) return scopedAutomations;
     return scopedAutomations.filter((automation) => {
-      const clientName = getClientNameForAutomation(automation.clientId).toLowerCase();
+      const clientName = getClientNameForAutomation(automation.clientId, clients).toLowerCase();
       const platformNames = automation.platforms.map((platform) => getPlatformLabel(platform).toLowerCase());
       return (
         automation.name.toLowerCase().includes(q) ||
@@ -556,7 +556,7 @@ export function AutomationsBoard({
         platformNames.some((label) => label.includes(q))
       );
     });
-  }, [scopedAutomations, query]);
+  }, [scopedAutomations, query, clients]);
 
   const visibleAutomations = useMemo(
     () =>
@@ -811,7 +811,7 @@ export function AutomationsBoard({
             <AutomationCard
               key={automation.id}
               automation={automation}
-              clientName={getClientNameForAutomation(automation.clientId)}
+              clientName={getClientNameForAutomation(automation.clientId, clients)}
               showClientName={showClientName}
               platformLogos={platformLogos}
               platformIconsLarge={platformIconsLarge}

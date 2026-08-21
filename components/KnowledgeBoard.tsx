@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { getClients, initializeStoreIfNeeded as initializeClientsStoreIfNeeded, type Client } from '@/lib/clients';
+import { useClientsRegistry } from '@/components/ClientsProvider';
 import {
   KNOWLEDGE_SOURCE_OPTIONS,
   KNOWLEDGE_TYPE_OPTIONS,
@@ -76,10 +76,12 @@ const TYPE_TONE_CLASS: Record<KnowledgeType, string> = {
 
 function KnowledgeCard({
   entry,
+  clients,
   onOpen,
   onTagClick,
 }: {
   entry: KnowledgeEntry;
+  clients: { id: string; name: string }[];
   onOpen: () => void;
   onTagClick: (tag: string) => void;
 }) {
@@ -122,7 +124,7 @@ function KnowledgeCard({
 
       <div className="flex items-center justify-between border-t border-os-border pt-2.5 font-mono text-[9.5px]">
         <span className="truncate text-os-dim">
-          {getClientNameForKnowledgeEntry(entry.clientId)} · {getKnowledgeSourceLabel(entry.source)}
+          {getClientNameForKnowledgeEntry(entry.clientId, clients)} · {getKnowledgeSourceLabel(entry.source)}
         </span>
         <span className="shrink-0 text-os-muted">{formatDate(entry.updatedAt)}</span>
       </div>
@@ -137,7 +139,9 @@ function KnowledgeCard({
 
 export function KnowledgeBoard() {
   const [entries, setEntries] = useState<KnowledgeEntry[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
+  // Canonical PostgreSQL Client registry — Knowledge entries themselves stay
+  // localStorage; only client identity/selection moved.
+  const { clients } = useClientsRegistry();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all');
@@ -151,10 +155,8 @@ export function KnowledgeBoard() {
   const [draft, setDraft] = useState<DraftKnowledgeEntry>(emptyDraft());
 
   useEffect(() => {
-    initializeClientsStoreIfNeeded();
     initializeKnowledgeStoreIfNeeded();
     setEntries(getKnowledgeEntries());
-    setClients(getClients());
   }, []);
 
   const refresh = () => setEntries(getKnowledgeEntries());
@@ -386,7 +388,7 @@ export function KnowledgeBoard() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filteredEntries.map((entry) => (
-            <KnowledgeCard key={entry.id} entry={entry} onOpen={() => openView(entry)} onTagClick={setTagFilter} />
+            <KnowledgeCard key={entry.id} entry={entry} clients={clients} onOpen={() => openView(entry)} onTagClick={setTagFilter} />
           ))}
         </div>
       )}
@@ -411,7 +413,7 @@ export function KnowledgeBoard() {
                 <div>
                   <div className="text-[16px] font-semibold text-os-text">{activeEntry.title}</div>
                   <div className="mt-1 font-mono text-[10px] text-os-dim">
-                    {getClientNameForKnowledgeEntry(activeEntry.clientId)} · {getKnowledgeTypeLabel(activeEntry.type)}
+                    {getClientNameForKnowledgeEntry(activeEntry.clientId, clients)} · {getKnowledgeTypeLabel(activeEntry.type)}
                   </div>
                 </div>
 

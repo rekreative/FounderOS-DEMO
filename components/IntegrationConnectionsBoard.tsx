@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { getClients, initializeStoreIfNeeded, type Client } from '@/lib/clients';
+import { useClientsRegistry } from '@/components/ClientsProvider';
+import type { Client } from '@/lib/clients';
 import {
   INTEGRATION_CONFIGURATION_STATUS_OPTIONS,
   INTEGRATION_PLATFORM_OPTIONS,
@@ -516,7 +517,9 @@ export function IntegrationConnectionsBoard({
 }: {
   platformLogosLarge: Record<string, ReactNode>;
 }) {
-  const [clients, setClients] = useState<Client[]>([]);
+  // Canonical PostgreSQL Client registry — Integration records themselves
+  // stay localStorage; only client identity/selection moved.
+  const { clients } = useClientsRegistry();
   // Primary scope: REKREATIVE's own shared infrastructure vs. client
   // integrations — conceptually ABOVE every filter/section below, never a
   // fake client. Defaults to REKREATIVE. Local UI state only, same pattern
@@ -554,17 +557,20 @@ export function IntegrationConnectionsBoard({
   const refreshRequirements = () => setRequirements(getClientIntegrationRequirements());
 
   useEffect(() => {
-    initializeStoreIfNeeded();
     initializeIntegrationConnectionsStoreIfNeeded();
     initializeClientIntegrationRequirementsStoreIfNeeded();
-    const loadedClients = getClients();
-    setClients(loadedClients);
     setConnections(getIntegrationConnections());
     setAllConnections(getIntegrationConnections());
     setRequirements(getClientIntegrationRequirements());
-    setSelectedOnboardingClientId((current) => current ?? loadedClients[0]?.id ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Defaults the onboarding workspace to the first canonical client once the
+  // registry's async fetch resolves — never overwrites an operator's
+  // already-made selection.
+  useEffect(() => {
+    setSelectedOnboardingClientId((current) => current ?? clients[0]?.id ?? null);
+  }, [clients]);
 
   useEffect(() => {
     refresh();
@@ -1141,7 +1147,7 @@ export function IntegrationConnectionsBoard({
             <ConnectionCard
               key={connection.id}
               connection={connection}
-              clientName={getClientNameForIntegrationConnection(connection.clientId)}
+              clientName={getClientNameForIntegrationConnection(connection.clientId, clients)}
               showClientName
               platformLogosLarge={platformLogosLarge}
               expanded={Boolean(expanded[connection.id])}

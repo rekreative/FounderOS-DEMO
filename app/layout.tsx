@@ -5,6 +5,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { Topbar } from '@/components/Topbar';
 import { CommandPalette } from '@/components/CommandPalette';
 import { ConductorPanel } from '@/components/ConductorPanel';
+import { ClientsProvider } from '@/components/ClientsProvider';
 import type { Command } from '@/lib/palette';
 import { REKREATIVE_PRIMARY } from '@/lib/nav';
 import { THEME_INIT_SCRIPT } from '@/lib/theme';
@@ -66,22 +67,27 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body>
-        <Sidebar />
-        {/* os-shell yields to the Conductor dock: the panel sets --conductor-w
-            and the whole content column glides left instead of being covered */}
-        <div className="os-shell ml-[232px] flex min-h-screen min-w-0 flex-col" style={{ marginRight: 'var(--conductor-w, 0px)' }}>
-          <Topbar />
-          <main className="min-w-0 flex-1 px-8 pb-16 pt-7 wide:px-10 ultra:px-12">
-            {/* Width tiers: 1280 on laptops · 1760 on large monitors ·
-                full-bleed on 32"/ultrawide. See tailwind screens wide/ultra. */}
-            <div className="mx-auto max-w-[1280px] wide:max-w-[1760px] ultra:max-w-none">
-              {children}
-            </div>
-          </main>
-        </div>
-        <CommandPalette commands={buildCommands()} />
-        {/* Notion-style agent dock — the Conductor, aware of the current screen */}
-        <ConductorPanel />
+        {/* Canonical PostgreSQL Client registry — one fetch, mounted above
+            every route, so every module resolves the same client list
+            (see components/ClientsProvider.tsx for why). */}
+        <ClientsProvider>
+          <Sidebar />
+          {/* os-shell yields to the Conductor dock: the panel sets --conductor-w
+              and the whole content column glides left instead of being covered */}
+          <div className="os-shell ml-[232px] flex min-h-screen min-w-0 flex-col" style={{ marginRight: 'var(--conductor-w, 0px)' }}>
+            <Topbar />
+            <main className="min-w-0 flex-1 px-8 pb-16 pt-7 wide:px-10 ultra:px-12">
+              {/* Width tiers: 1280 on laptops · 1760 on large monitors ·
+                  full-bleed on 32"/ultrawide. See tailwind screens wide/ultra. */}
+              <div className="mx-auto max-w-[1280px] wide:max-w-[1760px] ultra:max-w-none">
+                {children}
+              </div>
+            </main>
+          </div>
+          <CommandPalette commands={buildCommands()} />
+          {/* Notion-style agent dock — the Conductor, aware of the current screen */}
+          <ConductorPanel />
+        </ClientsProvider>
       </body>
     </html>
   );

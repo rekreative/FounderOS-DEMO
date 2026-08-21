@@ -1,25 +1,19 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
-import { getClients, initializeStoreIfNeeded } from '@/lib/clients';
+import { useClientsRegistry } from '@/components/ClientsProvider';
+import { LEAD_SCOPE_OPTIONS, LEAD_STAGE_OPTIONS, getClientNameForLead, type LeadIntent, type LeadScope, type LeadStage } from '@/lib/leads';
 import {
-  LEAD_SCOPE_OPTIONS,
-  LEAD_STAGE_OPTIONS,
   appendLeadEvent,
   createLead,
-  getClientNameForLead,
   getLeadEvents,
   getLeads,
-  initializeLeadsStoreIfNeeded,
   setLeadStage,
   updateLead,
   type Lead,
   type LeadEvent,
-  type LeadIntent,
-  type LeadScope,
-  type LeadStage,
-} from '@/lib/leads';
+} from '@/lib/api/leads';
 
 const STAGE_FILTERS = [{ id: 'all', label: 'Todos' }, ...LEAD_STAGE_OPTIONS];
 
@@ -97,7 +91,9 @@ function eventLabel(type: LeadEvent['type']): string {
 
 function LeadRow({
   lead,
+  clients,
   events,
+  eventsLoading,
   showClientColumn,
   columnCount,
   expanded,
@@ -107,7 +103,9 @@ function LeadRow({
   onAddNote,
 }: {
   lead: Lead;
+  clients: { id: string; name: string }[];
   events: LeadEvent[];
+  eventsLoading: boolean;
   /** REKREATIVE scope: every row is already known to be internal, so the
    * Cliente column is redundant — hidden there, shown as-is in CLIENTES scope. */
   showClientColumn: boolean;
@@ -120,7 +118,7 @@ function LeadRow({
   onEdit: () => void;
   onAddNote: () => void;
 }) {
-  const clientName = getClientNameForLead(lead.clientId);
+  const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
 
   return (
@@ -255,9 +253,11 @@ function LeadRow({
 
             <div className="mb-2 flex items-center justify-between gap-3">
               <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Línea de tiempo</span>
-              <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">{events.length} eventos</span>
+              {!eventsLoading && <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">{events.length} eventos</span>}
             </div>
-            {events.length === 0 ? (
+            {eventsLoading ? (
+              <span className="font-mono text-[10px] text-os-dim">Cargando línea de tiempo…</span>
+            ) : events.length === 0 ? (
               <span className="font-mono text-[10px] text-os-dim">Sin eventos en la línea de tiempo.</span>
             ) : (
               // Its own horizontal scroll region — a long real history scrolls
@@ -287,8 +287,10 @@ function LeadRow({
 }
 
 export default function LeadsPage() {
-  const [clients, setClients] = useState<any[]>([]);
+  const { clients } = useClientsRegistry();
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Primary scope: REKREATIVE's own leads vs. client leads — conceptually
   // ABOVE client filtering, never a fake client. Defaults to REKREATIVE.
   // Local UI state only, same as every other filter here.
@@ -297,6 +299,8 @@ export default function LeadsPage() {
   const [clientFilter, setClientFilter] = useState<'all' | string>('all');
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [eventsByLeadId, setEventsByLeadId] = useState<Record<string, LeadEvent[]>>({});
+  const [eventsLoadingId, setEventsLoadingId] = useState<Record<string, boolean>>({});
   const [showCreate, setShowCreate] = useState(false);
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
   const [noteLeadId, setNoteLeadId] = useState<string | null>(null);
@@ -307,26 +311,52 @@ export default function LeadsPage() {
   // always load the full set (internal leads have no clientId to filter
   // by); the scope filter below narrows it. In CLIENTES scope, behavior is
   // unchanged from before scope existed.
-  const loadLeads = () => {
-    if (moduleScope === 'internal') {
-      setLeads(getLeads());
-      return;
+  const fetchLeads = useCallback(() => {
+    return moduleScope === 'internal' ? getLeads() : getLeads(clientFilter === 'all' ? {} : { clientId: clientFilter });
+  }, [moduleScope, clientFilter]);
+
+  // Async, cancellation-guarded: a rapid scope/client-filter change (or an
+  // unmount mid-flight) must never let a stale response overwrite a newer
+  // one — no flashing wrong data, and never fabricated fallback data on
+  // failure (an honest error state instead).
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    fetchLeads()
+      .then((result) => {
+        if (cancelled) return;
+        setLeads(result);
+        setLoading(false);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoadError(error instanceof Error ? error.message : 'No se pudieron cargar los leads.');
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchLeads]);
+
+  const reloadLeads = useCallback(async () => {
+    try {
+      const result = await fetchLeads();
+      setLeads(result);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'No se pudieron cargar los leads.');
     }
-    const activeClient = clientFilter === 'all' ? undefined : clientFilter;
-    setLeads(getLeads(activeClient));
-  };
+  }, [fetchLeads]);
 
-  useEffect(() => {
-    initializeStoreIfNeeded();
-    initializeLeadsStoreIfNeeded();
-    setClients(getClients());
-    setLeads(getLeads());
+  const refreshEventsForLead = useCallback(async (leadId: string) => {
+    try {
+      const events = await getLeadEvents(leadId);
+      setEventsByLeadId((prev) => ({ ...prev, [leadId]: events }));
+    } catch {
+      // Keep whatever timeline was already shown — a secondary refresh
+      // failing isn't worth surfacing over the row's main content.
+    }
   }, []);
-
-  useEffect(() => {
-    loadLeads();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientFilter, moduleScope]);
 
   // Scope filter — sits above search/stage. "Todos los clientes" (CLIENTES
   // scope, no client picked) must never include REKREATIVE's own leads;
@@ -402,61 +432,61 @@ export default function LeadsPage() {
     setDraft(emptyDraft(clients[0]?.id ?? ''));
   };
 
-  const submitLead = () => {
+  const submitLead = async () => {
     const scope: LeadScope = moduleScope;
     const clientId = scope === 'client' ? draft.clientId : null;
-    const normalized = {
-      scope,
-      clientId,
-      name: draft.name.trim(),
-      email: draft.email.trim() || null,
-      phone: draft.phone.trim() || null,
-      whatsapp: draft.whatsapp.trim() || null,
-      source: draft.source.trim() || 'Manual',
-      campaign: draft.campaign.trim() || null,
-      adCreative: draft.adCreative.trim() || null,
-      form: draft.form.trim() || null,
-      stage: draft.stage,
-    };
+    const name = draft.name.trim();
+    const email = draft.email.trim() || null;
+    const phone = draft.phone.trim() || null;
+    const whatsapp = draft.whatsapp.trim() || null;
+    const source = draft.source.trim() || 'Manual';
+    const campaign = draft.campaign.trim() || null;
+    const adCreative = draft.adCreative.trim() || null;
+    const form = draft.form.trim() || null;
 
-    if (!normalized.name || (scope === 'client' && !normalized.clientId)) {
+    if (!name || (scope === 'client' && !clientId)) {
       return;
     }
 
-    if (editingLeadId) {
-      const existing = leads.find((lead) => lead.id === editingLeadId);
-      const next = updateLead(editingLeadId, {
-        scope: normalized.scope,
-        clientId: normalized.clientId,
-        name: normalized.name,
-        email: normalized.email,
-        phone: normalized.phone,
-        whatsapp: normalized.whatsapp,
-        source: normalized.source,
-        campaign: normalized.campaign,
-        adCreative: normalized.adCreative,
-        form: normalized.form,
-        lastActivityAt: new Date().toISOString(),
-      });
-
-      if (existing && existing.stage !== normalized.stage) {
-        setLeadStage(editingLeadId, normalized.stage, 'manual');
+    try {
+      if (editingLeadId) {
+        // Business fields only — scope/clientId can't be changed once a
+        // lead exists (see lib/api/leads.ts's UpdateLeadInput); the create
+        // form's client selector is disabled in edit mode for this reason.
+        const existing = leads.find((lead) => lead.id === editingLeadId);
+        await updateLead(editingLeadId, { name, email, phone, whatsapp, source, campaign, adCreative, form });
+        if (existing && existing.stage !== draft.stage) {
+          await setLeadStage(editingLeadId, draft.stage);
+        }
+      } else {
+        await createLead({ scope, clientId, name, email, phone, whatsapp, source, campaign, adCreative, form, stage: draft.stage });
       }
-
-      if (next) {
-        loadLeads();
-      }
-    } else {
-      createLead(normalized);
-      loadLeads();
+      await reloadLeads();
+      closeForm();
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'No se pudo guardar el lead.');
     }
-
-    closeForm();
   };
 
-  const handleStageChange = (leadId: string, nextStage: LeadStage) => {
-    setLeadStage(leadId, nextStage, 'manual');
-    loadLeads();
+  const handleStageChange = async (leadId: string, nextStage: LeadStage) => {
+    try {
+      await setLeadStage(leadId, nextStage);
+      await reloadLeads();
+      await refreshEventsForLead(leadId);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'No se pudo cambiar la etapa.');
+    }
+  };
+
+  const handleToggle = (leadId: string) => {
+    setExpanded((prev) => ({ ...prev, [leadId]: !prev[leadId] }));
+    if (!eventsByLeadId[leadId] && !eventsLoadingId[leadId]) {
+      setEventsLoadingId((prev) => ({ ...prev, [leadId]: true }));
+      getLeadEvents(leadId)
+        .then((events) => setEventsByLeadId((prev) => ({ ...prev, [leadId]: events })))
+        .catch(() => setEventsByLeadId((prev) => ({ ...prev, [leadId]: [] })))
+        .finally(() => setEventsLoadingId((prev) => ({ ...prev, [leadId]: false })));
+    }
   };
 
   const handleAddManualNote = (leadId: string) => {
@@ -464,17 +494,17 @@ export default function LeadsPage() {
     setNoteDraft('');
   };
 
-  const submitNote = () => {
+  const submitNote = async () => {
     if (!noteLeadId || !noteDraft.trim()) return;
-    appendLeadEvent(noteLeadId, {
-      type: 'manual_note',
-      source: 'manual',
-      summary: noteDraft.trim(),
-      occurredAt: new Date().toISOString(),
-    });
-    loadLeads();
-    setNoteLeadId(null);
-    setNoteDraft('');
+    try {
+      await appendLeadEvent(noteLeadId, { summary: noteDraft.trim() });
+      await reloadLeads();
+      await refreshEventsForLead(noteLeadId);
+      setNoteLeadId(null);
+      setNoteDraft('');
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'No se pudo guardar la nota.');
+    }
   };
 
   return (
@@ -494,6 +524,10 @@ export default function LeadsPage() {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="mb-4 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{loadError}</div>
+      )}
 
       {/* Primary scope — REKREATIVE's own acquisition vs. client leads.
           Conceptually above every filter below; REKREATIVE is never a
@@ -581,7 +615,13 @@ export default function LeadsPage() {
             </tr>
           </thead>
           <tbody>
-            {visibleLeads.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan={columnCount} className="px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+                  Cargando leads…
+                </td>
+              </tr>
+            ) : visibleLeads.length === 0 ? (
               <tr>
                 <td colSpan={columnCount} className="px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
                   No hay leads que coincidan con estos filtros.
@@ -592,11 +632,13 @@ export default function LeadsPage() {
                 <LeadRow
                   key={lead.id}
                   lead={lead}
-                  events={getLeadEvents(lead.id)}
+                  clients={clients}
+                  events={eventsByLeadId[lead.id] ?? []}
+                  eventsLoading={Boolean(eventsLoadingId[lead.id])}
                   showClientColumn={showClientColumn}
                   columnCount={columnCount}
                   expanded={Boolean(expanded[lead.id])}
-                  onToggle={() => setExpanded((prev) => ({ ...prev, [lead.id]: !prev[lead.id] }))}
+                  onToggle={() => handleToggle(lead.id)}
                   onStageChange={(nextStage) => handleStageChange(lead.id, nextStage)}
                   onEdit={() => openEditForm(lead)}
                   onAddNote={() => handleAddManualNote(lead.id)}
@@ -623,8 +665,9 @@ export default function LeadsPage() {
                   <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
                   <select
                     value={draft.clientId}
+                    disabled={Boolean(editingLeadId)}
                     onChange={(event) => setDraft((prev) => ({ ...prev, clientId: event.target.value }))}
-                    className="w-full border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-text"
+                    className="w-full border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-text disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {clients.map((client) => (
                       <option key={client.id} value={client.id}>
@@ -632,6 +675,9 @@ export default function LeadsPage() {
                       </option>
                     ))}
                   </select>
+                  {editingLeadId && (
+                    <span className="mt-1 block font-mono text-[9px] text-os-dim">El cliente de un lead no se puede reasignar.</span>
+                  )}
                 </label>
               ) : (
                 <label className="col-span-2">
