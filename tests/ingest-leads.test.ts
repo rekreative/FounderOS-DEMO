@@ -274,6 +274,69 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('POST /api/ingest/leads (real Postgre
       const events = await query('SELECT id FROM lead_events WHERE lead_id = $1', [first.json.leadId]);
       expect(events.rowCount).toBe(1);
     });
+
+    it('with aiAnalysis: stamps ai_analyzed_at and appends lead_received then ai_analyzed (make, then openai)', async () => {
+      const { json } = await postAndTrack(
+        baseBody({
+          name: 'AI Analyzed Ingest',
+          aiAnalysis: { summary: 'Great fit', intent: 'hot', priority: 'high', qualification: { pain: 'x' } },
+        }),
+      );
+
+      const leadRow = await query('SELECT ai_analyzed_at FROM leads WHERE id = $1', [json.leadId]);
+      expect(leadRow.rows[0].ai_analyzed_at).not.toBeNull();
+
+      const events = await query('SELECT type, source FROM lead_events WHERE lead_id = $1 ORDER BY occurred_at ASC, created_at ASC', [
+        json.leadId,
+      ]);
+      expect(events.rows).toEqual([
+        { type: 'lead_received', source: 'make' },
+        { type: 'ai_analyzed', source: 'openai' },
+      ]);
+    });
+
+    it('without aiAnalysis: ai_analyzed_at stays null and only lead_received is appended', async () => {
+      const { json } = await postAndTrack(baseBody({ name: 'No AI Ingest' }));
+
+      const leadRow = await query('SELECT ai_analyzed_at FROM leads WHERE id = $1', [json.leadId]);
+      expect(leadRow.rows[0].ai_analyzed_at).toBeNull();
+
+      const events = await query('SELECT type FROM lead_events WHERE lead_id = $1', [json.leadId]);
+      expect(events.rows).toEqual([{ type: 'lead_received' }]);
+    });
+  });
+
+  describe('idempotency with AI analysis', () => {
+    it('same deliveryId replay with aiAnalysis: deduped, event count stays at 2', async () => {
+      const body = baseBody({
+        name: 'AI Delivery Replay',
+        aiAnalysis: { summary: 'Great fit', intent: 'hot', priority: 'high', qualification: null },
+      });
+      const first = await postAndTrack(body);
+      expect(first.res.status).toBe(201);
+
+      const second = await postAndTrack(body);
+      expect(second.res.status).toBe(200);
+      expect(second.json).toMatchObject({ deduped: true, leadId: first.json.leadId });
+
+      const events = await query('SELECT id FROM lead_events WHERE lead_id = $1', [first.json.leadId]);
+      expect(events.rowCount).toBe(2);
+    });
+
+    it('same external identity via a different deliveryId, with aiAnalysis: deduped, event count stays at 2', async () => {
+      const externalLeadId = `meta-lead-${rand()}`;
+      const aiAnalysis = { summary: 'Great fit', intent: 'hot', priority: 'high', qualification: null };
+
+      const first = await postAndTrack(baseBody({ externalLeadId, name: 'AI External A', aiAnalysis }));
+      expect(first.res.status).toBe(201);
+
+      const second = await postAndTrack(baseBody({ externalLeadId, name: 'AI External B', aiAnalysis }));
+      expect(second.res.status).toBe(200);
+      expect(second.json).toMatchObject({ deduped: true, leadId: first.json.leadId });
+
+      const events = await query('SELECT id FROM lead_events WHERE lead_id = $1', [first.json.leadId]);
+      expect(events.rowCount).toBe(2);
+    });
   });
 
   describe('security', () => {

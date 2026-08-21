@@ -518,6 +518,11 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
     const now = new Date();
     const source = input.source?.trim() || 'Manual';
     const campaign = nullableTrim(input.campaign);
+    // Presence of the object at all — not any individual field being
+    // populated — is what counts as "an AI analysis pass occurred". Make
+    // never supplies analyzedAt (IngestLeadBodySchema has no such field);
+    // this server-stamped `now` is the only source of truth for it.
+    const hasAiAnalysis = input.aiAnalysis != null;
 
     let insertResult;
     try {
@@ -549,7 +554,7 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
           input.aiAnalysis?.priority ?? null,
           input.aiAnalysis?.summary ?? null,
           input.aiAnalysis?.qualification ? JSON.stringify(input.aiAnalysis.qualification) : null,
-          input.aiAnalysis?.analyzedAt ?? null,
+          hasAiAnalysis ? now : null,
           input.qualificationAnswers ? JSON.stringify(input.qualificationAnswers) : null,
           input.appointmentDate ?? null,
           input.conversionValue ?? null,
@@ -585,6 +590,27 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
       details: { source, campaign, ingestionSource: input.ingestionSource, externalLeadId: input.externalLeadId ?? null },
       occurredAt: now,
     });
+
+    // Only on this fresh-insert path — a deduped replay (either idempotency
+    // branch above) returns before reaching here, so a retried delivery can
+    // never produce a second ai_analyzed event. Details stay minimal
+    // (intent/priority only): the full aiAnalysis payload already lives on
+    // the lead row itself, not duplicated into the event log.
+    if (hasAiAnalysis) {
+      await insertLeadEvent(client, {
+        leadId: id,
+        type: 'ai_analyzed',
+        source: 'openai',
+        summary: `${input.name.trim()} was analyzed by AI qualification`,
+        details: { intent: input.aiAnalysis?.intent ?? null, priority: input.aiAnalysis?.priority ?? null },
+        // +1ms, strictly after lead_received's `now` — both events land in
+        // the same transaction, so occurred_at (and often created_at too)
+        // would otherwise tie and fall back to listLeadEvents' id-order
+        // tiebreaker, which doesn't reflect business sequence. Does not
+        // affect ai_analyzed_at, which stays `now` on the lead row itself.
+        occurredAt: new Date(now.getTime() + 1),
+      });
+    }
 
     const finalRow = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1', [id]);
     return { lead: rowToLead(finalRow.rows[0]), event, deduped: false };

@@ -3,7 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { useClientsRegistry } from '@/components/ClientsProvider';
-import { LEAD_SCOPE_OPTIONS, LEAD_STAGE_OPTIONS, getClientNameForLead, type LeadIntent, type LeadScope, type LeadStage } from '@/lib/leads';
+import {
+  LEAD_SCOPE_OPTIONS,
+  LEAD_STAGE_OPTIONS,
+  getClientNameForLead,
+  type LeadIntent,
+  type LeadPriority,
+  type LeadScope,
+  type LeadStage,
+} from '@/lib/leads';
 import {
   appendLeadEvent,
   createLead,
@@ -24,6 +32,14 @@ const AI_INTENT_LABEL: Record<LeadIntent, string> = {
   hot: 'ALTA',
   warm: 'MEDIA',
   cold: 'BAJA',
+};
+
+// Same presentation convention as AI_INTENT_LABEL — never render the raw
+// 'low'/'medium'/'high' enum value in the UI.
+const AI_PRIORITY_LABEL: Record<LeadPriority, string> = {
+  high: 'ALTA',
+  medium: 'MEDIA',
+  low: 'BAJA',
 };
 
 type DraftLead = {
@@ -250,6 +266,72 @@ function LeadRow({
                 </div>
               </div>
             </div>
+
+            {/* What the lead actually submitted — rendered verbatim, never
+                rewritten or reinterpreted. Same neutral register as the
+                contact block above: this is raw input, not a machine
+                judgment. */}
+            {lead.qualificationAnswers && Object.keys(lead.qualificationAnswers).length > 0 && (
+              <div className="mb-3 border-b border-os-border pb-3">
+                <div className="mb-2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Respuestas del formulario</div>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  {Object.entries(lead.qualificationAnswers).map(([question, answer]) => (
+                    <div key={question} className="min-w-0">
+                      <div className="break-words font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">{question}</div>
+                      <div className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] text-os-text">{answer}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* AI-derived interpretation — visually flagged with the "IA"
+                accent tag (same accent tokens as the active scope/stage
+                filters above) so it never reads as if the lead submitted
+                this itself. */}
+            {lead.aiAnalysis && (
+              <div className="mb-3 border-b border-os-border pb-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Análisis IA</span>
+                  <span className="inline-block border border-[var(--accent-line)] bg-[var(--accent-soft)] px-1.5 py-0.5 font-mono text-[8.5px] uppercase tracking-wide text-os-accent">
+                    IA
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <div className="col-span-2 sm:col-span-3">
+                    <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Resumen</div>
+                    <div className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] text-os-text">
+                      {lead.aiAnalysis.summary || '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Intención</div>
+                    <div className="mt-1 font-mono text-[11px] text-os-text">
+                      {lead.aiAnalysis.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Prioridad</div>
+                    <div className="mt-1 font-mono text-[11px] text-os-text">
+                      {lead.aiAnalysis.priority ? AI_PRIORITY_LABEL[lead.aiAnalysis.priority] : '—'}
+                    </div>
+                  </div>
+                </div>
+                {lead.aiAnalysis.qualification && Object.keys(lead.aiAnalysis.qualification).length > 0 && (
+                  <div className="mt-3">
+                    <div className="mb-1.5 font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Evaluación IA</div>
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                      {Object.entries(lead.aiAnalysis.qualification).map(([key, value]) => (
+                        <div key={key} className="min-w-0">
+                          <div className="break-words font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">{key}</div>
+                          <div className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] text-os-text">{value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="mb-2 flex items-center justify-between gap-3">
               <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Línea de tiempo</span>

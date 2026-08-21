@@ -287,6 +287,91 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/leads-repo (real PostgreS
       expect(first.lead.id).not.toBe(second.lead.id);
     });
 
+    it('a fresh insert with aiAnalysis stamps ai_analyzed_at and appends lead_received then ai_analyzed', async () => {
+      const { lead } = await ingestLeadTransactional({
+        scope: 'internal',
+        name: 'AI Qualified Lead',
+        deliveryId: 'delivery-ai-1',
+        ingestionSource: 'meta',
+        externalLeadId: 'meta-lead-ai-1',
+        aiAnalysis: { summary: 'Great fit', intent: 'hot', priority: 'high', qualification: { pain: 'x' }, analyzedAt: null },
+      });
+      createdLeadIds.push(lead.id);
+
+      expect(lead.aiAnalysis?.analyzedAt).not.toBeNull();
+
+      const events = await listLeadEvents(lead.id);
+      expect(events.map((e) => e.type)).toEqual(['lead_received', 'ai_analyzed']);
+      expect(events[0].source).toBe('make');
+      expect(events[1].source).toBe('openai');
+    });
+
+    it('a fresh insert without aiAnalysis leaves ai_analyzed_at null and appends only lead_received', async () => {
+      const { lead } = await ingestLeadTransactional({
+        scope: 'internal',
+        name: 'No AI Lead',
+        deliveryId: 'delivery-no-ai-1',
+        ingestionSource: 'meta',
+        externalLeadId: 'meta-lead-no-ai-1',
+      });
+      createdLeadIds.push(lead.id);
+
+      expect(lead.aiAnalysis).toBeNull();
+
+      const events = await listLeadEvents(lead.id);
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('lead_received');
+    });
+
+    it('a deliveryId replay with aiAnalysis dedupes with no additional lead_received or ai_analyzed event', async () => {
+      const input = {
+        scope: 'internal' as const,
+        name: 'AI Replay Lead',
+        deliveryId: 'delivery-ai-replay',
+        ingestionSource: 'meta',
+        externalLeadId: 'meta-lead-ai-replay',
+        aiAnalysis: { summary: 'Great fit', intent: 'hot', priority: 'high', qualification: null, analyzedAt: null } as const,
+      };
+      const first = await ingestLeadTransactional(input);
+      createdLeadIds.push(first.lead.id);
+      expect(first.deduped).toBe(false);
+
+      const second = await ingestLeadTransactional(input);
+      expect(second.deduped).toBe(true);
+      expect(second.lead.id).toBe(first.lead.id);
+      expect(second.lead.aiAnalysis?.analyzedAt).toBe(first.lead.aiAnalysis?.analyzedAt);
+
+      const events = await listLeadEvents(first.lead.id);
+      expect(events.map((e) => e.type)).toEqual(['lead_received', 'ai_analyzed']);
+    });
+
+    it('the same upstream lead via a different delivery, with aiAnalysis, dedupes with no additional events', async () => {
+      const aiAnalysis = { summary: 'Great fit', intent: 'hot', priority: 'high', qualification: null, analyzedAt: null } as const;
+      const first = await ingestLeadTransactional({
+        scope: 'internal',
+        name: 'AI External Dedupe A',
+        deliveryId: 'delivery-ai-ext-A',
+        ingestionSource: 'meta',
+        externalLeadId: 'meta-lead-ai-ext',
+        aiAnalysis,
+      });
+      createdLeadIds.push(first.lead.id);
+
+      const second = await ingestLeadTransactional({
+        scope: 'internal',
+        name: 'AI External Dedupe B',
+        deliveryId: 'delivery-ai-ext-B',
+        ingestionSource: 'meta',
+        externalLeadId: 'meta-lead-ai-ext',
+        aiAnalysis,
+      });
+      expect(second.deduped).toBe(true);
+      expect(second.lead.id).toBe(first.lead.id);
+
+      const events = await listLeadEvents(first.lead.id);
+      expect(events.map((e) => e.type)).toEqual(['lead_received', 'ai_analyzed']);
+    });
+
     it('findByDeliveryId / findByExternalIdentity resolve what ingestLeadTransactional created', async () => {
       const { lead } = await ingestLeadTransactional({
         scope: 'internal',
