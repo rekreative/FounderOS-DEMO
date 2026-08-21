@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
-    "brain:docs": "tsx scripts/generate-brain-docs.ts"
+    "brain:docs": "tsx scripts/generate-brain-docs.ts",
+    "db:migrate": "tsx lib/server/migrate.ts"
   },
   "dependencies": {
     "@notionhq/client": "^5.22.0",
@@ -25,6 +26,7 @@
     "next": "^14.2.13",
     "node-ical": "^0.26.1",
     "nodemailer": "^9.0.1",
+    "pg": "^8.23.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "simple-icons": "^16.27.0",
@@ -35,6 +37,7 @@
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.5.5",
     "@types/nodemailer": "^8.0.1",
+    "@types/pg": "^8.23.1",
     "@types/react": "^18.3.8",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.20",
