@@ -1,5 +1,16 @@
 import { getClients } from '@/lib/clients';
 
+// REKREATIVE is the agency's own internal acquisition, never a client —
+// scope distinguishes "REKREATIVE's own campaigns" (internal, clientId
+// null) from "a client's campaigns" (client, clientId required). Same
+// invariant style as lib/leads.ts / lib/content-items.ts / lib/agents-ai.ts.
+// Never model REKREATIVE as a fake Client row.
+export const META_CAMPAIGN_SCOPE_OPTIONS = [
+  { id: 'internal', label: 'REKREATIVE' },
+  { id: 'client', label: 'Clientes' },
+] as const;
+export type MetaCampaignScope = (typeof META_CAMPAIGN_SCOPE_OPTIONS)[number]['id'];
+
 export const CAMPAIGN_STATUS_OPTIONS = [
   { id: 'active', label: 'Activa' },
   { id: 'paused', label: 'Pausada' },
@@ -29,7 +40,9 @@ export type MetaCampaignDataSource = 'demo' | 'manual' | 'meta_api';
 
 export type MetaCampaign = {
   id: string;
-  clientId: string;
+  scope: MetaCampaignScope;
+  /** Required when scope === 'client'; always null when scope === 'internal'. */
+  clientId: string | null;
   /** Future Meta campaign ID once the live Marketing API is wired. Null until then. */
   externalCampaignId: string | null;
 
@@ -58,7 +71,10 @@ export type MetaCampaign = {
 };
 
 export type CreateMetaCampaignInput = {
-  clientId: string;
+  /** Defaults to 'client' when omitted — preserves every existing call
+   * site's prior behavior (a required clientId) without a migration. */
+  scope?: MetaCampaignScope;
+  clientId?: string | null;
   externalCampaignId?: string | null;
   name: string;
   status?: MetaCampaignStatus;
@@ -78,13 +94,25 @@ export type CreateMetaCampaignInput = {
 
 const STORAGE_KEY = 'rek_meta_campaigns_v1';
 
+/** Safe read-time migration: every MetaCampaign persisted before `scope`
+ * existed (JSON.parse yields `undefined`) was, by definition, a client
+ * campaign — this repo had no internal-campaign concept until now.
+ * Backfilling here means existing seeded/manual data is never rewritten or
+ * lost, only the new field is filled in, the same way every time it's read
+ * (same pattern as lib/client-integration-requirements.ts's
+ * normalizeRequirement / lib/leads.ts's normalizeLead). */
+function normalizeCampaign(raw: MetaCampaign): MetaCampaign {
+  if (raw.scope === 'internal' || raw.scope === 'client') return raw;
+  return { ...raw, scope: 'client' };
+}
+
 function readStorage(): MetaCampaign[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.map(normalizeCampaign) : [];
   } catch (error) {
     console.error(`Failed to parse ${STORAGE_KEY} from localStorage`, error);
     return [];
@@ -102,6 +130,17 @@ function writeStorage(campaigns: MetaCampaign[]) {
 
 function isoNow(): string {
   return new Date().toISOString();
+}
+
+function assertScopeInvariant(scope: MetaCampaignScope, clientId: string | null): void {
+  if (scope === 'client') {
+    if (!clientId) {
+      throw new Error('A client-scoped campaign requires a clientId');
+    }
+    if (!getClients().some((client) => client.id === clientId)) {
+      throw new Error('Cannot create campaign for a missing client id');
+    }
+  }
 }
 
 // Seed / demo data — intentionally obvious to be replaced by a live Meta
@@ -125,6 +164,7 @@ function seedDemoCampaigns(): MetaCampaign[] {
   return [
     {
       id: 'campaign-demo-1',
+      scope: 'client',
       clientId: 'client-acme',
       externalCampaignId: null,
       name: 'Acme Spring Retargeting',
@@ -146,6 +186,7 @@ function seedDemoCampaigns(): MetaCampaign[] {
     },
     {
       id: 'campaign-demo-2',
+      scope: 'client',
       clientId: 'client-acme',
       externalCampaignId: null,
       name: 'Acme New Client Offer',
@@ -167,6 +208,7 @@ function seedDemoCampaigns(): MetaCampaign[] {
     },
     {
       id: 'campaign-demo-3',
+      scope: 'client',
       clientId: 'client-northwind',
       externalCampaignId: null,
       name: 'Northwind Brand Awareness',
@@ -188,6 +230,7 @@ function seedDemoCampaigns(): MetaCampaign[] {
     },
     {
       id: 'campaign-demo-4',
+      scope: 'client',
       clientId: 'client-northwind',
       externalCampaignId: null,
       name: 'Northwind Retainer Funnel',
@@ -209,6 +252,7 @@ function seedDemoCampaigns(): MetaCampaign[] {
     },
     {
       id: 'campaign-demo-5',
+      scope: 'client',
       clientId: 'client-lumen',
       externalCampaignId: null,
       name: 'Lumen Launch Offer Reel',
@@ -230,6 +274,7 @@ function seedDemoCampaigns(): MetaCampaign[] {
     },
     {
       id: 'campaign-demo-6',
+      scope: 'client',
       clientId: 'client-lumen',
       externalCampaignId: null,
       name: 'Lumen Consulting Video Ad',
@@ -244,6 +289,30 @@ function seedDemoCampaigns(): MetaCampaign[] {
       clicks: 720,
       leads: 9,
       startDate: daysAgo(12),
+      endDate: null,
+      createdAt,
+      updatedAt: daysAgo(0),
+      dataSource: 'demo',
+    },
+    // REKREATIVE's own internal acquisition — never a client. scope:
+    // 'internal', clientId: null. Feeds lead-internal-1/2 in lib/leads.ts.
+    {
+      id: 'campaign-internal-1',
+      scope: 'internal',
+      clientId: null,
+      externalCampaignId: null,
+      name: 'REKREATIVE — Captación Centros de Psicología',
+      status: 'active',
+      objective: 'leads',
+      budgetType: 'daily',
+      dailyBudget: 45,
+      lifetimeBudget: null,
+      spend: 1120,
+      impressions: 62000,
+      reach: 38000,
+      clicks: 940,
+      leads: 14,
+      startDate: daysAgo(18),
       endDate: null,
       createdAt,
       updatedAt: daysAgo(0),
@@ -268,6 +337,10 @@ export function initializeMetaCampaignsStoreIfNeeded(): MetaCampaign[] {
   return existing;
 }
 
+/** No clientId → every campaign (internal + client — see META ADS-scope
+ * filtering in app/meta-ads/page.tsx). A clientId → only that client's own
+ * campaigns (never internal, never another client's) — the exact contract
+ * Client Workspace's ClientMetaAdsPanel relies on for isolation. */
 export function getCampaigns(clientId?: string): MetaCampaign[] {
   const campaigns = readStorage();
   const result = !clientId ? campaigns : campaigns.filter((campaign) => campaign.clientId === clientId);
@@ -279,16 +352,15 @@ export function getCampaignById(id: string): MetaCampaign | null {
 }
 
 export function createCampaign(input: CreateMetaCampaignInput): MetaCampaign {
-  const clients = getClients();
-  const clientExists = clients.some((client) => client.id === input.clientId);
-  if (!clientExists) {
-    throw new Error('Cannot create campaign for a missing client id');
-  }
+  const scope: MetaCampaignScope = input.scope ?? 'client';
+  const clientId = scope === 'client' ? input.clientId ?? null : null;
+  assertScopeInvariant(scope, clientId);
 
   const now = isoNow();
   const created: MetaCampaign = {
     id: `campaign-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    clientId: input.clientId,
+    scope,
+    clientId,
     externalCampaignId: input.externalCampaignId ?? null,
     name: input.name.trim(),
     status: input.status ?? 'draft',
@@ -318,32 +390,31 @@ export function updateCampaign(id: string, patch: Partial<Omit<MetaCampaign, 'id
   const index = campaigns.findIndex((campaign) => campaign.id === id);
   if (index === -1) return null;
 
-  if (patch.clientId) {
-    const clients = getClients();
-    const clientExists = clients.some((client) => client.id === patch.clientId);
-    if (!clientExists) {
-      throw new Error('Cannot move campaign to a missing client id');
-    }
-  }
-
-  const updated: MetaCampaign = {
+  const merged: MetaCampaign = {
     ...campaigns[index],
     ...patch,
     updatedAt: isoNow(),
   };
 
-  campaigns[index] = updated;
+  if (merged.scope === 'internal') {
+    merged.clientId = null;
+  } else {
+    assertScopeInvariant(merged.scope, merged.clientId);
+  }
+
+  campaigns[index] = merged;
   writeStorage(campaigns);
-  return updated;
+  return merged;
 }
 
 export function setCampaignStatus(id: string, status: MetaCampaignStatus): MetaCampaign | null {
   return updateCampaign(id, { status });
 }
 
-export function getClientNameForCampaign(clientId: string): string {
+export function getClientNameForCampaign(clientId: string | null): string {
+  if (!clientId) return 'Interno';
   const client = getClients().find((item) => item.id === clientId);
-  return client?.name ?? 'Unknown client';
+  return client?.name ?? 'Cliente desconocido';
 }
 
 export function getStatusLabel(status: MetaCampaignStatus): string {

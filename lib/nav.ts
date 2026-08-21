@@ -75,14 +75,13 @@ export const NAV_SYSTEM: NavItem[] = [
 // At the very bottom: persona templates that can run variants of this platform.
 export const NAV_LIBRARY: NavItem[] = [{ href: '/personas', label: 'Personas', icon: Layers }];
 
-/** Visible top-to-bottom order across all groups. */
-export const NAV_ORDER: string[] = [
-  ...NAV_OPERATE,
-  ...NAV_AGENTS,
-  ...NAV_INTELLIGENCE,
-  ...NAV_SYSTEM,
-  ...NAV_LIBRARY,
-].map((n) => n.href);
+/** Visible top-to-bottom order — REKREATIVE's primary rail only. The legacy
+ * FounderOS groups above (NAV_OPERATE/NAV_AGENTS/NAV_INTELLIGENCE/NAV_SYSTEM/
+ * NAV_LIBRARY) stay defined for internal/legacy screens but must never feed
+ * digit shortcuts or the command palette again — REKREATIVE_PRIMARY is the
+ * single source of truth for both, so the two can never drift apart or
+ * resurface a legacy route. */
+export const NAV_ORDER: string[] = REKREATIVE_PRIMARY.map((n) => n.href);
 
-/** Digit keys 1–9 jump to the first nine views in visible order. */
+/** Digit keys 1–9 jump to the first nine REKREATIVE views in visible order. */
 export const DIGIT_VIEWS: string[] = NAV_ORDER.slice(0, 9);

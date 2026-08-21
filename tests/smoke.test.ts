@@ -2,6 +2,9 @@ import { beforeAll, describe, expect, test } from 'vitest';
 import { mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 
 // Pages read the DB path at first access, so point it at a fresh seeded temp DB
 // before any page module is imported. FUNNEL_PROVIDER keeps /funnel off the
@@ -18,11 +21,27 @@ type PageEntry = {
   // remain assignable to this generic invoker.
   load: () => Promise<{ default: (props?: any) => unknown }>;
   props?: unknown;
+  /** 'use client' pages that call hooks directly (useState/useEffect/
+   * useRouter) can't be invoked as a plain function — React's dispatcher
+   * only exists inside an actual render. These render through React instead
+   * of the direct-call trick server/wrapper pages use below. */
+  client?: boolean;
+};
+
+// A minimal, inert router so `useRouter()` (only called by
+// ClientDetailPage's delete flow) doesn't throw for lack of a provider.
+const mockRouter = {
+  back() {},
+  forward() {},
+  refresh() {},
+  push() {},
+  replace() {},
+  prefetch() {},
 };
 
 // Every app/**/page.tsx, with the props each needs to be invoked.
 const PAGES: PageEntry[] = [
-  { file: 'page.tsx', load: () => import('@/app/page') },
+  { file: 'page.tsx', load: () => import('@/app/page'), client: true },
   { file: 'comms/page.tsx', load: () => import('@/app/comms/page') },
   { file: 'social/page.tsx', load: () => import('@/app/social/page') },
   { file: 'social/[platform]/page.tsx', load: () => import('@/app/social/[platform]/page'), props: { params: { platform: 'instagram' } } },
@@ -43,6 +62,16 @@ const PAGES: PageEntry[] = [
   { file: 'analytics/page.tsx', load: () => import('@/app/analytics/page') },
   { file: 'reference/page.tsx', load: () => import('@/app/reference/page') },
   { file: 'personas/page.tsx', load: () => import('@/app/personas/page') },
+  // REKREATIVE pages (2026-08-20 QA pass — these were missing from the net entirely).
+  { file: 'clients/page.tsx', load: () => import('@/app/clients/page'), client: true },
+  { file: 'clients/[clientId]/page.tsx', load: () => import('@/app/clients/[clientId]/page'), props: { params: { clientId: 'client-acme' } }, client: true },
+  { file: 'clients/[clientId]/results/page.tsx', load: () => import('@/app/clients/[clientId]/results/page'), props: { params: { clientId: 'client-acme' } } },
+  { file: 'leads/page.tsx', load: () => import('@/app/leads/page'), client: true },
+  { file: 'meta-ads/page.tsx', load: () => import('@/app/meta-ads/page'), client: true },
+  { file: 'automations/page.tsx', load: () => import('@/app/automations/page') },
+  { file: 'ai-agents/page.tsx', load: () => import('@/app/ai-agents/page') },
+  { file: 'connections/page.tsx', load: () => import('@/app/connections/page') },
+  { file: 'results/page.tsx', load: () => import('@/app/results/page') },
 ];
 
 function discoverPages(dir: string, base = ''): string[] {
@@ -57,14 +86,28 @@ function discoverPages(dir: string, base = ''): string[] {
 
 describe('platform smoke — every page renders without throwing', () => {
   // 20s: pages that shell out to the gbrain CLI or distill the brain-store
-  // (/, /brain) legitimately exceed vitest's 5s default under a loaded
+  // (/brain) legitimately exceed vitest's 5s default under a loaded
   // parallel suite — this is a does-it-throw net, not a performance gate.
-  test.each(PAGES)('$file renders', async ({ load, props }) => {
+  test.each(PAGES)('$file renders', async ({ load, props, client }) => {
     const mod = await load();
     const Page = mod.default;
-    // Server components run their body (DB reads, data fetch) when invoked;
-    // a throw here is exactly the failure we want to catch.
-    await expect(Promise.resolve(Page(props))).resolves.toBeTruthy();
+    if (client) {
+      // 'use client' pages call hooks directly, so they need React's real
+      // dispatcher — renderToStaticMarkup gives every child component one
+      // without needing jsdom (useEffect simply never fires, same as any
+      // other SSR pass). A mock AppRouterContext covers the one hook
+      // (useRouter, in ClientDetailPage) that would otherwise throw for
+      // lack of a provider; next/link degrades gracefully without one.
+      expect(() =>
+        renderToStaticMarkup(
+          createElement(AppRouterContext.Provider, { value: mockRouter as any }, createElement(Page as any, props as any)),
+        ),
+      ).not.toThrow();
+    } else {
+      // Server components run their body (DB reads, data fetch) when invoked;
+      // a throw here is exactly the failure we want to catch.
+      await expect(Promise.resolve(Page(props))).resolves.toBeTruthy();
+    }
   }, 20_000);
 
   test('the smoke net covers every app/**/page.tsx (no page escapes)', () => {

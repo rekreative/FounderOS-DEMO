@@ -177,10 +177,13 @@ export type SourceAcquisitionRow = {
 
 /** Grouped by Lead.source (CRM, free-text) — never MetaCampaign.leads
  * (platform-side, lifetime-cumulative). These two lead counts must never be
- * summed or compared 1:1. */
+ * summed or compared 1:1. Client-portfolio only: REKREATIVE's own
+ * scope==='internal' leads are excluded — this is a client-portfolio
+ * Analytics view, never a mix of REKREATIVE's own acquisition. */
 export function buildAcquisitionBySource(leads: Lead[], events: LeadEvent[]): SourceAcquisitionRow[] {
+  const clientLeads = leads.filter((lead) => lead.scope === 'client');
   const bySource = new Map<string, Lead[]>();
-  for (const lead of leads) {
+  for (const lead of clientLeads) {
     const key = lead.source.trim() || 'Sin origen';
     const list = bySource.get(key);
     if (list) list.push(lead);
@@ -211,13 +214,14 @@ export type LeadIntentDistribution = {
 
 /** "Analyzed" means an aiAnalysis record exists at all — unanalyzed leads are
  * reported as their own honest bucket, never guessed into an intent/priority
- * bucket. */
+ * bucket. Client-portfolio only — see buildAcquisitionBySource. */
 export function buildLeadIntentDistribution(leads: Lead[]): LeadIntentDistribution {
+  const clientLeads = leads.filter((lead) => lead.scope === 'client');
   let analyzed = 0;
   const intentCounts = new Map<LeadIntent, number>();
   const priorityCounts = new Map<LeadPriority, number>();
 
-  for (const lead of leads) {
+  for (const lead of clientLeads) {
     if (!lead.aiAnalysis) continue;
     analyzed += 1;
     if (lead.aiAnalysis.intent) {
@@ -230,7 +234,7 @@ export function buildLeadIntentDistribution(leads: Lead[]): LeadIntentDistributi
 
   return {
     analyzed,
-    unanalyzed: leads.length - analyzed,
+    unanalyzed: clientLeads.length - analyzed,
     byIntent: [...intentCounts.entries()].map(([intent, count]) => ({ intent, count })),
     byPriority: [...priorityCounts.entries()].map(([priority, count]) => ({ priority, count })),
   };
@@ -250,17 +254,26 @@ export type AutomationsOperationalSummary = {
   byType: { type: AutomationType; count: number }[];
 };
 
+/** Client operational health only — REKREATIVE's own scope==='internal'
+ * automations (and their runs) are excluded from this client-portfolio
+ * summary. `runs` is filtered to only the runs belonging to a client-scoped
+ * automation, so an internal automation's run history never inflates the
+ * portfolio's success-rate/run-count either. */
 export function buildAutomationsOperationalSummary(
   automations: Automation[],
   runs: AutomationRun[],
 ): AutomationsOperationalSummary {
+  const clientAutomations = automations.filter((automation) => automation.scope === 'client');
+  const clientAutomationIds = new Set(clientAutomations.map((automation) => automation.id));
+  const clientRuns = runs.filter((run) => clientAutomationIds.has(run.automationId));
+
   let healthy = 0;
   let needsAttention = 0;
   let neverRun = 0;
   const platformCounts = new Map<AutomationPlatform, number>();
   const typeCounts = new Map<AutomationType, number>();
 
-  for (const automation of automations) {
+  for (const automation of clientAutomations) {
     const health = getAutomationHealth(automation);
     if (health === 'healthy') healthy += 1;
     else if (health === 'needs_attention') needsAttention += 1;
@@ -273,11 +286,11 @@ export function buildAutomationsOperationalSummary(
   }
 
   return {
-    total: automations.length,
+    total: clientAutomations.length,
     healthy,
     needsAttention,
     neverRun,
-    runStats: getAutomationRunStats(runs),
+    runStats: getAutomationRunStats(clientRuns),
     byPlatform: [...platformCounts.entries()].map(([platform, count]) => ({ platform, count })).sort((a, b) => b.count - a.count),
     byType: [...typeCounts.entries()].map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count),
   };
@@ -300,7 +313,10 @@ export type AiAgentsConfigurationSummary = {
   byUseCase: { useCase: AiAgentUseCase; count: number }[];
 };
 
+/** Client portfolio configuration only — REKREATIVE's own scope==='internal'
+ * agents are excluded from this summary. */
 export function buildAiAgentsConfigurationSummary(agents: AiAgent[]): AiAgentsConfigurationSummary {
+  const clientAgents = agents.filter((agent) => agent.scope === 'client');
   let active = 0;
   let paused = 0;
   let draft = 0;
@@ -310,7 +326,7 @@ export function buildAiAgentsConfigurationSummary(agents: AiAgent[]): AiAgentsCo
   const channelCounts = new Map<AiAgentChannel, number>();
   const useCaseCounts = new Map<AiAgentUseCase, number>();
 
-  for (const agent of agents) {
+  for (const agent of clientAgents) {
     if (agent.status === 'active') active += 1;
     else if (agent.status === 'paused') paused += 1;
     else draft += 1;
@@ -324,7 +340,7 @@ export function buildAiAgentsConfigurationSummary(agents: AiAgent[]): AiAgentsCo
   }
 
   return {
-    total: agents.length,
+    total: clientAgents.length,
     active,
     paused,
     draft,
@@ -401,17 +417,22 @@ export type CampaignPortfolioMix = {
   byObjective: { objective: MetaCampaignObjective; count: number }[];
 };
 
+/** Client campaign context only — REKREATIVE's own scope==='internal'
+ * acquisition campaign is excluded. This section is deliberately
+ * "contexto, sin gasto" for the client portfolio, never REKREATIVE's own
+ * acquisition. */
 export function buildCampaignPortfolioMix(campaigns: MetaCampaign[]): CampaignPortfolioMix {
+  const clientCampaigns = campaigns.filter((campaign) => campaign.scope === 'client');
   const statusCounts = new Map<MetaCampaignStatus, number>();
   const objectiveCounts = new Map<MetaCampaignObjective, number>();
 
-  for (const campaign of campaigns) {
+  for (const campaign of clientCampaigns) {
     statusCounts.set(campaign.status, (statusCounts.get(campaign.status) ?? 0) + 1);
     objectiveCounts.set(campaign.objective, (objectiveCounts.get(campaign.objective) ?? 0) + 1);
   }
 
   return {
-    total: campaigns.length,
+    total: clientCampaigns.length,
     byStatus: [...statusCounts.entries()].map(([status, count]) => ({ status, count })),
     byObjective: [...objectiveCounts.entries()].map(([objective, count]) => ({ objective, count })),
   };
@@ -481,52 +502,65 @@ export function buildOpportunitiesFeed(input: {
     });
   }
 
-  // Automations needing attention, or active but never run.
+  // Automations needing attention, or active but never run. Client-portfolio
+  // findings only — REKREATIVE's own internal automations never generate a
+  // client-portfolio risk, no matter their health.
   for (const automation of automations) {
+    if (automation.scope === 'internal') continue;
     const health = getAutomationHealth(automation);
+    const owner = nameOf(automation.clientId ?? '');
     if (health === 'needs_attention') {
       findings.push({
         id: `automation-attention-${automation.id}`,
         category: 'automation_needs_attention',
         clientId: automation.clientId,
-        clientName: nameOf(automation.clientId),
-        message: `La automatización "${automation.name}" (${nameOf(automation.clientId)}) requiere atención: su última ejecución falló.`,
+        clientName: owner,
+        message: `La automatización "${automation.name}" (${owner}) requiere atención: su última ejecución falló.`,
       });
     } else if (health === 'never_run' && automation.status === 'active') {
       findings.push({
         id: `automation-never-run-${automation.id}`,
         category: 'automation_never_run',
         clientId: automation.clientId,
-        clientName: nameOf(automation.clientId),
-        message: `La automatización "${automation.name}" (${nameOf(automation.clientId)}) está activa pero no registra ninguna ejecución.`,
+        clientName: owner,
+        message: `La automatización "${automation.name}" (${owner}) está activa pero no registra ninguna ejecución.`,
       });
     }
   }
 
   // Active AI agents with incomplete configuration (draft agents are
   // expected to be incomplete while being set up — not flagged).
+  // Client-portfolio findings only — REKREATIVE's own internal agents never
+  // generate a client-portfolio risk.
   for (const agent of agents) {
+    if (agent.scope === 'internal') continue;
     if (agent.status !== 'active') continue;
     if (getAiAgentConfigurationStatus(agent) !== 'incomplete') continue;
-    const owner = agent.scope === 'internal' ? 'REKREATIVE (interno)' : nameOf(agent.clientId ?? '');
+    const owner = nameOf(agent.clientId ?? '');
     findings.push({
       id: `agent-incomplete-${agent.id}`,
       category: 'agent_config_incomplete',
-      clientId: agent.scope === 'internal' ? null : agent.clientId,
-      clientName: agent.scope === 'internal' ? null : owner,
+      clientId: agent.clientId,
+      clientName: owner,
       message: `El agente de IA "${agent.name}" (${owner}) está activo con configuración incompleta.`,
     });
   }
 
-  // Connections with a failed verification.
+  // Connections with a failed verification. Client-owned connections only —
+  // a REKREATIVE-internal shared connection's own verification issue is
+  // REKREATIVE's own operational risk, not a client-portfolio one; it can
+  // still surface for a client, but only through the existing valid
+  // requirement-satisfaction path above (integration_requirement_pending),
+  // never as its own standalone "internal connection failed" finding here.
   for (const connection of connections) {
+    if (connection.scope === 'internal') continue;
     if (connection.verificationStatus !== 'failed') continue;
-    const owner = connection.scope === 'internal' ? 'REKREATIVE (interno)' : nameOf(connection.clientId ?? '');
+    const owner = nameOf(connection.clientId ?? '');
     findings.push({
       id: `connection-failed-${connection.id}`,
       category: 'integration_verification_failed',
-      clientId: connection.scope === 'internal' ? null : connection.clientId,
-      clientName: connection.scope === 'internal' ? null : owner,
+      clientId: connection.clientId,
+      clientName: owner,
       message: `La conexión "${connection.name}" (${owner}) tiene una incidencia de verificación.`,
     });
   }
@@ -538,7 +572,15 @@ export function buildOpportunitiesFeed(input: {
 // Only MetaCampaign/Automation/AiAgent/IntegrationConnection carry a
 // dataSource field among the sources Analytics touches — Client and Lead do
 // not (same documented limitation as lib/results.ts's includesDemoData).
-
+//
+// Campaigns/automations/agents are checked client-scope only, matching what
+// this module actually renders for the client portfolio — a demo-sourced
+// REKREATIVE-internal record (excluded from every metric above) must never
+// be the sole reason this badge shows. Connections are deliberately left
+// unfiltered: internal/shared connections DO still visibly affect the
+// Integraciones section (verification counts, onboarding coverage via the
+// shared-connection exception), so their demo-ness is honestly "used by
+// Analytics" here too.
 export function includesDemoPortfolioData(input: {
   campaigns?: MetaCampaign[];
   automations?: Automation[];
@@ -546,9 +588,9 @@ export function includesDemoPortfolioData(input: {
   connections?: IntegrationConnection[];
 }): boolean {
   return (
-    (input.campaigns ?? []).some((campaign) => campaign.dataSource === 'demo') ||
-    (input.automations ?? []).some((automation) => automation.dataSource === 'demo') ||
-    (input.agents ?? []).some((agent) => agent.dataSource === 'demo') ||
+    (input.campaigns ?? []).some((campaign) => campaign.scope === 'client' && campaign.dataSource === 'demo') ||
+    (input.automations ?? []).some((automation) => automation.scope === 'client' && automation.dataSource === 'demo') ||
+    (input.agents ?? []).some((agent) => agent.scope === 'client' && agent.dataSource === 'demo') ||
     (input.connections ?? []).some((connection) => connection.dataSource === 'demo')
   );
 }

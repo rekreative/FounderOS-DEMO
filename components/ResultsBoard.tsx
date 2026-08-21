@@ -193,8 +193,18 @@ export function ResultsBoard() {
           overview stays a summary, not another dense operational table. */}
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="border border-os-border bg-os-surface p-4">
-          <SectionHead label="Funnel comercial · agencia" />
-          <FunnelBars stages={globalFunnelStages} />
+          {/* "Hitos comerciales" (milestones), not a strict sequential
+              funnel: these are summed across every client's own cohort, so
+              e.g. "Asistidas" and "Conversiones" are independent axes (see
+              lib/results.ts's buildLeadFunnel) that can make a later
+              milestone exceed an earlier one — an adjacent-stage percentage
+              here could render an impossible rate like "200%". Counts stay
+              fully visible; only the misleading rate labels are omitted
+              (showRates={false}). Per-client dashboards keep their existing
+              funnel + rates unchanged (a single client's own cohort makes
+              that framing legitimate there). */}
+          <SectionHead label="Hitos comerciales · clientes" />
+          <FunnelBars stages={globalFunnelStages} showRates={false} />
         </div>
         <div className="flex flex-col gap-4">
           <div className="border border-os-border bg-os-surface p-4">

@@ -22,7 +22,7 @@ export function NewLeadMagnet() {
     url: '',
     offer: '',
     source: '',
-    destination: 'Newsletter · main list',
+    destination: 'Newsletter · lista principal',
     captures: 'email',
     status: 'live',
     launchedAt: today,
@@ -47,7 +47,7 @@ export function NewLeadMagnet() {
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: unknown };
-        setError(typeof body.error === 'string' ? body.error : 'Check the name and the URL.');
+        setError(typeof body.error === 'string' ? body.error : 'Revisa el nombre y la URL.');
         return;
       }
       const body = (await res.json()) as { leadMagnet?: { name?: string } };
@@ -56,7 +56,7 @@ export function NewLeadMagnet() {
       setOpen(false);
       router.refresh(); // the table is a server component; pull the new row
     } catch {
-      setError('Network error. Try again.');
+      setError('Error de red. Inténtalo de nuevo.');
     } finally {
       setBusy(false);
     }
@@ -75,11 +75,11 @@ export function NewLeadMagnet() {
           }}
           className="flex items-center gap-1.5 rounded-sm-t border border-os-border bg-os-surface px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-widest text-os-accent transition-colors hover:border-os-border-strong"
         >
-          <Plus className="h-3 w-3" /> New lead magnet
+          <Plus className="h-3 w-3" /> Nuevo lead magnet
         </button>
         {done && (
           <span className="font-mono text-[10.5px] text-os-ok">
-            Added {done} to the register.
+            Se añadió {done} al registro.
           </span>
         )}
       </div>
@@ -89,62 +89,62 @@ export function NewLeadMagnet() {
   return (
     <form onSubmit={submit} className="mb-4 rounded-lg-t border border-os-border bg-os-surface p-4">
       <div className="mb-3 flex items-center">
-        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-os-dim">Register a page</span>
-        <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="ml-auto text-os-dim hover:text-os-text">
+        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-os-dim">Registrar una página</span>
+        <button type="button" onClick={() => setOpen(false)} aria-label="Cerrar" className="ml-auto text-os-dim hover:text-os-text">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <label className={label} htmlFor="lm-name">Name</label>
-          <input id="lm-name" className={field} value={form.name} onChange={set('name')} required placeholder="The Operator Teardown" />
+          <label className={label} htmlFor="lm-name">Nombre</label>
+          <input id="lm-name" className={field} value={form.name} onChange={set('name')} required placeholder="Guía del embudo Meta Ads" />
         </div>
         <div>
-          <label className={label} htmlFor="lm-url">Live URL</label>
+          <label className={label} htmlFor="lm-url">URL en vivo</label>
           <input id="lm-url" className={field} value={form.url} onChange={set('url')} required type="url" placeholder="https://…" />
         </div>
         <div className="sm:col-span-2">
-          <label className={label} htmlFor="lm-offer">What they get</label>
-          <input id="lm-offer" className={field} value={form.offer} onChange={set('offer')} placeholder="The workflow pulled apart, step by step" />
+          <label className={label} htmlFor="lm-offer">Qué reciben</label>
+          <input id="lm-offer" className={field} value={form.offer} onChange={set('offer')} placeholder="El proceso explicado paso a paso" />
         </div>
         <div>
-          <label className={label} htmlFor="lm-source">Campaign it was built for</label>
-          <input id="lm-source" className={field} value={form.source} onChange={set('source')} placeholder="Short (comment TEARDOWN)" />
+          <label className={label} htmlFor="lm-source">Campaña para la que se creó</label>
+          <input id="lm-source" className={field} value={form.source} onChange={set('source')} placeholder="Ej: comenta GUÍA" />
         </div>
         <div>
-          <label className={label} htmlFor="lm-dest">Where leads land</label>
+          <label className={label} htmlFor="lm-dest">Dónde llegan los leads</label>
           <input id="lm-dest" className={field} value={form.destination} onChange={set('destination')} />
         </div>
         <div>
-          <label className={label} htmlFor="lm-captures">Captures</label>
+          <label className={label} htmlFor="lm-captures">Captura</label>
           <select id="lm-captures" className={field} value={form.captures} onChange={set('captures')}>
             <option value="email">Email</option>
-            <option value="booking">Booking</option>
-            <option value="none">Nothing yet</option>
+            <option value="booking">Reserva</option>
+            <option value="none">Aún nada</option>
           </select>
         </div>
         <div>
-          <label className={label} htmlFor="lm-launched">Went live</label>
+          <label className={label} htmlFor="lm-launched">Fecha de publicación</label>
           <input id="lm-launched" className={field} type="date" value={form.launchedAt} onChange={set('launchedAt')} />
         </div>
         <div>
-          <label className={label} htmlFor="lm-status">Status</label>
+          <label className={label} htmlFor="lm-status">Estado</label>
           <select id="lm-status" className={field} value={form.status} onChange={set('status')}>
-            <option value="live">Live</option>
-            <option value="draft">Draft</option>
-            <option value="paused">Paused</option>
-            <option value="archived">Archived</option>
+            <option value="live">Activo</option>
+            <option value="draft">Borrador</option>
+            <option value="paused">Pausado</option>
+            <option value="archived">Archivado</option>
           </select>
         </div>
         <div className="sm:col-span-2">
-          <label className={label} htmlFor="lm-notes">Notes</label>
+          <label className={label} htmlFor="lm-notes">Notas</label>
           <textarea
             id="lm-notes"
             rows={2}
             className={`${field} resize-y`}
             value={form.notes}
             onChange={set('notes')}
-            placeholder="Anything future-you needs to know: what is gated, what still needs wiring, which automation feeds it"
+            placeholder="Cualquier cosa que el futuro tú necesite saber: qué está gateado, qué falta por conectar, qué automatización lo alimenta"
           />
         </div>
       </div>
@@ -154,7 +154,7 @@ export function NewLeadMagnet() {
         disabled={busy}
         className="mt-3 rounded-sm-t border border-os-border bg-os-surface2 px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-widest text-os-accent transition-colors hover:border-os-border-strong disabled:opacity-40"
       >
-        {busy ? 'saving…' : 'add to the register'}
+        {busy ? 'guardando…' : 'añadir al registro'}
       </button>
     </form>
   );

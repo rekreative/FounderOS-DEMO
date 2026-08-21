@@ -44,6 +44,7 @@ import type { MetaCampaign } from '@/lib/meta-ads';
 
 function makeLead(overrides: Partial<Lead> & Pick<Lead, 'id' | 'clientId' | 'stage' | 'createdAt'>): Lead {
   return {
+    scope: 'client',
     name: 'Test Lead',
     email: null,
     phone: null,
@@ -88,6 +89,7 @@ function makeRevenueRecord(overrides: Partial<RevenueRecord> & Pick<RevenueRecor
 function makeCampaign(overrides: Partial<MetaCampaign> & Pick<MetaCampaign, 'clientId' | 'spend'>): MetaCampaign {
   return {
     id: `campaign-${Math.random().toString(36).slice(2, 8)}`,
+    scope: 'client',
     externalCampaignId: null,
     name: 'Test campaign',
     status: 'active',
@@ -594,6 +596,30 @@ describe('computeClientResults', () => {
     const results = computeClientResults('c1', leads, [], campaigns, revenue, { start: null, end: null }, 'all');
     expect(results.roas).toBeCloseTo(2);
     expect(results.cac).toBe(1000);
+  });
+
+  // REKREATIVE's own internal-scope acquisition (lib/leads.ts / lib/meta-ads.ts
+  // scope==='internal', clientId: null) must never enter a client's Results —
+  // Results is exclusively "what REKREATIVE generated for its CLIENTS."
+  // ResultsBoard/ClientResultsDashboard both call getLeads()/getCampaigns()
+  // with no clientId (returning internal + every client's records together)
+  // and rely on this function's own `lead.clientId === clientId` /
+  // `campaign.clientId === clientId` filtering to keep them apart — proven
+  // here directly rather than only via the UI.
+  it("never attributes REKREATIVE's own internal-scope leads/campaigns to a real client", () => {
+    const leads = [
+      makeLead({ id: 'internal-1', scope: 'internal', clientId: null, stage: 'converted', createdAt: '2026-08-01T00:00:00.000Z' }),
+      makeLead({ id: 'client-a-1', clientId: 'client-a', stage: 'converted', createdAt: '2026-08-01T00:00:00.000Z' }),
+    ];
+    const campaigns = [
+      makeCampaign({ scope: 'internal', clientId: null, spend: 9999 }),
+      makeCampaign({ clientId: 'client-a', spend: 100 }),
+    ];
+    const revenue = [makeRevenueRecord({ clientId: 'client-a', amount: 500, occurredAt: '2026-08-01T00:00:00.000Z' })];
+
+    const resultsA = computeClientResults('client-a', leads, [], campaigns, revenue, { start: null, end: null }, 'all');
+    expect(resultsA.counts.leads).toBe(1);
+    expect(resultsA.adSpend).toBe(100);
   });
 });
 

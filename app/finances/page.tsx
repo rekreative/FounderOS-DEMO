@@ -1,5 +1,6 @@
+import Link from 'next/link';
 import { ArrowDownLeft, ArrowUpRight, Scale, Landmark, Send } from 'lucide-react';
-import { configuredProcessors, monthToDateIncome, stripeSnapshot, wiseOutgoing, fanbasisMonthToDateIncome } from '@/lib/connectors/payments';
+import { configuredProcessors, monthToDateIncome, stripeSnapshot, wiseOutgoing } from '@/lib/connectors/payments';
 import {
   incomeAccounts,
   totalIncome,
@@ -19,8 +20,16 @@ import { Badge, Label, SectionHead } from '@/components/terminal';
 
 export const dynamic = 'force-dynamic';
 
-const usd = (n: number, cents = false) =>
-  n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: cents ? 2 : 0 });
+// REKREATIVE's internal finance view presents every value in EUR — this is a
+// display convention only (see lib/finances.ts's IncomeAccount.income doc),
+// no FX conversion happens anywhere. `cents` widens to 2 decimals for
+// sub-euro-precision figures (e.g. a real Stripe balance in cents).
+const eur = (n: number, cents = false) =>
+  `${n.toLocaleString('es-ES', {
+    minimumFractionDigits: cents ? 2 : 0,
+    maximumFractionDigits: cents ? 2 : 0,
+    useGrouping: true,
+  })} €`;
 
 function ago(unix: number): string {
   const mins = Math.round((Date.now() - unix * 1000) / 60_000);
@@ -55,22 +64,18 @@ export default async function FinancesPage() {
   }
 
   // Which processors have keys (honest config), so non-Stripe cards show
-  // "key set · pull pending" vs "connect →" rather than a misleading live badge.
+  // "clave configurada · sincronización pendiente" vs "conectar →" rather
+  // than a misleading live badge. configuredProcessors() still reports the
+  // full processor registry (FanBasis, both Wise accounts, etc.) — that
+  // architecture is untouched; incomeAccounts() simply no longer renders a
+  // row for every one of them by default (see its own doc comment).
   const configuredMap = Object.fromEntries(configuredProcessors(process.env).map((p) => [p.id, p.configured]));
-  // Live FanBasis month-to-date income per account (null when unkeyed).
-  const [fbAa, fbMer] = await Promise.all([
-    fanbasisMonthToDateIncome(process.env.FANBASIS_LC_KEY).catch(() => null),
-    fanbasisMonthToDateIncome(process.env.FANBASIS_VANTAGE_KEY).catch(() => null),
-  ]);
-  const liveIncomeUsd: Record<string, number> = {};
-  if (fbAa != null) liveIncomeUsd['fanbasis-lc'] = fbAa;
-  if (fbMer != null) liveIncomeUsd['fanbasis-vantage'] = fbMer;
-  const accounts = incomeAccounts({ connected: stripeLive, mtdUsd }, configuredMap, liveIncomeUsd);
+  const accounts = incomeAccounts({ connected: stripeLive, mtdUsd }, configuredMap);
   // Outgoing Wise transfers — null (no Wise key) hides the section entirely.
   const wiseOut = await wiseOutgoing(process.env).catch(() => null);
   const incomeMtd = totalIncome(accounts);
   // Expenses from the uploaded statement ledger when present; seeded SAMPLE
-  // otherwise (honest "sample" vs "uploaded" label below).
+  // otherwise (honest "demo" vs "importado" label below).
   let ledgerSpend: { category: string; total: number }[] = [];
   let ledgerMonth: string | null = null;
   try {
@@ -82,7 +87,7 @@ export default async function FinancesPage() {
     ledgerSpend = [];
   }
   const expensesLive = ledgerSpend.length > 0;
-  // Per-business income from uploaded bank statements (Vantage, General Ops…).
+  // Per-business income from uploaded bank statements (e.g. per account/business).
   let bankSeries: ReturnType<typeof businessSeries> = [];
   try {
     const bank = openBankStore();
@@ -93,7 +98,7 @@ export default async function FinancesPage() {
   }
   // "2026-06" → "Jun 2026" for an honest period label on the uploaded figures.
   const monthLabel = ledgerMonth
-    ? new Date(`${ledgerMonth}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+    ? new Date(`${ledgerMonth}-01T00:00:00Z`).toLocaleDateString('es-ES', { month: 'short', year: 'numeric', timeZone: 'UTC' })
     : null;
   const byCategory = expensesLive ? ledgerSpend : expensesByCategory(SAMPLE_EXPENSES);
   const expenses = expensesLive ? ledgerSpend.reduce((s, c) => s + c.total, 0) : totalExpenses(SAMPLE_EXPENSES);
@@ -105,51 +110,63 @@ export default async function FinancesPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="every processor, one view"
-        title="Finances"
+        eyebrow="REKREATIVE FINANZAS"
+        title="Finanzas"
         right={
           <Badge tone={netMonthly >= 0 ? 'ok' : 'err'}>
             {netMonthly >= 0 ? '+' : '−'}
-            {usd(Math.abs(netMonthly))} net /mo
+            {eur(Math.abs(netMonthly))} neto/mes
           </Badge>
         }
       />
+      <p className="-mt-4 mb-5 max-w-xl text-[12px] text-os-muted">Visión financiera interna de REKREATIVE.</p>
+
+      {/* Scope note — Finances is REKREATIVE-level processor income, distinct
+          from Resultados' per-client attributed revenue. The two are never
+          meant to reconcile: different granularity, different question. */}
+      <div className="mb-5 border border-dashed border-os-border bg-os-surface2 px-3 py-2 font-mono text-[10px] text-os-dim">
+        Ingresos por procesador a nivel de REKREATIVE (todos los clientes). Para ingresos atribuidos por cliente, consulta{' '}
+        <Link href="/results" className="text-os-muted underline decoration-dotted hover:text-os-accent">
+          Resultados
+        </Link>
+        .
+      </div>
 
       {/* Summary tiles — slim single-line rows so the page opens condensed */}
       <section className="mb-5 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
         <div className="flex flex-col gap-1 rounded-lg-t border border-os-border bg-os-surface px-3 py-2">
           <div className="flex items-center justify-between gap-2">
-            <Label>Income · MTD</Label>
+            <Label>Ingresos · mes</Label>
             <ArrowDownLeft className="h-3 w-3 text-os-ok" strokeWidth={1.8} />
           </div>
           <div className="flex items-baseline justify-between gap-2">
             <span className="font-mono text-[16px] font-semibold leading-none tracking-[-0.02em] text-os-ok">
-              {usd(incomeMtd)}
+              {eur(incomeMtd)}
             </span>
             <span className="min-w-0 truncate font-mono text-[9.5px] uppercase tracking-[0.1em] text-os-dim">
-              {liveCount}/{accounts.length} live
+              {liveCount}/{accounts.length} conectados
             </span>
           </div>
         </div>
 
         <div className="flex flex-col gap-1 rounded-lg-t border border-os-border bg-os-surface px-3 py-2">
           <div className="flex items-center justify-between gap-2">
-            <Label>Expenses · /mo</Label>
+            <Label>Gastos · mes</Label>
             <ArrowUpRight className="h-3 w-3 text-os-err" strokeWidth={1.8} />
           </div>
           <div className="flex items-baseline justify-between gap-2">
-            <span className="font-mono text-[16px] font-semibold leading-none tracking-[-0.02em]">{usd(expenses)}</span>
+            <span className="font-mono text-[16px] font-semibold leading-none tracking-[-0.02em]">{eur(expenses)}</span>
             <span
               className={`min-w-0 truncate font-mono text-[9.5px] uppercase tracking-[0.1em] ${expensesLive ? 'text-os-ok' : 'text-os-warn'}`}
             >
-              {expensesLive ? `uploaded · ${monthLabel}` : 'sample'}
+              {expensesLive ? `importado · ${monthLabel}` : 'demo'}
             </span>
           </div>
         </div>
 
         <div className="flex flex-col gap-1 rounded-lg-t border border-os-border bg-os-surface px-3 py-2">
           <div className="flex items-center justify-between gap-2">
-            <Label>Net · /mo</Label>
+            <Label>Neto · mes</Label>
             <Scale className="h-3 w-3 text-os-accent" strokeWidth={1.8} />
           </div>
           <div className="flex items-baseline justify-between gap-2">
@@ -157,23 +174,23 @@ export default async function FinancesPage() {
               className={`font-mono text-[16px] font-semibold leading-none tracking-[-0.02em] ${netMonthly >= 0 ? 'text-os-ok' : 'text-os-err'}`}
             >
               {netMonthly >= 0 ? '' : '−'}
-              {usd(Math.abs(netMonthly))}
+              {eur(Math.abs(netMonthly))}
             </span>
-            <span className="min-w-0 truncate font-mono text-[9.5px] uppercase tracking-[0.1em] text-os-dim">in − out</span>
+            <span className="min-w-0 truncate font-mono text-[9.5px] uppercase tracking-[0.1em] text-os-dim">ingresos − gastos</span>
           </div>
         </div>
 
         <div className="flex flex-col gap-1 rounded-lg-t border border-os-border bg-os-surface px-3 py-2">
           <div className="flex items-center justify-between gap-2">
-            <Label>Stripe balance</Label>
+            <Label>Saldo Stripe</Label>
             <Landmark className="h-3 w-3 text-os-accent" strokeWidth={1.8} />
           </div>
           <div className="flex items-baseline justify-between gap-2">
             <span className="font-mono text-[16px] font-semibold leading-none tracking-[-0.02em]">
-              {stripeLive ? usd(available, true) : '—'}
+              {stripeLive ? eur(available, true) : '—'}
             </span>
             <span className="min-w-0 truncate font-mono text-[9.5px] uppercase tracking-[0.1em] text-os-dim">
-              {stripeLive ? `${usd(pending, true)} pending` : 'connect Stripe'}
+              {stripeLive ? `${eur(pending, true)} pendiente` : 'conectar Stripe'}
             </span>
           </div>
         </div>
@@ -183,7 +200,7 @@ export default async function FinancesPage() {
       {/* Income by business — from uploaded bank statements, with a range dropdown */}
       {bankSeries.length > 0 && (
         <section className="mb-5">
-          <SectionHead label="Income · by business" count="bank deposits" />
+          <SectionHead label="Ingresos · por negocio" count="depósitos bancarios" />
           <div className="grid gap-3.5 lg:grid-cols-2">
             {bankSeries.map((s) => (
               <BusinessIncomeChart key={s.business} series={s} />
@@ -195,18 +212,18 @@ export default async function FinancesPage() {
       {/* Monthly expenses by category */}
       <section className="mb-5">
         <SectionHead
-          label="Monthly expenses · by category"
-          count={expensesLive && monthLabel ? `${usd(expenses)} · ${monthLabel}` : `${usd(expenses)} /mo`}
+          label="Gastos mensuales · por categoría"
+          count={expensesLive && monthLabel ? `${eur(expenses)} · ${monthLabel}` : `${eur(expenses)} demo`}
         />
         <div className="grid items-stretch gap-3.5 lg:grid-cols-[1.15fr_1fr_0.85fr]">
           {/* where the money goes — share per category */}
           <SharePie
             items={byCategory.map((c) => ({ key: c.category, label: c.category, value: Math.round(c.total * 100) }))}
             total={Math.round(expenses * 100)}
-            centerLabel={expensesLive && monthLabel ? monthLabel : 'per month'}
-            format={(cents) => usd(cents / 100)}
+            centerLabel={expensesLive && monthLabel ? monthLabel : 'por mes'}
+            format={(cents) => eur(cents / 100)}
             donutPx={190}
-            ariaLabel="Monthly expenses by category"
+            ariaLabel="Gastos mensuales por categoría"
           />
 
           <div className="rounded-lg-t border border-os-border bg-os-surface p-4">
@@ -215,7 +232,7 @@ export default async function FinancesPage() {
                 <div key={c.category}>
                   <div className="mb-1 flex items-baseline justify-between gap-2 font-mono text-[11px]">
                     <span className="text-os-muted">{c.category}</span>
-                    <span className="text-os-text">{usd(c.total)}</span>
+                    <span className="text-os-text">{eur(c.total)}</span>
                   </div>
                   <div className="h-1.5 overflow-hidden rounded-sm-t bg-os-surface2">
                     <div className="h-full bg-os-accent opacity-60" style={{ width: `${(c.total / maxCategory) * 100}%` }} />
@@ -231,7 +248,7 @@ export default async function FinancesPage() {
       </section>
 
       <section className="mb-5">
-        <SectionHead label="Income · by processor" count={`${liveCount}/${accounts.length} live`} />
+        <SectionHead label="Ingresos · por procesador" count={`${liveCount}/${accounts.length} conectados`} />
         <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
           {accounts.map((a) => (
             <div key={a.id} className="hoverable rounded-lg-t border border-os-border bg-os-surface px-4 py-3">
@@ -242,20 +259,20 @@ export default async function FinancesPage() {
                 </div>
                 {a.live ? (
                   <Badge tone="ok">
-                    <span className="dot ok pulse mr-1 inline-block" /> live
+                    <span className="dot ok pulse mr-1 inline-block" /> conectado
                   </Badge>
                 ) : a.configured ? (
-                  <Badge tone="warn">key set</Badge>
+                  <Badge tone="warn">clave configurada</Badge>
                 ) : (
-                  <Badge ghost>connect →</Badge>
+                  <Badge ghost>conectar →</Badge>
                 )}
               </div>
               <div className="mt-2 flex items-baseline gap-1.5">
                 <span className="font-mono text-[18px] font-semibold tracking-[-0.02em]">
-                  {a.income != null ? usd(a.income) : '—'}
+                  {a.income != null ? eur(a.income) : '—'}
                 </span>
                 <span className="font-mono text-[9.5px] text-os-dim">
-                  {a.live ? 'this month' : a.configured ? 'pull pending' : 'awaiting key'}
+                  {a.live ? 'este mes' : a.configured ? 'sincronización pendiente' : 'sin conectar'}
                 </span>
               </div>
               <div className="mt-2 h-1 overflow-hidden rounded-sm-t bg-os-surface2">
@@ -269,13 +286,16 @@ export default async function FinancesPage() {
         </div>
       </section>
 
-      {/* Outgoing transfers — Wise (hidden entirely until a Wise key lands) */}
+      {/* Outgoing transfers — Wise (hidden entirely until a Wise key lands).
+          Real per-transfer currency (t.currency) is preserved honestly —
+          only the locale/grouping style is es-ES, never forced to € for a
+          transfer that isn't actually in euros. */}
       {wiseOut && (
         <section className="mb-5">
-          <SectionHead label="Outgoing · Wise" count={`${wiseOut.length} transfer${wiseOut.length === 1 ? '' : 's'}`} />
+          <SectionHead label="Salidas · Wise" count={`${wiseOut.length} transferencia${wiseOut.length === 1 ? '' : 's'}`} />
           {wiseOut.length === 0 ? (
             <div className="rounded-lg-t border border-os-border bg-os-surface px-4 py-3 font-mono text-[11px] text-os-dim">
-              Wise connected · no recent outgoing transfers
+              Wise conectado · sin transferencias salientes recientes
             </div>
           ) : (
             <ul className="space-y-1.5">
@@ -286,7 +306,7 @@ export default async function FinancesPage() {
                 >
                   <Send className="h-[15px] w-[15px] shrink-0 text-os-err" strokeWidth={1.8} />
                   <span className="font-mono text-[15px] font-semibold text-os-err">
-                    −{(t.amountCents / 100).toLocaleString('en-US', { style: 'currency', currency: t.currency })}
+                    −{(t.amountCents / 100).toLocaleString('es-ES', { style: 'currency', currency: t.currency })}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-[12.5px] text-os-muted">{t.reference ?? t.status}</span>
                   <span className="shrink-0 font-mono text-[11px] text-os-dim">{t.status}</span>
@@ -300,14 +320,14 @@ export default async function FinancesPage() {
       {/* Recent income — real Stripe charges */}
       {stripeLive && recent.length > 0 && (
         <section>
-          <SectionHead label="Recent income" count="Stripe · live" />
+          <SectionHead label="Ingresos recientes" count="Stripe · conectado" />
           <ul className="space-y-1.5">
             {recent.map((c, i) => (
               <li
                 key={`${c.created}-${i}`}
                 className="hoverable flex items-center gap-3.5 rounded-lg-t border border-os-border bg-os-surface px-4 py-3"
               >
-                <span className="font-mono text-[15px] font-semibold text-os-ok">+{usd(c.amount / 100, true)}</span>
+                <span className="font-mono text-[15px] font-semibold text-os-ok">+{eur(c.amount / 100, true)}</span>
                 <span className="min-w-0 flex-1 truncate text-[12.5px] text-os-muted">{c.description}</span>
                 <span className="shrink-0 font-mono text-[11px] text-os-dim">{ago(c.created)}</span>
               </li>

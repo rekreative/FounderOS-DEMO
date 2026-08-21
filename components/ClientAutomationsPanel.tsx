@@ -23,6 +23,37 @@ import { Badge, type BadgeTone } from '@/components/terminal';
 // discipline lib/automations.ts documents — a paused automation is never
 // "healthy" or "unhealthy", and an active one can still need attention.
 
+// Presentation-only lookup for the free-text seeded `description` field —
+// the only free-text automation copy this read-only client panel renders
+// (trigger/step detail lives only in the global /automations expanded
+// view). Nothing stored is ever rewritten — only how it reads here. Falls
+// back to the original text for anything not in the map, so a real
+// automation's description (once a client automation is created from the
+// OS, or synced from a real Make/OpenAI provider) still renders correctly,
+// unrecognized rather than silently dropped or mistranslated. Brand/product
+// names (Meta, Make, OpenAI, CRM, Google Sheets, WhatsApp Business Cloud,
+// ManyChat, Instagram) are kept as-is throughout — only the surrounding
+// explanatory English is translated. Automation names (the "scenario name")
+// are left untouched wherever they render, matching real configured names.
+const AUTOMATION_DESCRIPTION_ES: Record<string, string> = {
+  'Meta lead form triggers a Make scenario: OpenAI qualifies the lead, logs it to the REKREATIVE CRM and the client tracking sheet, then WhatsApp Business Cloud sends the welcome template.':
+    'El formulario de leads de Meta activa un escenario de Make: OpenAI cualifica al lead, lo registra en el CRM de REKREATIVE y en la hoja de seguimiento del cliente, y WhatsApp Business Cloud envía la plantilla de bienvenida.',
+  'When a discovery call is booked in the CRM calendar, a Make scenario sends a WhatsApp reminder template 24h before the call.':
+    'Cuando se agenda una llamada de descubrimiento en el calendario del CRM, un escenario de Make envía una plantilla de recordatorio por WhatsApp 24 horas antes de la llamada.',
+  'Contacts tagged "warm" in ManyChat receive a 3-message nurture sequence over Instagram DMs. Paused while the creative brief is refreshed.':
+    'Los contactos etiquetados como "tibios" en ManyChat reciben una secuencia de 3 mensajes de seguimiento por DM de Instagram. Pausada mientras se actualiza el brief creativo.',
+  'Draft automation: once a lead is marked converted in the CRM, send a WhatsApp message asking for a review. Not yet launched.':
+    'Automatización en borrador: cuando un lead se marca como convertido en el CRM, se envía un mensaje de WhatsApp pidiendo una reseña. Aún no está lanzada.',
+  'Active but never triggered yet: notifies the internal team and logs a row in Google Sheets whenever a client’s status changes to active.':
+    'Activa pero todavía sin activarse nunca: notifica al equipo interno y registra una fila en Google Sheets cada vez que el estado de un cliente cambia a activo.',
+  'Every Monday, aggregates the past week’s lead and campaign numbers into the client tracking sheet.':
+    'Cada lunes, agrega los datos de leads y campañas de la semana anterior en la hoja de seguimiento del cliente.',
+};
+
+function translateAutomationDescription(description: string): string {
+  return AUTOMATION_DESCRIPTION_ES[description] ?? description;
+}
+
 function formatRelative(value: string | null): string {
   if (!value) return 'Sin ejecuciones';
   const date = new Date(value);
@@ -108,7 +139,9 @@ export function ClientAutomationsPanel({ automations }: { automations: Automatio
                     </div>
                   </div>
                   {automation.description && (
-                    <p className="mt-2 text-[12px] leading-relaxed text-os-muted">{automation.description}</p>
+                    <p className="mt-2 text-[12px] leading-relaxed text-os-muted">
+                      {translateAutomationDescription(automation.description)}
+                    </p>
                   )}
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {automation.platforms.map((platform) => (

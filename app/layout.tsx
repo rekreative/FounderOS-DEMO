@@ -5,8 +5,8 @@ import { Sidebar } from '@/components/Sidebar';
 import { Topbar } from '@/components/Topbar';
 import { CommandPalette } from '@/components/CommandPalette';
 import { ConductorPanel } from '@/components/ConductorPanel';
-import { getDb } from '@/lib/data';
 import type { Command } from '@/lib/palette';
+import { REKREATIVE_PRIMARY } from '@/lib/nav';
 import { THEME_INIT_SCRIPT } from '@/lib/theme';
 
 const fontMono = JetBrains_Mono({
@@ -20,42 +20,42 @@ export const metadata: Metadata = {
   description: 'Personal operating system and AI agent command center',
 };
 
-const NAV_COMMANDS: Command[] = [
-  { id: 'nav-home', label: 'Home', keywords: 'dashboard today overview start', href: '/', hint: 'view' },
-  { id: 'nav-social', label: 'Social', keywords: 'instagram tiktok twitter x youtube linkedin followers growth zernio founderos', href: '/social', hint: 'view' },
-  { id: 'nav-comms', label: 'Comms', keywords: 'messages email whatsapp slack inbox unified feed', href: '/comms', hint: 'view' },
-  { id: 'nav-agents', label: 'Agents', keywords: 'runtime run real roster', href: '/agents', hint: 'view' },
-  { id: 'nav-connections', label: 'Connections', keywords: 'integrations tools status creds', href: '/integrations', hint: 'view' },
-  { id: 'nav-roadmap', label: 'Roadmap', keywords: 'plan phases quarters', href: '/roadmap', hint: 'view' },
-  { id: 'nav-analytics', label: 'Analytics', keywords: 'metrics numbers', href: '/analytics', hint: 'view' },
-  { id: 'nav-reference', label: 'Reference Model', keywords: 'domains business brm', href: '/reference', hint: 'view' },
-  { id: 'nav-org', label: 'Clients', keywords: 'org chart hierarchy departments tree structure leads specialists', href: '/org', hint: 'view' },
-  { id: 'nav-brain', label: 'G-Brain', keywords: 'brain knowledge core markdown vector pgvector supabase embeddings zeroentropy graph doctor', href: '/brain', hint: 'view' },
-  // Local apps discovered on this machine — open in a new tab
+// Search keywords per REKREATIVE route — the labels/hrefs themselves come
+// from REKREATIVE_PRIMARY (lib/nav.ts), the same source the sidebar renders,
+// so ⌘K can never contradict it or resurface a legacy FounderOS route.
+const NAV_COMMAND_KEYWORDS: Record<string, string> = {
+  '/': 'inicio dashboard resumen centro de operaciones',
+  '/clients': 'clientes cuentas workspace',
+  '/leads': 'leads crm pipeline etapas',
+  '/meta-ads': 'meta ads campañas publicidad gasto cpl ctr',
+  '/results': 'resultados funnel comercial ingresos roas cac',
+  '/automations': 'automatizaciones make manychat whatsapp',
+  '/ai-agents': 'agentes ia openai anthropic whatsapp instagram',
+  '/connections': 'integraciones conexiones requeridas verificadas',
+  '/content': 'contenido piezas producción calendario',
+  '/finances': 'finanzas ingresos procesadores stripe paypal',
+  '/brain': 'g-brain conocimiento sops decisiones aprendizajes',
+  '/analytics': 'analítica portafolio métricas benchmarks',
+};
+
+const NAV_COMMANDS: Command[] = REKREATIVE_PRIMARY.map((item) => ({
+  id: `nav-${item.href === '/' ? 'home' : item.href.replace(/^\//, '')}`,
+  label: item.label,
+  keywords: NAV_COMMAND_KEYWORDS[item.href] ?? '',
+  href: item.href,
+  hint: 'view',
+}));
+
+// Local apps and external tools this machine has open — open in a new tab.
+const EXTERNAL_COMMANDS: Command[] = [
   { id: 'ext-command-center', label: 'Command Center', keywords: 'command-center kanban missions port 4000', href: 'http://localhost:4000', hint: 'localhost' },
   { id: 'ext-remotion', label: 'Remotion Studio', keywords: 'video render pipeline port 3789', href: 'http://localhost:3789', hint: 'localhost' },
-  { id: 'ext-skool', label: 'Skool Community', keywords: 'launchpad cohort community posts', href: 'https://www.skool.com/launchpad-cohort', hint: 'web' },
-  { id: 'ext-attio', label: 'Attio CRM', keywords: 'deals pipeline vantage', href: 'https://app.attio.com', hint: 'web' },
+  { id: 'ext-attio', label: 'Attio CRM', keywords: 'deals pipeline', href: 'https://app.attio.com', hint: 'web' },
   { id: 'ext-fathom', label: 'Fathom Calls', keywords: 'meetings recordings notes', href: 'https://fathom.video', hint: 'web' },
 ];
 
 function buildCommands(): Command[] {
-  const db = getDb();
-  const tools: Command[] = db.tools.all().map((t) => ({
-    id: `tool-${t.id}`,
-    label: t.name,
-    keywords: `${t.category} ${t.description}`,
-    href: '/integrations',
-    hint: 'tool',
-  }));
-  const agents: Command[] = db.agents.all().map((a) => ({
-    id: `agent-${a.id}`,
-    label: a.name,
-    keywords: `${a.role} ${a.description}`,
-    href: '/agents',
-    hint: 'agent',
-  }));
-  return [...NAV_COMMANDS, ...agents, ...tools];
+  return [...NAV_COMMANDS, ...EXTERNAL_COMMANDS];
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

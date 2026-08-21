@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Search } from 'lucide-react';
 import { getClients, initializeStoreIfNeeded, type Client } from '@/lib/clients';
 import {
   AUTOMATION_PLATFORM_OPTIONS,
+  AUTOMATION_SCOPE_OPTIONS,
   AUTOMATION_STATUS_OPTIONS,
   AUTOMATION_TYPE_OPTIONS,
   createAutomation,
@@ -25,6 +27,7 @@ import {
   type AutomationHealth,
   type AutomationPlatform,
   type AutomationRun,
+  type AutomationScope,
   type AutomationStatus,
   type AutomationStep,
   type AutomationType,
@@ -117,6 +120,65 @@ const STATUS_TONE: Record<AutomationStatus, string> = {
   paused: 'text-os-muted',
   draft: 'text-os-dim',
 };
+
+// Presentation-only lookup — the stored AutomationRun.error / Automation
+// .lastError strings themselves are never touched, just how they read here.
+// Falls back to the original text for anything not in the map, so an
+// unrecognized future error never silently disappears. Brand names
+// (WhatsApp, Make, OpenAI, ManyChat, Meta, Google Sheets) are kept as-is.
+const AUTOMATION_ERROR_ES: Record<string, string> = {
+  'WhatsApp template send timed out': 'Tiempo de espera agotado al enviar la plantilla de WhatsApp.',
+  'WhatsApp template not approved for this variant': 'Plantilla de WhatsApp no aprobada para esta variante.',
+};
+
+function translateAutomationError(error: string | null): string | null {
+  if (!error) return error;
+  return AUTOMATION_ERROR_ES[error] ?? error;
+}
+
+// Presentation-only lookup for the free-text seeded copy in the expanded
+// detail view — trigger event/description, step action/description,
+// automation description, and run summaries all share this one map, since
+// they're the same kind of field (short seeded English explanatory text).
+// Nothing stored (Automation.trigger/.steps/.description, AutomationRun
+// .summary) is ever rewritten — only how it reads here. Falls back to the
+// original text for anything not in the map: real Make scenario names/
+// messages arriving later will still render correctly, unrecognized rather
+// than silently dropped or mistranslated. Brand names (Meta, Make, OpenAI,
+// CRM, WhatsApp, WhatsApp Business Cloud) are kept as-is throughout.
+const AUTOMATION_TEXT_ES: Record<string, string> = {
+  // automation-internal-lead-intake
+  'New Lead Ad form submission': 'Nuevo lead desde formulario de Meta',
+  "Fires when a prospect submits REKREATIVE's own Meta instant form.":
+    'Se activa cuando un prospecto envía el formulario instantáneo de Meta de REKREATIVE.',
+  'Receive Make webhook': 'Recibir webhook en Make',
+  'Make scenario receives the raw Meta lead payload.': 'El escenario de Make recibe los datos originales del lead de Meta.',
+  'Qualify prospect': 'Cualificar prospecto',
+  'OpenAI scores intent and extracts qualification fields.': 'OpenAI analiza la intención y extrae los datos de cualificación.',
+  'Create CRM lead': 'Crear lead en CRM',
+  "Prospect is written into REKREATIVE's own Leads CRM (scope: internal) with AI analysis attached.":
+    'El prospecto se registra en el CRM de Leads de REKREATIVE con su análisis de IA asociado.',
+  'Send welcome template': 'Enviar plantilla de bienvenida',
+  'WhatsApp Business Cloud sends the approved welcome template.': 'WhatsApp Business Cloud envía la plantilla de bienvenida aprobada.',
+  "Meta lead form for REKREATIVE's own Captación Centros de Psicología campaign triggers a Make scenario: OpenAI qualifies the prospect, logs it into REKREATIVE's own CRM, then WhatsApp Business Cloud sends the welcome template.":
+    'El formulario de anuncio de leads de Meta de la campaña Captación Centros de Psicología de REKREATIVE activa un escenario de Make: OpenAI cualifica al prospecto, lo registra en el CRM propio de REKREATIVE y WhatsApp Business Cloud envía la plantilla de bienvenida.',
+  'Prospect qualified and welcome template delivered': 'Prospecto cualificado y plantilla de bienvenida enviada.',
+  // automation-internal-digest
+  'Every day 08:00': 'Todos los días a las 08:00',
+  'Scheduled trigger, once a day.': 'Disparador programado, una vez al día.',
+  'Aggregate daily numbers': 'Agregar datos diarios',
+  'Pulls the past 24h of REKREATIVE-internal leads and stage changes.':
+    'Recopila los leads internos de REKREATIVE y los cambios de etapa de las últimas 24 horas.',
+  'Write digest sheet': 'Escribir hoja de resumen',
+  "Writes the summary into REKREATIVE's own internal tracker.": 'Escribe el resumen en el panel de seguimiento interno de REKREATIVE.',
+  'Every morning, summarizes new REKREATIVE-internal leads and their stage changes for the team.':
+    'Cada mañana, resume para el equipo los nuevos leads internos de REKREATIVE y sus cambios de etapa.',
+  'Digest written to internal tracker': 'Resumen escrito en el panel de seguimiento interno.',
+};
+
+function translateAutomationText(text: string): string {
+  return AUTOMATION_TEXT_ES[text] ?? text;
+}
 
 // Trigger platforms that describe *how/when* an automation fires rather than
 // *what business platform it concerns* — too generic to stand in as the
@@ -224,8 +286,8 @@ function RunHistory({ runs }: { runs: AutomationRun[] }) {
             {getRunStatusLabel(run.status)}
           </span>
           <span className="font-mono text-[9.5px] text-os-dim">{formatDateTime(run.startedAt)}</span>
-          <span className="font-mono text-[10px] text-os-muted">{run.summary}</span>
-          {run.error && <span className="font-mono text-[9.5px] text-os-err">{run.error}</span>}
+          <span className="font-mono text-[10px] text-os-muted">{translateAutomationText(run.summary)}</span>
+          {run.error && <span className="font-mono text-[9.5px] text-os-err">{translateAutomationError(run.error)}</span>}
         </div>
       ))}
     </div>
@@ -235,6 +297,7 @@ function RunHistory({ runs }: { runs: AutomationRun[] }) {
 function AutomationCard({
   automation,
   clientName,
+  showClientName,
   platformLogos,
   platformIconsLarge,
   expanded,
@@ -244,6 +307,10 @@ function AutomationCard({
 }: {
   automation: Automation;
   clientName: string;
+  /** REKREATIVE scope: every card is already known to be internal, so a
+   * "Cliente: Interno" label is redundant — hidden there, shown as-is in
+   * CLIENTES scope. */
+  showClientName: boolean;
   platformLogos: Record<string, ReactNode>;
   platformIconsLarge: Record<string, ReactNode>;
   expanded: boolean;
@@ -265,31 +332,47 @@ function AutomationCard({
           <div className="min-w-0">
             <div className="truncate text-[13.5px] font-semibold leading-tight text-os-text">{automation.name}</div>
             <div className="mt-1 flex flex-wrap items-center gap-x-1.5 font-mono text-[10px] text-os-muted">
-              <span className="truncate">{clientName}</span>
-              <span className="text-os-dim">·</span>
+              {showClientName && (
+                <>
+                  <span className="truncate">{clientName}</span>
+                  <span className="text-os-dim">·</span>
+                </>
+              )}
               <span className="text-os-dim">{getTypeLabel(automation.type)}</span>
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <HealthBadge health={health} />
-          <select
-            value={automation.status}
-            onChange={(event) => onStatusChange(event.target.value as AutomationStatus)}
-            className={`border border-os-border bg-os-surface px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide outline-none ${STATUS_TONE[automation.status]}`}
-          >
-            {AUTOMATION_STATUS_OPTIONS.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          {/* SALUD (run health, derived) and ESTADO (lifecycle, stored) are
+              two distinct axes — see the label prefixes below. Neither
+              value itself, nor how each is derived, changes here. */}
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Salud ·</span>
+            <HealthBadge health={health} />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Estado ·</span>
+            <select
+              value={automation.status}
+              onChange={(event) => onStatusChange(event.target.value as AutomationStatus)}
+              className={`border border-os-border bg-os-surface px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide outline-none ${STATUS_TONE[automation.status]}`}
+            >
+              {AUTOMATION_STATUS_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
       {health === 'needs_attention' && automation.lastError && (
-        <div className="mt-2 truncate border border-os-err/40 bg-os-err/10 px-2 py-1 font-mono text-[9.5px] text-os-err" title={automation.lastError}>
-          ⚠ {automation.lastError}
+        <div
+          className="mt-2 truncate border border-os-err/40 bg-os-err/10 px-2 py-1 font-mono text-[9.5px] text-os-err"
+          title={translateAutomationError(automation.lastError) ?? undefined}
+        >
+          ⚠ {translateAutomationError(automation.lastError)}
         </div>
       )}
 
@@ -335,8 +418,8 @@ function AutomationCard({
             <div className="mb-1.5 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Disparador</div>
             <div className="border border-os-border bg-os-surface2 px-2.5 py-2">
               <PlatformLabel platform={automation.trigger.platform} platformLogos={platformLogos} className="font-mono text-[9px] uppercase tracking-wide text-os-accent" />
-              <div className="mt-1 text-[11px] text-os-text">{automation.trigger.event}</div>
-              <div className="mt-0.5 text-[10px] text-os-dim">{automation.trigger.description}</div>
+              <div className="mt-1 text-[11px] text-os-text">{translateAutomationText(automation.trigger.event)}</div>
+              <div className="mt-0.5 text-[10px] text-os-dim">{translateAutomationText(automation.trigger.description)}</div>
             </div>
 
             <div className="mb-1.5 mt-3 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Pasos del flujo</div>
@@ -353,9 +436,9 @@ function AutomationCard({
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                           <PlatformLabel platform={step.platform} platformLogos={platformLogos} className="font-mono text-[9px] uppercase tracking-wide text-os-accent" />
-                          <span className="text-[11px] font-medium text-os-text">{step.action}</span>
+                          <span className="text-[11px] font-medium text-os-text">{translateAutomationText(step.action)}</span>
                         </div>
-                        {step.description && <div className="mt-0.5 text-[10px] text-os-dim">{step.description}</div>}
+                        {step.description && <div className="mt-0.5 text-[10px] text-os-dim">{translateAutomationText(step.description)}</div>}
                       </div>
                     </div>
                   ))}
@@ -392,7 +475,7 @@ function AutomationCard({
             {automation.description && (
               <>
                 <div className="mb-1.5 mt-3 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Descripción</div>
-                <p className="text-[11px] text-os-muted">{automation.description}</p>
+                <p className="text-[11px] text-os-muted">{translateAutomationText(automation.description)}</p>
               </>
             )}
           </div>
@@ -411,15 +494,28 @@ export function AutomationsBoard({
 }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [automations, setAutomations] = useState<Automation[]>([]);
+  // Primary scope: REKREATIVE's own automations vs. client automations —
+  // conceptually ABOVE client filtering, never a fake client. Defaults to
+  // REKREATIVE. Local UI state only, same as every other filter here.
+  const [moduleScope, setModuleScope] = useState<AutomationScope>('internal');
   const [statusFilter, setStatusFilter] = useState<'all' | AutomationStatus>('all');
   const [clientFilter, setClientFilter] = useState<'all' | string>('all');
   const [platformFilter, setPlatformFilter] = useState<'all' | AutomationPlatform>('all');
+  const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [showForm, setShowForm] = useState(false);
   const [editingAutomationId, setEditingAutomationId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftAutomation>(emptyDraft());
 
+  // In REKREATIVE scope the client selector is hidden and irrelevant, so
+  // always load the full set (internal automations have no clientId to
+  // filter by); the scope filter below narrows it. In CLIENTES scope,
+  // behavior is unchanged from before scope existed.
   const loadAutomations = () => {
+    if (moduleScope === 'internal') {
+      setAutomations(getAutomations());
+      return;
+    }
     const activeClient = clientFilter === 'all' ? undefined : clientFilter;
     setAutomations(getAutomations(activeClient));
   };
@@ -435,22 +531,51 @@ export function AutomationsBoard({
   useEffect(() => {
     loadAutomations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientFilter]);
+  }, [clientFilter, moduleScope]);
+
+  // Scope filter — sits above search/status/platform. "Todos los clientes"
+  // (CLIENTES scope, no client picked) must never include REKREATIVE's own
+  // automations; this guarantees it regardless of what `automations` holds.
+  const scopedAutomations = useMemo(
+    () => automations.filter((automation) => automation.scope === moduleScope),
+    [automations, moduleScope],
+  );
+
+  // Search is client-side, UI-only state — never persisted, matches
+  // automation name, client name, and platform(s) case-insensitively.
+  // Operates only within the currently selected scope.
+  const searchedAutomations = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return scopedAutomations;
+    return scopedAutomations.filter((automation) => {
+      const clientName = getClientNameForAutomation(automation.clientId).toLowerCase();
+      const platformNames = automation.platforms.map((platform) => getPlatformLabel(platform).toLowerCase());
+      return (
+        automation.name.toLowerCase().includes(q) ||
+        clientName.includes(q) ||
+        platformNames.some((label) => label.includes(q))
+      );
+    });
+  }, [scopedAutomations, query]);
 
   const visibleAutomations = useMemo(
     () =>
-      automations.filter((automation) => {
+      searchedAutomations.filter((automation) => {
         if (statusFilter !== 'all' && automation.status !== statusFilter) return false;
         if (platformFilter !== 'all' && !automation.platforms.includes(platformFilter)) return false;
         return true;
       }),
-    [automations, statusFilter, platformFilter],
+    [searchedAutomations, statusFilter, platformFilter],
   );
 
+  // KPI row recalculates from only the currently selected scope — same
+  // summarizeAutomations() call, just fed the scope-filtered set (see
+  // scopedAutomations above → searchedAutomations → visibleAutomations).
   const summary = useMemo(() => summarizeAutomations(visibleAutomations), [visibleAutomations]);
+  const showClientName = moduleScope === 'client';
 
   const openCreateForm = () => {
-    const firstClient = clients[0]?.id ?? '';
+    const firstClient = moduleScope === 'client' ? clients[0]?.id ?? '' : '';
     setDraft(emptyDraft(firstClient));
     setEditingAutomationId(null);
     setShowForm(true);
@@ -459,7 +584,7 @@ export function AutomationsBoard({
   const openEditForm = (automation: Automation) => {
     setEditingAutomationId(automation.id);
     setDraft({
-      clientId: automation.clientId,
+      clientId: automation.clientId ?? '',
       name: automation.name,
       description: automation.description,
       status: automation.status,
@@ -498,7 +623,9 @@ export function AutomationsBoard({
 
   const submitAutomation = () => {
     const name = draft.name.trim();
-    if (!name || !draft.clientId || draft.platforms.length === 0) return;
+    const scope: AutomationScope = moduleScope;
+    const clientId = scope === 'client' ? draft.clientId : null;
+    if (!name || (scope === 'client' && !clientId) || draft.platforms.length === 0) return;
 
     const trigger = {
       platform: draft.triggerPlatform,
@@ -512,7 +639,8 @@ export function AutomationsBoard({
 
     if (editingAutomationId) {
       updateAutomation(editingAutomationId, {
-        clientId: draft.clientId,
+        scope,
+        clientId,
         name,
         description: draft.description.trim(),
         status: draft.status,
@@ -525,7 +653,8 @@ export function AutomationsBoard({
       });
     } else {
       createAutomation({
-        clientId: draft.clientId,
+        scope,
+        clientId,
         name,
         description: draft.description.trim(),
         status: draft.status,
@@ -539,15 +668,13 @@ export function AutomationsBoard({
       });
     }
 
-    const activeClient = clientFilter === 'all' ? undefined : clientFilter;
-    setAutomations(getAutomations(activeClient));
+    loadAutomations();
     closeForm();
   };
 
   const handleStatusChange = (automationId: string, next: AutomationStatus) => {
     setAutomationStatus(automationId, next);
-    const activeClient = clientFilter === 'all' ? undefined : clientFilter;
-    setAutomations(getAutomations(activeClient));
+    loadAutomations();
   };
 
   return (
@@ -568,7 +695,31 @@ export function AutomationsBoard({
         </div>
       </div>
 
-      {/* KPI summary */}
+      {/* Primary scope — REKREATIVE's own automations vs. client
+          automations. Conceptually above every filter below, including the
+          KPI row; REKREATIVE is never a client, so this never touches the
+          client selector's options. */}
+      <div className="mb-4 flex items-center gap-1.5">
+        {AUTOMATION_SCOPE_OPTIONS.map((option) => {
+          const active = moduleScope === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setModuleScope(option.id)}
+              className={`border px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-wide ${
+                active ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim hover:border-os-border-strong hover:text-os-muted'
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* KPI summary — recalculated from only the currently selected scope
+          (see scopedAutomations → searchedAutomations → visibleAutomations
+          → summary above). */}
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {[
           { label: 'Activas', value: String(summary.active) },
@@ -586,6 +737,17 @@ export function AutomationsBoard({
 
       {/* Filters */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-os-dim" />
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Buscar automatización..."
+            className="border border-os-border bg-os-surface py-1.5 pl-8 pr-2.5 text-[12.5px] text-os-text outline-none placeholder:text-os-dim focus:border-os-border-strong"
+          />
+        </div>
+
         <div className="flex flex-wrap items-center gap-1.5">
           {STATUS_FILTERS.map((option) => {
             const active = statusFilter === option.id;
@@ -619,27 +781,29 @@ export function AutomationsBoard({
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
-          <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
-          <select
-            value={clientFilter}
-            onChange={(event) => setClientFilter(event.target.value)}
-            className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
-          >
-            <option value="all">Todos los clientes</option>
-            {clients.map((client) => (
-              <option key={client.id} value={client.id}>
-                {client.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {moduleScope === 'client' && (
+          <div className="flex items-center gap-2">
+            <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
+            <select
+              value={clientFilter}
+              onChange={(event) => setClientFilter(event.target.value)}
+              className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
+            >
+              <option value="all">Todos los clientes</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Automation cards — fast visual scanning: icon + name + client + health first */}
       {visibleAutomations.length === 0 ? (
         <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-          No hay automatizaciones en este segmento.
+          No hay automatizaciones que coincidan con estos filtros.
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -648,6 +812,7 @@ export function AutomationsBoard({
               key={automation.id}
               automation={automation}
               clientName={getClientNameForAutomation(automation.clientId)}
+              showClientName={showClientName}
               platformLogos={platformLogos}
               platformIconsLarge={platformIconsLarge}
               expanded={Boolean(expanded[automation.id])}
@@ -670,20 +835,31 @@ export function AutomationsBoard({
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <label className="col-span-2">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
-                <select
-                  value={draft.clientId}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, clientId: event.target.value }))}
-                  className="w-full border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-text"
-                >
-                  {clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {moduleScope === 'client' ? (
+                <label className="col-span-2">
+                  <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
+                  <select
+                    value={draft.clientId}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, clientId: event.target.value }))}
+                    className="w-full border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-text"
+                  >
+                    {clients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label className="col-span-2">
+                  <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
+                  <input
+                    disabled
+                    value="Interno · REKREATIVE"
+                    className="w-full cursor-not-allowed border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-dim"
+                  />
+                </label>
+              )}
 
               <label className="col-span-2">
                 <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Nombre</span>

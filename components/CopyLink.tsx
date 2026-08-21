@@ -22,20 +22,20 @@ export function CopyLink({ url }: { url: string }) {
   return (
     <button
       onClick={copy}
-      title={`Copy ${url}`}
+      title={`Copiar ${url}`}
       className="inline-flex items-center gap-1.5 rounded-sm-t border border-os-border bg-os-bg px-2 py-1 font-mono text-[10px] text-os-muted transition-colors hover:border-os-dim hover:text-os-text"
     >
       {state === 'ok' ? (
         <>
-          <Check className="h-3 w-3 text-os-ok" /> copied
+          <Check className="h-3 w-3 text-os-ok" /> copiado
         </>
       ) : state === 'err' ? (
         <>
-          <Copy className="h-3 w-3 text-os-err" /> failed
+          <Copy className="h-3 w-3 text-os-err" /> error
         </>
       ) : (
         <>
-          <Copy className="h-3 w-3" /> copy
+          <Copy className="h-3 w-3" /> copiar
         </>
       )}
     </button>

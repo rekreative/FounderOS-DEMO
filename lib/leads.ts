@@ -1,5 +1,17 @@
 import { getClients, initializeStoreIfNeeded } from '@/lib/clients';
 
+// REKREATIVE is the agency's own internal acquisition, never a client —
+// scope distinguishes "REKREATIVE's own leads" (internal, clientId null)
+// from "a client's leads" (client, clientId required), same invariant
+// style as lib/content-items.ts / lib/agents-ai.ts / lib/integration-
+// connections.ts's scope + clientId pairs. Never model REKREATIVE as a
+// fake Client row.
+export const LEAD_SCOPE_OPTIONS = [
+  { id: 'internal', label: 'REKREATIVE' },
+  { id: 'client', label: 'Clientes' },
+] as const;
+export type LeadScope = (typeof LEAD_SCOPE_OPTIONS)[number]['id'];
+
 export const LEAD_STAGE_OPTIONS = [
   { id: 'new', label: 'Nuevo' },
   { id: 'contacted', label: 'Contactado' },
@@ -24,7 +36,9 @@ export type LeadAiAnalysis = {
 
 export type Lead = {
   id: string;
-  clientId: string;
+  scope: LeadScope;
+  /** Required when scope === 'client'; always null when scope === 'internal'. */
+  clientId: string | null;
   name: string;
   email: string | null;
   phone: string | null;
@@ -69,7 +83,10 @@ export type LeadEvent = {
 };
 
 export type CreateLeadInput = {
-  clientId: string;
+  /** Defaults to 'client' when omitted — preserves every existing call
+   * site's prior behavior (a required clientId) without a migration. */
+  scope?: LeadScope;
+  clientId?: string | null;
   name: string;
   email?: string | null;
   phone?: string | null;
@@ -117,6 +134,32 @@ function writeStorage<T>(key: string, value: T[]) {
 
 function isoNow(): string {
   return new Date().toISOString();
+}
+
+function assertScopeInvariant(scope: LeadScope, clientId: string | null): void {
+  if (scope === 'client') {
+    if (!clientId) {
+      throw new Error('A client-scoped lead requires a clientId');
+    }
+    if (!getClients().some((client) => client.id === clientId)) {
+      throw new Error('Cannot create lead for a missing client id');
+    }
+  }
+}
+
+/** Safe read-time migration: every Lead persisted before `scope` existed
+ * (JSON.parse yields `undefined`) was, by definition, a client lead — this
+ * repo had no internal-lead concept until now. Backfilling here means
+ * existing seeded/manual data is never rewritten or lost, only the new
+ * field is filled in, the same way every time it's read (same pattern as
+ * lib/client-integration-requirements.ts's normalizeRequirement). */
+function normalizeLead(raw: Lead): Lead {
+  if (raw.scope === 'internal' || raw.scope === 'client') return raw;
+  return { ...raw, scope: 'client' };
+}
+
+function readLeads(): Lead[] {
+  return readStorage<Lead>(STORAGE_KEY).map(normalizeLead);
 }
 
 function seedLeadEvents(): LeadEvent[] {
@@ -273,6 +316,53 @@ function seedLeadEvents(): LeadEvent[] {
       summary: 'Lead converted to paying client',
       details: { value: 4200 },
     },
+    // REKREATIVE's own internal acquisition — scope: 'internal', never a
+    // client. See lead-internal-1/2 in seedDemoLeads below.
+    {
+      id: 'evt-internal-1',
+      leadId: 'lead-internal-1',
+      type: 'lead_received',
+      source: 'meta',
+      occurredAt: offset(7, 3),
+      summary: 'Meta instant form submitted',
+      details: { campaign: 'REKREATIVE — Captación Centros de Psicología' },
+    },
+    {
+      id: 'evt-internal-2',
+      leadId: 'lead-internal-1',
+      type: 'ai_analyzed',
+      source: 'openai',
+      occurredAt: offset(6, 20),
+      summary: 'AI analyzed the lead and marked it warm',
+      details: { intent: 'warm', priority: 'high' },
+    },
+    {
+      id: 'evt-internal-3',
+      leadId: 'lead-internal-1',
+      type: 'commercial_contacted',
+      source: 'manual',
+      occurredAt: offset(6, 4),
+      summary: 'Commercial outreach sent by team',
+      details: null,
+    },
+    {
+      id: 'evt-internal-4',
+      leadId: 'lead-internal-1',
+      type: 'stage_changed',
+      source: 'system',
+      occurredAt: offset(1, 4),
+      summary: 'Lead moved to qualified',
+      details: { from: 'contacted', to: 'qualified' },
+    },
+    {
+      id: 'evt-internal-5',
+      leadId: 'lead-internal-2',
+      type: 'lead_received',
+      source: 'meta',
+      occurredAt: offset(2, 1),
+      summary: 'Meta instant form submitted',
+      details: { campaign: 'REKREATIVE — Captación Centros de Psicología' },
+    },
   ];
 }
 
@@ -288,6 +378,7 @@ function seedDemoLeads(): Lead[] {
   return [
     {
       id: 'lead-demo-1',
+      scope: 'client',
       clientId: 'client-acme',
       name: 'Maya Chen',
       email: 'maya.chen@example.com',
@@ -319,6 +410,7 @@ function seedDemoLeads(): Lead[] {
     },
     {
       id: 'lead-demo-2',
+      scope: 'client',
       clientId: 'client-lumen',
       name: 'Nora Singh',
       email: 'nora@lumen.example.com',
@@ -350,6 +442,7 @@ function seedDemoLeads(): Lead[] {
     },
     {
       id: 'lead-demo-3',
+      scope: 'client',
       clientId: 'client-northwind',
       name: 'Adrian Brooks',
       email: 'adrian@northwind.example.com',
@@ -380,6 +473,7 @@ function seedDemoLeads(): Lead[] {
     },
     {
       id: 'lead-demo-4',
+      scope: 'client',
       clientId: 'client-acme',
       name: 'Elliot Price',
       email: 'elliot@acme.example.com',
@@ -411,6 +505,7 @@ function seedDemoLeads(): Lead[] {
     },
     {
       id: 'lead-demo-5',
+      scope: 'client',
       clientId: 'client-lumen',
       name: 'Harper Ross',
       email: 'harper@lumen.example.com',
@@ -423,6 +518,62 @@ function seedDemoLeads(): Lead[] {
       stage: 'new',
       createdAt: daysAgo(21),
       lastActivityAt: daysAgo(18, 10),
+      aiAnalysis: null,
+      qualificationAnswers: null,
+      appointmentDate: null,
+      conversionValue: null,
+    },
+    // REKREATIVE's own internal acquisition — prospects for REKREATIVE
+    // itself (psychology centers/professionals interested in REKREATIVE's
+    // marketing services), never a client. scope: 'internal', clientId:
+    // null. Kept small and credible — 2 leads, not a full pipeline.
+    {
+      id: 'lead-internal-1',
+      scope: 'internal',
+      clientId: null,
+      name: 'Dra. Carla Méndez',
+      email: 'carla.mendez@centropsique.example.com',
+      phone: '+34 611 222 333',
+      whatsapp: '+34 611 222 333',
+      source: 'Meta Ads',
+      campaign: 'REKREATIVE — Captación Centros de Psicología',
+      adCreative: 'Anuncio de captación para consultas de psicología',
+      form: 'Formulario instantáneo REKREATIVE',
+      stage: 'qualified',
+      createdAt: daysAgo(7),
+      lastActivityAt: daysAgo(1, 4),
+      aiAnalysis: {
+        summary: 'Dirige un centro de psicología con 4 profesionales y busca más pacientes de terapia individual.',
+        intent: 'warm',
+        priority: 'high',
+        qualification: {
+          pain: 'Pocas consultas nuevas al mes',
+          urgency: 'Media',
+        },
+        analyzedAt: daysAgo(6, 20),
+      },
+      qualificationAnswers: {
+        servicio: 'Terapia individual y de pareja',
+        presupuesto: 'Abierta a un paquete mensual',
+      },
+      appointmentDate: null,
+      conversionValue: null,
+    },
+    {
+      id: 'lead-internal-2',
+      scope: 'internal',
+      clientId: null,
+      name: 'Javier Roldán',
+      email: 'javier@institutobienestar.example.com',
+      phone: '+34 622 444 555',
+      whatsapp: null,
+      source: 'Meta Ads',
+      campaign: 'REKREATIVE — Captación Centros de Psicología',
+      adCreative: 'Anuncio de captación para consultas de psicología',
+      form: 'Formulario instantáneo REKREATIVE',
+      stage: 'new',
+      createdAt: daysAgo(2),
+      lastActivityAt: daysAgo(2),
       aiAnalysis: null,
       qualificationAnswers: null,
       appointmentDate: null,
@@ -476,14 +627,18 @@ export function initializeLeadsStoreIfNeeded(): Lead[] {
   return existing.length ? existing : seedDemoLeads();
 }
 
+/** No clientId → every lead (internal + client — see LEADS-scope filtering
+ * in app/leads/page.tsx). A clientId → only that client's own leads (never
+ * internal, never another client's) — the exact contract Client Workspace's
+ * ClientLeadsPanel relies on for isolation. */
 export function getLeads(clientId?: string): Lead[] {
-  const leads = readStorage<Lead>(STORAGE_KEY);
+  const leads = readLeads();
   const result = !clientId ? leads : leads.filter((lead) => lead.clientId === clientId);
   return result.sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime());
 }
 
 export function getLeadById(id: string): Lead | null {
-  return readStorage<Lead>(STORAGE_KEY).find((lead) => lead.id === id) ?? null;
+  return readLeads().find((lead) => lead.id === id) ?? null;
 }
 
 export function getLeadEvents(leadId: string): LeadEvent[] {
@@ -517,7 +672,7 @@ export function appendLeadEvent(
   const nextEvents = [...events, created];
   writeStorage(EVENTS_STORAGE_KEY, nextEvents);
 
-  const leads = readStorage<Lead>(STORAGE_KEY);
+  const leads = readLeads();
   const leadIndex = leads.findIndex((lead) => lead.id === leadId);
   if (leadIndex >= 0) {
     const lead = leads[leadIndex];
@@ -530,16 +685,15 @@ export function appendLeadEvent(
 }
 
 export function createLead(input: CreateLeadInput): Lead {
-  const clients = getClients();
-  const clientExists = clients.some((client) => client.id === input.clientId);
-  if (!clientExists) {
-    throw new Error('Cannot create lead for a missing client id');
-  }
+  const scope: LeadScope = input.scope ?? 'client';
+  const clientId = scope === 'client' ? input.clientId ?? null : null;
+  assertScopeInvariant(scope, clientId);
 
   const now = isoNow();
   const created: Lead = {
     id: `lead-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    clientId: input.clientId,
+    scope,
+    clientId,
     name: input.name.trim(),
     email: input.email?.trim() || null,
     phone: input.phone?.trim() || null,
@@ -557,7 +711,7 @@ export function createLead(input: CreateLeadInput): Lead {
     conversionValue: input.conversionValue ?? null,
   };
 
-  const leads = readStorage<Lead>(STORAGE_KEY);
+  const leads = readLeads();
   const nextLeads = [created, ...leads];
   writeStorage(STORAGE_KEY, nextLeads);
 
@@ -572,24 +726,37 @@ export function createLead(input: CreateLeadInput): Lead {
   return created;
 }
 
-export function updateLead(id: string, patch: Partial<Lead>): Lead | null {
-  const leads = readStorage<Lead>(STORAGE_KEY);
+/** clientId/scope are deliberately excluded — the only way they may change
+ * is together, through updateLead's own merge below, which re-enforces the
+ * scope invariant on every write (same single-writer discipline as
+ * lib/content-items.ts's updateContentItem). stage stays excluded too —
+ * setLeadStage is the only writer, so a stage_changed LeadEvent is never
+ * skipped. */
+export type UpdateLeadInput = Partial<Omit<Lead, 'id' | 'createdAt' | 'stage'>>;
+
+export function updateLead(id: string, patch: UpdateLeadInput): Lead | null {
+  const leads = readLeads();
   const leadIndex = leads.findIndex((lead) => lead.id === id);
   if (leadIndex === -1) {
     return null;
   }
 
   const existing = leads[leadIndex];
-  const { stage: _ignoredStage, ...safePatch } = patch;
-  const updatedLead = {
+  const merged: Lead = {
     ...existing,
-    ...safePatch,
-    lastActivityAt: safePatch.lastActivityAt ?? existing.lastActivityAt,
+    ...patch,
+    lastActivityAt: patch.lastActivityAt ?? existing.lastActivityAt,
   };
 
-  leads[leadIndex] = updatedLead;
+  if (merged.scope === 'internal') {
+    merged.clientId = null;
+  } else {
+    assertScopeInvariant(merged.scope, merged.clientId);
+  }
+
+  leads[leadIndex] = merged;
   writeStorage(STORAGE_KEY, leads);
-  return updatedLead;
+  return merged;
 }
 
 export function setLeadStage(leadId: string, nextStage: LeadStage, source: LeadEventSource = 'manual'): Lead | null {
@@ -597,7 +764,7 @@ export function setLeadStage(leadId: string, nextStage: LeadStage, source: LeadE
   if (!lead) return null;
   if (lead.stage === nextStage) return lead;
 
-  const leads = readStorage<Lead>(STORAGE_KEY);
+  const leads = readLeads();
   const leadIndex = leads.findIndex((item) => item.id === leadId);
   if (leadIndex === -1) return null;
 
@@ -621,7 +788,7 @@ export function setLeadStage(leadId: string, nextStage: LeadStage, source: LeadE
 }
 
 export function setAIAnalysis(leadId: string, analysis: LeadAiAnalysis | null): Lead | null {
-  const leads = readStorage<Lead>(STORAGE_KEY);
+  const leads = readLeads();
   const leadIndex = leads.findIndex((lead) => lead.id === leadId);
   if (leadIndex === -1) return null;
 
@@ -647,9 +814,10 @@ export function setAIAnalysis(leadId: string, analysis: LeadAiAnalysis | null): 
   return updatedLead;
 }
 
-export function getClientNameForLead(clientId: string): string {
+export function getClientNameForLead(clientId: string | null): string {
+  if (!clientId) return 'Interno';
   const client = getClients().find((item) => item.id === clientId);
-  return client?.name ?? 'Unknown client';
+  return client?.name ?? 'Cliente desconocido';
 }
 
 export function getStageLabel(stage: LeadStage): string {

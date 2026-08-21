@@ -823,7 +823,7 @@ export function includesDemoData(input: { revenueRecords?: RevenueRecord[]; camp
 // rather than introducing FX/multi-currency handling.
 
 export function formatEUR(value: number): string {
-  return `${Math.round(value).toLocaleString('es-ES')} €`;
+  return `${Math.round(value).toLocaleString('es-ES', { useGrouping: true })} €`;
 }
 
 export function formatRoas(value: number | null): string {

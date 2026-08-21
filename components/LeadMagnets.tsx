@@ -8,24 +8,24 @@ import type { LeadMagnet } from '@/lib/schemas';
  * it replaces a database rather than a bookmark folder. Columns are name + offer, status pill, what it captures, where the leads land,
  * and the campaign it was built for. Every row opens the real page.
  */
-const STATUS: Record<LeadMagnet['status'], { dot: string; text: string }> = {
-  live: { dot: 'bg-os-ok', text: 'text-os-ok' },
-  draft: { dot: 'bg-os-muted', text: 'text-os-muted' },
-  paused: { dot: 'bg-os-warn', text: 'text-os-warn' },
-  archived: { dot: 'bg-os-dim', text: 'text-os-dim' },
+const STATUS: Record<LeadMagnet['status'], { dot: string; text: string; label: string }> = {
+  live: { dot: 'bg-os-ok', text: 'text-os-ok', label: 'Activo' },
+  draft: { dot: 'bg-os-muted', text: 'text-os-muted', label: 'Borrador' },
+  paused: { dot: 'bg-os-warn', text: 'text-os-warn', label: 'Pausado' },
+  archived: { dot: 'bg-os-dim', text: 'text-os-dim', label: 'Archivado' },
 };
 
 const CAPTURES = {
   email: { Icon: Mail, label: 'Email' },
-  booking: { Icon: CalendarCheck, label: 'Booking' },
-  none: { Icon: Minus, label: 'None' },
+  booking: { Icon: CalendarCheck, label: 'Reserva' },
+  none: { Icon: Minus, label: 'Ninguno' },
 } as const;
 
 const dateLabel = (iso: string): string => {
   const d = new Date(`${iso}T00:00:00Z`);
   return Number.isNaN(d.getTime())
     ? iso
-    : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    : d.toLocaleDateString('es-ES', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 };
 
 const host = (url: string): string => {
@@ -49,7 +49,7 @@ export function LeadMagnets({
   if (rows.length === 0) {
     return (
       <p className="rounded-lg-t border border-os-border bg-os-surface px-4 py-3 font-mono text-[10.5px] text-os-dim">
-        No lead magnets yet. Every landing page we ship lands here.
+        Aún no hay lead magnets. Cada página que publicamos aparece aquí.
       </p>
     );
   }
@@ -59,14 +59,14 @@ export function LeadMagnets({
         <thead>
           <tr className="border-b border-os-border">
             {[
-              'Name',
-              'Status',
-              'Captures',
-              'Leads to',
-              'Source',
-              'Live',
-              ...(showCopy ? ['Link'] : []),
-              ...(manage ? ['Manage'] : []),
+              'Nombre',
+              'Estado',
+              'Captura',
+              'Destino',
+              'Origen',
+              'Publicado',
+              ...(showCopy ? ['Enlace'] : []),
+              ...(manage ? ['Gestionar'] : []),
             ].map((h) => (
               <th
                 key={h}
@@ -99,7 +99,7 @@ export function LeadMagnets({
                 <td className="whitespace-nowrap px-4 py-3 align-top">
                   <span className="inline-flex items-center gap-1.5">
                     <span className={`h-1.5 w-1.5 shrink-0 ${s.dot}`} />
-                    <span className={`font-mono text-[10.5px] uppercase tracking-wider ${s.text}`}>{m.status}</span>
+                    <span className={`font-mono text-[10.5px] uppercase tracking-wider ${s.text}`}>{s.label}</span>
                   </span>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 align-top">

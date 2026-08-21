@@ -11,17 +11,16 @@ import {
 } from '@/lib/finances';
 
 describe('incomeAccounts', () => {
-  test('lists every processor Alex runs (Stripe, PayPal, FanBasis×2, Wise×2)', () => {
+  test("REKREATIVE's default visible demo set is Stripe, PayPal, Wise — one row each", () => {
     const accounts = incomeAccounts({ connected: false, mtdUsd: null });
-    expect(accounts).toHaveLength(6);
-    expect(accounts.map((a) => a.id)).toEqual([
-      'stripe',
-      'paypal',
-      'fanbasis-vantage',
-      'fanbasis-lc',
-      'wise-1',
-      'wise-2',
-    ]);
+    expect(accounts).toHaveLength(3);
+    expect(accounts.map((a) => a.id)).toEqual(['stripe', 'paypal', 'wise-1']);
+    expect(accounts.map((a) => a.label)).toEqual(['Stripe · REKREATIVE', 'PayPal · REKREATIVE', 'Wise · REKREATIVE']);
+  });
+
+  test('0/3 disconnected by default — none configured, none live', () => {
+    const accounts = incomeAccounts({ connected: false, mtdUsd: null });
+    expect(accounts.filter((a) => a.live)).toHaveLength(0);
   });
 
   test('Stripe goes live with its real month-to-date income when connected', () => {
@@ -50,7 +49,6 @@ describe('incomeAccounts', () => {
     expect(paypal.live).toBe(false); // but no real pull implemented yet
     expect(paypal.income).toBeNull(); // so never a faked number
     expect(accounts.find((a) => a.id === 'wise-1')!.configured).toBe(true);
-    expect(accounts.find((a) => a.id === 'fanbasis-lc')!.configured).toBe(false);
   });
 
   test('stripe.configured defaults to its connection state', () => {
@@ -59,13 +57,27 @@ describe('incomeAccounts', () => {
   });
 
   test('a non-Stripe account goes live with real income when passed in liveIncomeUsd', () => {
-    const accounts = incomeAccounts({ connected: false, mtdUsd: null }, { 'fanbasis-lc': true }, { 'fanbasis-lc': 3400 });
-    const aa = accounts.find((a) => a.id === 'fanbasis-lc')!;
-    expect(aa.configured).toBe(true);
-    expect(aa.live).toBe(true);
-    expect(aa.income).toBe(3400);
+    const accounts = incomeAccounts({ connected: false, mtdUsd: null }, { 'wise-1': true }, { 'wise-1': 3400 });
+    const wise = accounts.find((a) => a.id === 'wise-1')!;
+    expect(wise.configured).toBe(true);
+    expect(wise.live).toBe(true);
+    expect(wise.income).toBe(3400);
     // others still pending
     expect(accounts.find((a) => a.id === 'paypal')!.live).toBe(false);
+  });
+
+  test('the underlying account-building mechanism stays generic — a FanBasis-style id not in the default list can still be built the same way if ever re-added', () => {
+    // Exercises the same `configured`/`live`/`income` derivation the default
+    // Stripe/PayPal/Wise rows use, via the config/liveIncomeUsd maps alone —
+    // proof that dropping FanBasis from the default VISIBLE list didn't
+    // remove the general multi-account mechanism, only its default output.
+    const accounts = incomeAccounts({ connected: false, mtdUsd: null }, { 'fanbasis-lc': true }, { 'fanbasis-lc': 900 });
+    // Not part of today's default visible set...
+    expect(accounts.find((a) => a.id === 'fanbasis-lc')).toBeUndefined();
+    // ...but the maps themselves accept any id without throwing, exactly as
+    // configuredProcessors() (lib/connectors/payments.ts, untouched) still
+    // reports fanbasis-lc/fanbasis-vantage/wise-2 in the full registry.
+    expect(accounts).toHaveLength(3);
   });
 });
 

@@ -14,6 +14,13 @@ import type { LeadMagnet } from '@/lib/schemas';
  */
 const STATUSES: LeadMagnet['status'][] = ['live', 'draft', 'paused', 'archived'];
 
+const STATUS_LABEL: Record<LeadMagnet['status'], string> = {
+  live: 'Activo',
+  draft: 'Borrador',
+  paused: 'Pausado',
+  archived: 'Archivado',
+};
+
 export function LeadMagnetRowActions({ id, status }: { id: string; status: LeadMagnet['status'] }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -36,7 +43,7 @@ export function LeadMagnetRowActions({ id, status }: { id: string; status: LeadM
   return (
     <span className="flex items-center gap-1.5">
       <select
-        aria-label="Status"
+        aria-label="Estado"
         disabled={busy}
         value={status}
         onChange={(e) => call({ method: 'PATCH', body: JSON.stringify({ status: e.target.value }) })}
@@ -44,7 +51,7 @@ export function LeadMagnetRowActions({ id, status }: { id: string; status: LeadM
       >
         {STATUSES.map((s) => (
           <option key={s} value={s}>
-            {s}
+            {STATUS_LABEL[s]}
           </option>
         ))}
       </select>
@@ -55,7 +62,7 @@ export function LeadMagnetRowActions({ id, status }: { id: string; status: LeadM
             disabled={busy}
             className="rounded-sm-t border border-os-border px-1.5 py-1 font-mono text-[10px] uppercase tracking-widest text-os-err transition-colors hover:border-os-border-strong disabled:opacity-40"
           >
-            sure?
+            ¿seguro?
           </button>
           <button
             onClick={() => setConfirming(false)}
@@ -67,8 +74,8 @@ export function LeadMagnetRowActions({ id, status }: { id: string; status: LeadM
       ) : (
         <button
           onClick={() => setConfirming(true)}
-          aria-label="Delete lead magnet"
-          title="Delete"
+          aria-label="Eliminar lead magnet"
+          title="Eliminar"
           className="text-os-dim opacity-0 transition-opacity hover:text-os-err group-hover:opacity-100"
         >
           <Trash2 className="h-3.5 w-3.5" />

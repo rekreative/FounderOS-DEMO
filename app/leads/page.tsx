@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Search } from 'lucide-react';
 import { getClients, initializeStoreIfNeeded } from '@/lib/clients';
 import {
+  LEAD_SCOPE_OPTIONS,
   LEAD_STAGE_OPTIONS,
   appendLeadEvent,
   createLead,
@@ -14,10 +16,21 @@ import {
   updateLead,
   type Lead,
   type LeadEvent,
+  type LeadIntent,
+  type LeadScope,
   type LeadStage,
 } from '@/lib/leads';
 
 const STAGE_FILTERS = [{ id: 'all', label: 'Todos' }, ...LEAD_STAGE_OPTIONS];
+
+// Presentation-only mapping — lead.aiAnalysis.intent itself is never
+// touched, just how it reads in the table. Kept explicitly separate from
+// CRM stage (the "Etapa" column/select, a few cells over).
+const AI_INTENT_LABEL: Record<LeadIntent, string> = {
+  hot: 'ALTA',
+  warm: 'MEDIA',
+  cold: 'BAJA',
+};
 
 type DraftLead = {
   clientId: string;
@@ -85,6 +98,8 @@ function eventLabel(type: LeadEvent['type']): string {
 function LeadRow({
   lead,
   events,
+  showClientColumn,
+  columnCount,
   expanded,
   onToggle,
   onStageChange,
@@ -93,6 +108,12 @@ function LeadRow({
 }: {
   lead: Lead;
   events: LeadEvent[];
+  /** REKREATIVE scope: every row is already known to be internal, so the
+   * Cliente column is redundant — hidden there, shown as-is in CLIENTES scope. */
+  showClientColumn: boolean;
+  /** Current visible column count (9 with Cliente shown, 8 without) — keeps
+   * the expanded row's colSpan aligned with the header in both scopes. */
+  columnCount: number;
   expanded: boolean;
   onToggle: () => void;
   onStageChange: (nextStage: LeadStage) => void;
@@ -100,7 +121,7 @@ function LeadRow({
   onAddNote: () => void;
 }) {
   const clientName = getClientNameForLead(lead.clientId);
-  const aiIntent = lead.aiAnalysis?.intent ? lead.aiAnalysis.intent.toUpperCase() : '—';
+  const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
 
   return (
     <>
@@ -122,7 +143,7 @@ function LeadRow({
             </div>
           </div>
         </td>
-        <td className="px-3 py-3 text-left font-mono text-[10.5px] text-os-muted">{clientName}</td>
+        {showClientColumn && <td className="px-3 py-3 text-left font-mono text-[10.5px] text-os-muted">{clientName}</td>}
         <td className="px-3 py-3 text-left">
           <select
             value={lead.stage}
@@ -141,44 +162,123 @@ function LeadRow({
         <td className="px-3 py-3 text-left font-mono text-[10.5px] text-os-muted">{lead.campaign || '—'}</td>
         <td className="px-3 py-3 text-left font-mono text-[10.5px] text-os-dim">{formatRelative(lead.lastActivityAt)}</td>
         <td className="px-3 py-3 text-left">
-          <div className="flex flex-wrap items-center gap-2 text-[10px] text-os-dim">
-            {lead.email && <span className="font-mono">email</span>}
-            {lead.phone && <span className="font-mono">phone</span>}
-            {lead.whatsapp && <span className="font-mono">wa</span>}
-            {!lead.email && !lead.phone && !lead.whatsapp && <span className="font-mono">—</span>}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {lead.email && (
+              <span className="inline-block border border-os-border bg-os-surface2 px-1.5 py-0.5 font-mono text-[8.5px] uppercase tracking-wide text-os-dim">
+                Email
+              </span>
+            )}
+            {lead.phone && (
+              <span className="inline-block border border-os-border bg-os-surface2 px-1.5 py-0.5 font-mono text-[8.5px] uppercase tracking-wide text-os-dim">
+                Tel
+              </span>
+            )}
+            {lead.whatsapp && (
+              <span className="inline-block border border-os-border bg-os-surface2 px-1.5 py-0.5 font-mono text-[8.5px] uppercase tracking-wide text-os-dim">
+                WA
+              </span>
+            )}
+            {!lead.email && !lead.phone && !lead.whatsapp && <span className="font-mono text-[10px] text-os-dim">—</span>}
           </div>
         </td>
         <td className="px-3 py-3 text-right">
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={onAddNote} className="font-mono text-[9px] uppercase tracking-wide text-os-dim hover:text-os-accent">
-              añadir nota
+          <div className="flex justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={onAddNote}
+              className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-dim hover:border-os-border-strong hover:text-os-accent"
+            >
+              Añadir nota
             </button>
-            <button type="button" onClick={onEdit} className="font-mono text-[9px] uppercase tracking-wide text-os-muted hover:text-os-accent">
-              editar
+            <button
+              type="button"
+              onClick={onEdit}
+              className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent"
+            >
+              Editar
             </button>
           </div>
         </td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={9} className="border-t border-os-border bg-os-surface px-3 py-3">
+          <td colSpan={columnCount} className="border-t border-os-border bg-os-surface px-3 py-3">
+            {/* Contact details — the real values the operator needs to reach
+                this person, never invented. The main row stays compact; this
+                is the one place they're shown in full. */}
+            <div className="mb-3 border-b border-os-border pb-3">
+              <div className="mb-2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Datos de contacto</div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div>
+                  <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Email</div>
+                  <div className="mt-1 truncate font-mono text-[11px] text-os-text">
+                    {lead.email ? (
+                      <a href={`mailto:${lead.email}`} className="hover:text-os-accent">
+                        {lead.email}
+                      </a>
+                    ) : (
+                      '—'
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Teléfono</div>
+                  <div className="mt-1 truncate font-mono text-[11px] text-os-text">
+                    {lead.phone ? (
+                      <a href={`tel:${lead.phone}`} className="hover:text-os-accent">
+                        {lead.phone}
+                      </a>
+                    ) : (
+                      '—'
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">WhatsApp</div>
+                  <div className="mt-1 truncate font-mono text-[11px] text-os-text">
+                    {lead.whatsapp ? (
+                      <a
+                        href={`https://wa.me/${lead.whatsapp.replace(/[^\d]/g, '')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:text-os-accent"
+                      >
+                        {lead.whatsapp}
+                      </a>
+                    ) : (
+                      '—'
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="mb-2 flex items-center justify-between gap-3">
               <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Línea de tiempo</span>
               <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">{events.length} eventos</span>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {events.length === 0 ? (
-                <span className="font-mono text-[10px] text-os-dim">Sin eventos en la línea de tiempo.</span>
-              ) : (
-                events.map((event, index) => (
-                  <span key={event.id} className="inline-flex items-center gap-1.5 rounded-sm-t border border-os-border bg-os-surface2 px-2 py-1">
-                    {index > 0 && <span className="font-mono text-[9px] text-os-dim">→</span>}
-                    <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-muted">{eventLabel(event.type)}</span>
-                    <span className="font-mono text-[8.5px] text-os-dim">{formatDateTime(event.occurredAt)}</span>
-                  </span>
-                ))
-              )}
-            </div>
+            {events.length === 0 ? (
+              <span className="font-mono text-[10px] text-os-dim">Sin eventos en la línea de tiempo.</span>
+            ) : (
+              // Its own horizontal scroll region — a long real history scrolls
+              // in place rather than compressing cards or clipping later
+              // events, independent of the table's own overflow-x-auto.
+              <div className="overflow-x-auto">
+                <div className="flex items-center gap-1.5 pb-1">
+                  {events.map((event, index) => (
+                    <div key={event.id} className="flex shrink-0 items-center gap-1.5">
+                      {index > 0 && <span className="font-mono text-[9px] text-os-dim">→</span>}
+                      <div className="flex shrink-0 flex-col gap-0.5 rounded-sm-t border border-os-border bg-os-surface2 px-2.5 py-1.5">
+                        <span className="whitespace-nowrap font-mono text-[9.5px] uppercase tracking-wide text-os-text">
+                          {eventLabel(event.type)}
+                        </span>
+                        <span className="whitespace-nowrap font-mono text-[8.5px] text-os-dim">{formatDateTime(event.occurredAt)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </td>
         </tr>
       )}
@@ -189,8 +289,13 @@ function LeadRow({
 export default function LeadsPage() {
   const [clients, setClients] = useState<any[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
+  // Primary scope: REKREATIVE's own leads vs. client leads — conceptually
+  // ABOVE client filtering, never a fake client. Defaults to REKREATIVE.
+  // Local UI state only, same as every other filter here.
+  const [moduleScope, setModuleScope] = useState<LeadScope>('internal');
   const [stageFilter, setStageFilter] = useState<'all' | LeadStage>('all');
   const [clientFilter, setClientFilter] = useState<'all' | string>('all');
+  const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [showCreate, setShowCreate] = useState(false);
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
@@ -198,7 +303,15 @@ export default function LeadsPage() {
   const [noteDraft, setNoteDraft] = useState('');
   const [draft, setDraft] = useState<DraftLead>(emptyDraft());
 
+  // In REKREATIVE scope the client selector is hidden and irrelevant, so
+  // always load the full set (internal leads have no clientId to filter
+  // by); the scope filter below narrows it. In CLIENTES scope, behavior is
+  // unchanged from before scope existed.
   const loadLeads = () => {
+    if (moduleScope === 'internal') {
+      setLeads(getLeads());
+      return;
+    }
     const activeClient = clientFilter === 'all' ? undefined : clientFilter;
     setLeads(getLeads(activeClient));
   };
@@ -212,19 +325,55 @@ export default function LeadsPage() {
 
   useEffect(() => {
     loadLeads();
-  }, [clientFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientFilter, moduleScope]);
+
+  // Scope filter — sits above search/stage. "Todos los clientes" (CLIENTES
+  // scope, no client picked) must never include REKREATIVE's own leads;
+  // this guarantees it regardless of what `leads` currently holds.
+  const scopedLeads = useMemo(() => leads.filter((lead) => lead.scope === moduleScope), [leads, moduleScope]);
+
+  // Search is client-side, UI-only state — never persisted, matches name,
+  // email, phone, and campaign case-insensitively. Operates only within the
+  // currently selected scope.
+  const searchedLeads = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return scopedLeads;
+    return scopedLeads.filter(
+      (lead) =>
+        lead.name.toLowerCase().includes(q) ||
+        (lead.email ?? '').toLowerCase().includes(q) ||
+        (lead.phone ?? '').toLowerCase().includes(q) ||
+        (lead.campaign ?? '').toLowerCase().includes(q),
+    );
+  }, [scopedLeads, query]);
+
+  // Stage filter counts — computed from the already-loaded, search-filtered
+  // leads (never a new metric/store); reacts live as the search narrows.
+  const stageCounts = useMemo(() => {
+    const counts: Record<'all' | LeadStage, number> = { all: searchedLeads.length } as Record<'all' | LeadStage, number>;
+    for (const option of LEAD_STAGE_OPTIONS) {
+      counts[option.id] = searchedLeads.filter((lead) => lead.stage === option.id).length;
+    }
+    return counts;
+  }, [searchedLeads]);
 
   const visibleLeads = useMemo(
     () =>
-      leads.filter((lead) => {
+      searchedLeads.filter((lead) => {
         if (stageFilter !== 'all' && lead.stage !== stageFilter) return false;
         return true;
       }),
-    [leads, stageFilter],
+    [searchedLeads, stageFilter],
   );
 
+  // REKREATIVE scope: every row is already known to be internal, so the
+  // Cliente column is redundant there — shown as-is in CLIENTES scope.
+  const showClientColumn = moduleScope === 'client';
+  const columnCount = showClientColumn ? 9 : 8;
+
   const openCreateForm = () => {
-    const firstClient = clients[0]?.id ?? '';
+    const firstClient = moduleScope === 'client' ? clients[0]?.id ?? '' : '';
     setDraft(emptyDraft(firstClient));
     setEditingLeadId(null);
     setShowCreate(true);
@@ -233,7 +382,7 @@ export default function LeadsPage() {
   const openEditForm = (lead: Lead) => {
     setEditingLeadId(lead.id);
     setDraft({
-      clientId: lead.clientId,
+      clientId: lead.clientId ?? '',
       name: lead.name,
       email: lead.email ?? '',
       phone: lead.phone ?? '',
@@ -254,8 +403,11 @@ export default function LeadsPage() {
   };
 
   const submitLead = () => {
+    const scope: LeadScope = moduleScope;
+    const clientId = scope === 'client' ? draft.clientId : null;
     const normalized = {
-      clientId: draft.clientId,
+      scope,
+      clientId,
       name: draft.name.trim(),
       email: draft.email.trim() || null,
       phone: draft.phone.trim() || null,
@@ -267,13 +419,14 @@ export default function LeadsPage() {
       stage: draft.stage,
     };
 
-    if (!normalized.name || !normalized.clientId) {
+    if (!normalized.name || (scope === 'client' && !normalized.clientId)) {
       return;
     }
 
     if (editingLeadId) {
       const existing = leads.find((lead) => lead.id === editingLeadId);
       const next = updateLead(editingLeadId, {
+        scope: normalized.scope,
         clientId: normalized.clientId,
         name: normalized.name,
         email: normalized.email,
@@ -291,13 +444,11 @@ export default function LeadsPage() {
       }
 
       if (next) {
-        const activeClient = clientFilter === 'all' ? undefined : clientFilter;
-        setLeads(getLeads(activeClient));
+        loadLeads();
       }
     } else {
       createLead(normalized);
-      const activeClient = clientFilter === 'all' ? undefined : clientFilter;
-      setLeads(getLeads(activeClient));
+      loadLeads();
     }
 
     closeForm();
@@ -305,8 +456,7 @@ export default function LeadsPage() {
 
   const handleStageChange = (leadId: string, nextStage: LeadStage) => {
     setLeadStage(leadId, nextStage, 'manual');
-    const activeClient = clientFilter === 'all' ? undefined : clientFilter;
-    setLeads(getLeads(activeClient));
+    loadLeads();
   };
 
   const handleAddManualNote = (leadId: string) => {
@@ -322,8 +472,7 @@ export default function LeadsPage() {
       summary: noteDraft.trim(),
       occurredAt: new Date().toISOString(),
     });
-    const activeClient = clientFilter === 'all' ? undefined : clientFilter;
-    setLeads(getLeads(activeClient));
+    loadLeads();
     setNoteLeadId(null);
     setNoteDraft('');
   };
@@ -346,7 +495,39 @@ export default function LeadsPage() {
         </div>
       </div>
 
+      {/* Primary scope — REKREATIVE's own acquisition vs. client leads.
+          Conceptually above every filter below; REKREATIVE is never a
+          client, so this never touches the client selector's options. */}
+      <div className="mb-4 flex items-center gap-1.5">
+        {LEAD_SCOPE_OPTIONS.map((option) => {
+          const active = moduleScope === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setModuleScope(option.id)}
+              className={`border px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-wide ${
+                active ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim hover:border-os-border-strong hover:text-os-muted'
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-os-dim" />
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Buscar lead..."
+            className="border border-os-border bg-os-surface py-1.5 pl-8 pr-2.5 text-[12.5px] text-os-text outline-none placeholder:text-os-dim focus:border-os-border-strong"
+          />
+        </div>
+
         <div className="flex flex-wrap items-center gap-1.5">
           {STAGE_FILTERS.map((option) => {
             const active = stageFilter === option.id;
@@ -359,35 +540,37 @@ export default function LeadsPage() {
                   active ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim hover:border-os-border-strong hover:text-os-muted'
                 }`}
               >
-                {option.label}
+                {option.label} <span className="opacity-70">{stageCounts[option.id as 'all' | LeadStage] ?? 0}</span>
               </button>
             );
           })}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
-          <select
-            value={clientFilter}
-            onChange={(event) => setClientFilter(event.target.value)}
-            className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
-          >
-            <option value="all">Todos los clientes</option>
-            {clients.map((client) => (
-              <option key={client.id} value={client.id}>
-                {client.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {moduleScope === 'client' && (
+          <div className="ml-auto flex items-center gap-2">
+            <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
+            <select
+              value={clientFilter}
+              onChange={(event) => setClientFilter(event.target.value)}
+              className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
+            >
+              <option value="all">Todos los clientes</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
-      <div className="overflow-hidden rounded-sm-t border border-os-border bg-os-surface">
-        <table className="w-full border-collapse text-left text-sm">
+      <div className="overflow-x-auto rounded-sm-t border border-os-border bg-os-surface">
+        <table className="w-full min-w-[900px] border-collapse text-left text-sm">
           <thead>
             <tr className="bg-os-surface2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">
               <th className="px-3 py-2 font-normal">Lead</th>
-              <th className="px-3 py-2 font-normal">Cliente</th>
+              {showClientColumn && <th className="px-3 py-2 font-normal">Cliente</th>}
               <th className="px-3 py-2 font-normal">Etapa</th>
               <th className="px-3 py-2 font-normal">Intención IA</th>
               <th className="px-3 py-2 font-normal">Origen</th>
@@ -400,8 +583,8 @@ export default function LeadsPage() {
           <tbody>
             {visibleLeads.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-                  No hay leads en este segmento.
+                <td colSpan={columnCount} className="px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+                  No hay leads que coincidan con estos filtros.
                 </td>
               </tr>
             ) : (
@@ -410,6 +593,8 @@ export default function LeadsPage() {
                   key={lead.id}
                   lead={lead}
                   events={getLeadEvents(lead.id)}
+                  showClientColumn={showClientColumn}
+                  columnCount={columnCount}
                   expanded={Boolean(expanded[lead.id])}
                   onToggle={() => setExpanded((prev) => ({ ...prev, [lead.id]: !prev[lead.id] }))}
                   onStageChange={(nextStage) => handleStageChange(lead.id, nextStage)}
@@ -433,20 +618,31 @@ export default function LeadsPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <label className="col-span-2">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
-                <select
-                  value={draft.clientId}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, clientId: event.target.value }))}
-                  className="w-full border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-text"
-                >
-                  {clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {moduleScope === 'client' ? (
+                <label className="col-span-2">
+                  <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
+                  <select
+                    value={draft.clientId}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, clientId: event.target.value }))}
+                    className="w-full border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-text"
+                  >
+                    {clients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label className="col-span-2">
+                  <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
+                  <input
+                    disabled
+                    value="Interno · REKREATIVE"
+                    className="w-full cursor-not-allowed border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-dim"
+                  />
+                </label>
+              )}
 
               <label className="col-span-1">
                 <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Nombre</span>

@@ -46,6 +46,17 @@ const CONFIGURATION_FILTERS = [{ id: 'all', label: 'Todas' }, ...INTEGRATION_CON
 const VERIFICATION_FILTERS = [{ id: 'all', label: 'Todas' }, ...INTEGRATION_VERIFICATION_STATUS_OPTIONS];
 const PLATFORM_FILTERS = [{ id: 'all', label: 'Todas las plataformas' }, ...INTEGRATION_PLATFORM_OPTIONS];
 
+// Primary scope selector labels — presentation only, local to this board.
+// Deliberately NOT sourced from INTEGRATION_SCOPE_OPTIONS (lib/integration-
+// connections.ts): that array's 'Cliente'/'Interno' labels back the
+// per-record "Ámbito" concept elsewhere and are left untouched. Same
+// non-invasive approach as MODULE_SCOPE_OPTIONS in AgentsAiBoard/
+// AUTOMATION_SCOPE_OPTIONS in lib/automations.ts.
+const MODULE_SCOPE_OPTIONS: { id: IntegrationScope; label: string }[] = [
+  { id: 'internal', label: 'REKREATIVE' },
+  { id: 'client', label: 'Clientes' },
+];
+
 // ── Platform catalog (presentation only — no model/storage impact) ─────────
 // "Principales" = the small set of high-value platforms REKREATIVE actually
 // uses day to day. "Explorar por categoría" groups the full controlled
@@ -265,10 +276,10 @@ function RequirementRowCard({
  * categoría" reuse this same card). Deliberately never says
  * connected/disconnected/connect — only how many IntegrationConnection
  * records exist for this platform, and whether any of them are incomplete
- * or have a manually-recorded incident. Counts come from ALL connections
- * (every client + internal) — the catalog is global discovery, secondary to
- * the client-first onboarding sections above it, so it stays a stable
- * overview unaffected by any single filter. */
+ * or have a manually-recorded incident. Counts are scoped to the active
+ * moduleScope (see platformStats) — REKREATIVE never sees a client's
+ * connection counted as its own, and vice versa; ownership must read
+ * honestly regardless of which scope tab is active. */
 function PlatformCatalogCard({
   platform,
   logo,
@@ -363,6 +374,7 @@ function CategorySection({
 function ConnectionCard({
   connection,
   clientName,
+  showClientName,
   platformLogosLarge,
   expanded,
   onToggle,
@@ -373,6 +385,11 @@ function ConnectionCard({
 }: {
   connection: IntegrationConnection;
   clientName: string;
+  /** REKREATIVE scope: every card in "Infraestructura compartida de
+   * REKREATIVE" is already known to be internal, so a "Cliente: Interno"
+   * label would be redundant — hidden there, shown as-is in CLIENTES scope.
+   * Same pattern as AutomationsBoard/AgentsAiBoard. */
+  showClientName: boolean;
   platformLogosLarge: Record<string, ReactNode>;
   expanded: boolean;
   onToggle: () => void;
@@ -389,8 +406,8 @@ function ConnectionCard({
           <div className="min-w-0">
             <div className="truncate text-[13.5px] font-semibold leading-tight text-os-text">{connection.name || 'Sin nombre'}</div>
             <div className="mt-1 flex flex-wrap items-center gap-x-1.5 font-mono text-[10px] text-os-muted">
-              <span className="truncate">{clientName}</span>
-              <span className="text-os-dim">·</span>
+              {showClientName && <span className="truncate">{clientName}</span>}
+              {showClientName && <span className="text-os-dim">·</span>}
               <span className="truncate text-os-dim">{getIntegrationPlatformLabel(connection.platform)}</span>
             </div>
           </div>
@@ -500,6 +517,11 @@ export function IntegrationConnectionsBoard({
   platformLogosLarge: Record<string, ReactNode>;
 }) {
   const [clients, setClients] = useState<Client[]>([]);
+  // Primary scope: REKREATIVE's own shared infrastructure vs. client
+  // integrations — conceptually ABOVE every filter/section below, never a
+  // fake client. Defaults to REKREATIVE. Local UI state only, same pattern
+  // as AutomationsBoard's/AgentsAiBoard's moduleScope.
+  const [moduleScope, setModuleScope] = useState<IntegrationScope>('internal');
   const [connections, setConnections] = useState<IntegrationConnection[]>([]);
   // Unfiltered by clientFilter — the onboarding overview, selected-client
   // workspace, internal-connections section, and platform catalog all need
@@ -520,6 +542,7 @@ export function IntegrationConnectionsBoard({
   const [draft, setDraft] = useState<DraftConnection>(emptyDraft());
   const connectionsSectionRef = useRef<HTMLDivElement>(null);
   const onboardingWorkspaceRef = useRef<HTMLDivElement>(null);
+  const internalConnectionsSectionRef = useRef<HTMLDivElement>(null);
 
   const activeClientId = () => (clientFilter === 'all' ? undefined : clientFilter);
 
@@ -589,11 +612,20 @@ export function IntegrationConnectionsBoard({
     [selectedOnboardingClientId, requirementsByClient, connectionsByClient, internalConnections],
   );
 
-  // Catalog stats read from `allConnections` (every client + internal) — the
-  // catalog is global discovery, not scoped to any one filter.
+  // Catalog stats — scoped to the active moduleScope, not global. REKREATIVE
+  // scope must only ever count/reveal REKREATIVE's own (scope==='internal')
+  // connections; CLIENTES scope must only ever count/reveal client-owned
+  // (scope==='client') connections. Counting a client's connection as if it
+  // were REKREATIVE's own (or vice versa) would misrepresent ownership —
+  // catalog counting is a display concern, entirely separate from onboarding
+  // requirement satisfaction (buildClientRequirementRows/
+  // summarizeClientOnboarding in lib/client-integration-requirements.ts),
+  // which still lets a shared internal connection satisfy a client's
+  // connectionScope==='internal' requirement, unchanged.
   const platformStats = useMemo(() => {
     const stats: Partial<Record<IntegrationPlatform, { count: number; hasIncomplete: boolean; hasIncident: boolean }>> = {};
     for (const c of allConnections) {
+      if (c.scope !== moduleScope) continue;
       const entry = stats[c.platform] ?? { count: 0, hasIncomplete: false, hasIncident: false };
       entry.count += 1;
       if (getIntegrationConfigurationStatus(c) === 'incomplete') entry.hasIncomplete = true;
@@ -601,7 +633,7 @@ export function IntegrationConnectionsBoard({
       stats[c.platform] = entry;
     }
     return stats;
-  }, [allConnections]);
+  }, [allConnections, moduleScope]);
 
   const statsFor = (platform: IntegrationPlatform) => platformStats[platform] ?? { count: 0, hasIncomplete: false, hasIncident: false };
 
@@ -621,12 +653,16 @@ export function IntegrationConnectionsBoard({
     refreshRequirements();
   };
 
-  const visibleConnections = useMemo(
+  // CLIENTES scope board — client-owned connections only, respecting the
+  // Cliente/Plataforma/Configuración/Verificación filters. Unchanged from
+  // before the primary scope selector existed.
+  const clientVisibleConnections = useMemo(
     () =>
       connections.filter((connection) => {
         // Internal (scope==='internal') connections are managed exclusively
-        // through "Integraciones internas REKREATIVE" above — never shown
-        // here too. Display/filtering only; nothing is removed from storage.
+        // through "Infraestructura compartida de REKREATIVE" (REKREATIVE
+        // scope) — never shown here too. Display/filtering only; nothing is
+        // removed from storage.
         if (connection.scope === 'internal') return false;
         if (platformFilter !== 'all' && connection.platform !== platformFilter) return false;
         if (configurationFilter !== 'all' && getIntegrationConfigurationStatus(connection) !== configurationFilter) return false;
@@ -636,7 +672,26 @@ export function IntegrationConnectionsBoard({
     [connections, clientFilter, platformFilter, configurationFilter, verificationFilter],
   );
 
-  const summary = useMemo(() => summarizeIntegrationConnections(visibleConnections), [visibleConnections]);
+  // REKREATIVE scope board — REKREATIVE's own shared connections only,
+  // respecting the same Plataforma/Configuración/Verificación filters (no
+  // Cliente filter — internal connections have no clientId). Sourced from
+  // allConnections (unaffected by the Cliente filter) rather than
+  // `connections`, since that filter is irrelevant/hidden in this scope.
+  const internalVisibleConnections = useMemo(
+    () =>
+      allConnections.filter((connection) => {
+        if (connection.scope !== 'internal') return false;
+        if (platformFilter !== 'all' && connection.platform !== platformFilter) return false;
+        if (configurationFilter !== 'all' && getIntegrationConfigurationStatus(connection) !== configurationFilter) return false;
+        if (verificationFilter !== 'all' && connection.verificationStatus !== verificationFilter) return false;
+        return true;
+      }),
+    [allConnections, platformFilter, configurationFilter, verificationFilter],
+  );
+
+  // KPI row recalculates from only the currently selected scope.
+  const displayedConnections = moduleScope === 'internal' ? internalVisibleConnections : clientVisibleConnections;
+  const summary = useMemo(() => summarizeIntegrationConnections(displayedConnections), [displayedConnections]);
 
   /** preselectScope defaults to 'client'. An 'internal' requirement row with
    * no connection yet must open the form as an internal (shared) connection,
@@ -652,12 +707,24 @@ export function IntegrationConnectionsBoard({
     setShowForm(true);
   };
 
-  /** "Gestionar" on a catalog card — focuses the existing connections
-   * section on that platform via the existing platform filter, no new
-   * route, no duplicated list. */
+  /** "Gestionar" on a catalog card — focuses the currently active scope's
+   * connections section on that platform via the existing platform filter,
+   * no new route, no duplicated list. */
   const focusPlatform = (platform: IntegrationPlatform) => {
     setPlatformFilter(platform);
-    connectionsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const target = moduleScope === 'internal' ? internalConnectionsSectionRef.current : connectionsSectionRef.current;
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  /** "+ Añadir" on a catalog card — coherent with the active primary scope:
+   * REKREATIVE opens the form as a new shared internal connection; CLIENTES
+   * preserves the pre-existing client-scoped behavior unchanged. */
+  const catalogAdd = (platform: IntegrationPlatform) => {
+    if (moduleScope === 'internal') {
+      openCreateForm(platform, undefined, 'internal');
+    } else {
+      openCreateForm(platform);
+    }
   };
 
   const openEditForm = (connection: IntegrationConnection) => {
@@ -731,7 +798,7 @@ export function IntegrationConnectionsBoard({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => openCreateForm()}
+            onClick={() => openCreateForm(undefined, undefined, moduleScope)}
             className="border border-os-border bg-os-surface px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-text hover:border-os-border-strong hover:text-os-accent"
           >
             + Añadir conexión
@@ -739,7 +806,32 @@ export function IntegrationConnectionsBoard({
         </div>
       </div>
 
-      {/* KPI summary — always recomputed from the currently filtered set */}
+      {/* Primary scope — REKREATIVE's own shared infrastructure vs. client
+          integrations. Conceptually above every section/filter below,
+          including the KPI row; REKREATIVE is never a client, so this never
+          touches the client selectors below. */}
+      <div className="mb-4 flex items-center gap-1.5">
+        {MODULE_SCOPE_OPTIONS.map((option) => {
+          const active = moduleScope === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setModuleScope(option.id)}
+              className={`border px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-wide ${
+                active ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim hover:border-os-border-strong hover:text-os-muted'
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* KPI summary — recalculated from only the currently selected scope
+          (internalVisibleConnections in REKREATIVE, clientVisibleConnections
+          in CLIENTES). Configured != verified stays explicit — see the two
+          separate axes in lib/integration-connections.ts. */}
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {[
           { label: 'Configuradas', value: String(summary.configured) },
@@ -754,120 +846,183 @@ export function IntegrationConnectionsBoard({
         ))}
       </div>
 
-      {/* Onboarding técnico por cliente — client is the primary organizing
-          concept for REKREATIVE (agency, multi-client), not platform. One
-          compact row per client; progress is REQUIRED-only, never reduced by
-          optional platforms (see summarizeClientOnboarding). */}
-      <div className="mb-4">
-        <SectionHead label="Onboarding técnico por cliente" count={clients.length} />
-        {clients.length === 0 ? (
-          <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-            No hay clientes todavía.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-            {clients.map((client) => (
-              <OnboardingClientCard
-                key={client.id}
-                client={client}
-                summary={onboardingSummaries[client.id] ?? summarizeClientOnboarding(client.id, [], [])}
-                onManage={() => focusOnboardingClient(client.id)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Cliente seleccionado — the onboarding workspace for one client at a
-          time, requirement rows grouped by the same categories the catalog
-          uses below. This is where "required vs optional" and "pending vs
-          configuración incompleta vs configurada" become visible per
-          platform — never CONNECTED/NOT CONNECTED. */}
-      <div ref={onboardingWorkspaceRef} className="mb-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <SectionHead label="Cliente seleccionado" />
-          {selectedClient && (
-            <button
-              type="button"
-              onClick={() => setShowRequirementsEditor(true)}
-              className="border border-os-border px-2.5 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent"
-            >
-              Gestionar requisitos
-            </button>
-          )}
-        </div>
-
-        {!selectedClient ? (
-          <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-            Selecciona un cliente arriba para ver sus integraciones.
-          </div>
-        ) : (
-          <>
-            <div className="mb-3 flex items-center gap-2">
-              <select
-                value={selectedClient.id}
-                onChange={(event) => setSelectedOnboardingClientId(event.target.value)}
-                className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
-              >
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                  </option>
-                ))}
-              </select>
-              <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">— Integraciones</span>
-            </div>
-
-            {selectedClientRows.length === 0 ? (
+      {moduleScope === 'client' && (
+        <>
+          {/* Onboarding técnico por cliente — client is the primary organizing
+              concept for REKREATIVE (agency, multi-client), not platform. One
+              compact row per client; progress is REQUIRED-only, never reduced by
+              optional platforms (see summarizeClientOnboarding). */}
+          <div className="mb-4">
+            <SectionHead label="Onboarding técnico por cliente" count={clients.length} />
+            {clients.length === 0 ? (
               <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-                Este cliente no tiene integraciones definidas. Usa &quot;Gestionar requisitos&quot; para añadir alguna.
+                No hay clientes todavía.
               </div>
             ) : (
-              <div className="flex flex-col gap-2">
-                {CATALOG_CATEGORIES.map((category) => {
-                  const rows = selectedClientRows.filter((row) => category.platforms.includes(row.platform));
-                  if (rows.length === 0) return null;
-                  return (
-                    <div key={category.label}>
-                      <div className="mb-1.5 font-mono text-[9.5px] font-semibold uppercase tracking-[0.16em] text-os-dim">{category.label}</div>
-                      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                        {rows.map((row) => (
-                          <RequirementRowCard
-                            key={row.platform}
-                            row={row}
-                            logo={platformLogosLarge[row.platform]}
-                            onAdd={() => openCreateForm(row.platform, selectedClient.id, row.connectionScope)}
-                            onManage={() => focusOperationalConnection(selectedClient.id, row.platform)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                {clients.map((client) => (
+                  <OnboardingClientCard
+                    key={client.id}
+                    client={client}
+                    summary={onboardingSummaries[client.id] ?? summarizeClientOnboarding(client.id, [], [])}
+                    onManage={() => focusOnboardingClient(client.id)}
+                  />
+                ))}
               </div>
             )}
-          </>
-        )}
-      </div>
+          </div>
 
-      {/* Integraciones internas REKREATIVE — shared agency infrastructure
-          (scope === 'internal'), kept visually distinct from client-owned
-          connections. Reuses the exact same ConnectionCard as "Conexiones
-          actuales" below — same edit/verify/fail/reset behavior, no
-          duplicated logic. */}
-      <div className="mb-4">
-        <SectionHead label="Integraciones internas REKREATIVE" count={internalConnections.length} />
-        {internalConnections.length === 0 ? (
+          {/* Cliente seleccionado — the onboarding workspace for one client at a
+              time, requirement rows grouped by the same categories the catalog
+              uses below. This is where "required vs optional" and "pending vs
+              configuración incompleta vs configurada" become visible per
+              platform — never CONNECTED/NOT CONNECTED. */}
+          <div ref={onboardingWorkspaceRef} className="mb-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <SectionHead label="Cliente seleccionado" />
+              {selectedClient && (
+                <button
+                  type="button"
+                  onClick={() => setShowRequirementsEditor(true)}
+                  className="border border-os-border px-2.5 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent"
+                >
+                  Gestionar requisitos
+                </button>
+              )}
+            </div>
+
+            {!selectedClient ? (
+              <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+                Selecciona un cliente arriba para ver sus integraciones.
+              </div>
+            ) : (
+              <>
+                <div className="mb-3 flex items-center gap-2">
+                  <select
+                    value={selectedClient.id}
+                    onChange={(event) => setSelectedOnboardingClientId(event.target.value)}
+                    className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
+                  >
+                    {clients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">— Integraciones</span>
+                </div>
+
+                {selectedClientRows.length === 0 ? (
+                  <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+                    Este cliente no tiene integraciones definidas. Usa &quot;Gestionar requisitos&quot; para añadir alguna.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {CATALOG_CATEGORIES.map((category) => {
+                      const rows = selectedClientRows.filter((row) => category.platforms.includes(row.platform));
+                      if (rows.length === 0) return null;
+                      return (
+                        <div key={category.label}>
+                          <div className="mb-1.5 font-mono text-[9.5px] font-semibold uppercase tracking-[0.16em] text-os-dim">{category.label}</div>
+                          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                            {rows.map((row) => (
+                              <RequirementRowCard
+                                key={row.platform}
+                                row={row}
+                                logo={platformLogosLarge[row.platform]}
+                                onAdd={() => openCreateForm(row.platform, selectedClient.id, row.connectionScope)}
+                                onManage={() => focusOperationalConnection(selectedClient.id, row.platform)}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Infraestructura compartida de REKREATIVE — REKREATIVE's own shared
+          agency infrastructure (scope === 'internal'), REKREATIVE scope
+          only. Reuses the exact same ConnectionCard as "Conexiones
+          actuales" — same edit/verify/fail/reset behavior, no duplicated
+          logic. No client onboarding cards, no client selector, no
+          client-owned connections appear here. */}
+      {moduleScope === 'internal' && (
+      <div ref={internalConnectionsSectionRef} className="mb-4">
+        <SectionHead label="Infraestructura compartida de REKREATIVE" count={internalConnections.length} />
+        <p className="mb-3 max-w-2xl text-[11.5px] text-os-muted">
+          Conexiones propias de REKREATIVE, compartidas por todos los clientes — nunca duplicadas por cliente.
+        </p>
+
+        {/* Filters — Plataforma/Configuración/Verificación only; no Cliente
+            filter, internal connections have no clientId. */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {CONFIGURATION_FILTERS.map((option) => {
+              const active = configurationFilter === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setConfigurationFilter(option.id as 'all' | IntegrationConfigurationStatus)}
+                  className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-wide ${
+                    active ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim hover:border-os-border-strong hover:text-os-muted'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="ml-auto flex items-center gap-2">
+            <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Verificación</label>
+            <select
+              value={verificationFilter}
+              onChange={(event) => setVerificationFilter(event.target.value as 'all' | IntegrationVerificationStatus)}
+              className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
+            >
+              {VERIFICATION_FILTERS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Plataforma</label>
+            <select
+              value={platformFilter}
+              onChange={(event) => setPlatformFilter(event.target.value as 'all' | IntegrationPlatform)}
+              className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
+            >
+              {PLATFORM_FILTERS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {internalVisibleConnections.length === 0 ? (
           <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-            No hay integraciones internas todavía.
+            No hay integraciones internas que coincidan con estos filtros.
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {internalConnections.map((connection) => (
+            {internalVisibleConnections.map((connection) => (
               <ConnectionCard
                 key={connection.id}
                 connection={connection}
                 clientName="Interno"
+                showClientName={false}
                 platformLogosLarge={platformLogosLarge}
                 expanded={Boolean(expanded[connection.id])}
                 onToggle={() => setExpanded((prev) => ({ ...prev, [connection.id]: !prev[connection.id] }))}
@@ -880,17 +1035,19 @@ export function IntegrationConnectionsBoard({
           </div>
         )}
       </div>
+      )}
 
       {/* Conexiones actuales — the actual operational records. Same filters,
           same cards, same behavior already validated; only the section
           framing and an optional platform focus chip are new. Sits right
           after Principales (day-to-day workspace, not pushed below the
           fold) — the full category browser sits below it since it's
-          discovery, not daily operation. */}
+          discovery, not daily operation. CLIENTES scope only. */}
+      {moduleScope === 'client' && (
       <div ref={connectionsSectionRef}>
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <div className="flex-1">
-            <SectionHead label="Conexiones actuales" count={visibleConnections.length} />
+            <SectionHead label="Conexiones actuales" count={clientVisibleConnections.length} />
           </div>
           {platformFilter !== 'all' && (
             <div className="flex items-center gap-2">
@@ -974,17 +1131,18 @@ export function IntegrationConnectionsBoard({
       </div>
 
       {/* Connection cards */}
-      {visibleConnections.length === 0 ? (
+      {clientVisibleConnections.length === 0 ? (
         <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
           No hay integraciones en este segmento.
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {visibleConnections.map((connection) => (
+          {clientVisibleConnections.map((connection) => (
             <ConnectionCard
               key={connection.id}
               connection={connection}
               clientName={getClientNameForIntegrationConnection(connection.clientId)}
+              showClientName
               platformLogosLarge={platformLogosLarge}
               expanded={Boolean(expanded[connection.id])}
               onToggle={() => setExpanded((prev) => ({ ...prev, [connection.id]: !prev[connection.id] }))}
@@ -997,12 +1155,14 @@ export function IntegrationConnectionsBoard({
         </div>
       )}
       </div>
+      )}
 
       {/* Principales / Explorar integraciones — the platform catalog is now
           SECONDARY: onboarding-by-client and the operational board above are
           the day-to-day workspace; this stays available for discovery
           without dominating the page. Never claims connected/disconnected —
-          only how many IntegrationConnection records exist per platform. */}
+          only how many IntegrationConnection records exist per platform,
+          scoped to the active moduleScope (see platformStats). */}
       <div className="mb-4 mt-2">
         <SectionHead label="Principales" count={PRINCIPAL_PLATFORMS.length} />
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
@@ -1016,7 +1176,7 @@ export function IntegrationConnectionsBoard({
                 count={stats.count}
                 hasIncomplete={stats.hasIncomplete}
                 hasIncident={stats.hasIncident}
-                onAdd={() => openCreateForm(platform)}
+                onAdd={() => catalogAdd(platform)}
                 onManage={() => focusPlatform(platform)}
               />
             );
@@ -1042,7 +1202,7 @@ export function IntegrationConnectionsBoard({
                     count={stats.count}
                     hasIncomplete={stats.hasIncomplete}
                     hasIncident={stats.hasIncident}
-                    onAdd={() => openCreateForm(platform)}
+                    onAdd={() => catalogAdd(platform)}
                     onManage={() => focusPlatform(platform)}
                   />
                 );

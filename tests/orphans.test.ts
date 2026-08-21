@@ -4,7 +4,12 @@ import path from 'node:path';
 
 // Every component must be imported somewhere — no dead files. If a component is
 // intentionally kept unused (rare), add its basename here with a reason.
-const KNOWN_ORPHANS: string[] = [];
+const KNOWN_ORPHANS: string[] = [
+  // Used only by the old FounderOS-era Home page, replaced 2026-08-20 by the
+  // REKREATIVE OS command center (app/page.tsx). Left in place rather than
+  // deleted — legacy FounderOS code is preserved, not removed, in this pass.
+  'HomeSocialGraph',
+];
 
 const ROOT = process.cwd();
 

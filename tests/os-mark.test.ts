@@ -22,7 +22,7 @@ describe('OS mark branding', () => {
   test('the sidebar brands with the mark, no raster emblem', () => {
     const sidebar = read('components/Sidebar.tsx');
     expect(sidebar).toContain('OsMark');
-    expect(sidebar).toContain('FOUNDER OS');
+    expect(sidebar).toContain('REKREATIVE OS');
     expect(sidebar).not.toMatch(/emblem|\.png/i);
     // the mark renders no text at all — the logo is the only lockup element
     expect(read('components/OsMark.tsx')).not.toMatch(/<text/);

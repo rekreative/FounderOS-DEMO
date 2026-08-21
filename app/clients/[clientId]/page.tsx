@@ -47,6 +47,24 @@ const TAB_LABELS: Record<TabKey, string> = {
 
 const CLOSED_LEAD_STAGES = new Set(['converted', 'disqualified', 'no_response']);
 
+// Display-only formatting, matching the approved /clients list
+// (components/ClientsList.tsx) so the two surfaces never disagree on how a
+// budget/date reads. Explicit useGrouping avoids a runtime quirk where bare
+// .toLocaleString('es-ES') silently drops the thousands separator. Applied
+// once here at the shared Client Workspace header so every tab inherits the
+// same formatting; never touches the stored client value.
+function formatHeaderBudget(value: number): string {
+  return `${Math.round(value).toLocaleString('es-ES', { useGrouping: true })} €`;
+}
+
+// startDate is stored date-only ('YYYY-MM-DD'); UTC keeps the displayed day
+// from shifting with the viewer's local timezone.
+function formatHeaderStartDate(value: string): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+}
+
 export default function ClientDetailPage({ params }: { params: { clientId: string } }) {
   const clientId = params?.clientId ?? '';
   const [client, setClient] = useState<Client | null>(null);
@@ -201,11 +219,11 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
           </div>
           <div className="p-2 border border-os-border bg-os-surface2 text-sm">
             <div className="text-[11px] text-os-dim uppercase tracking-wide">Presupuesto Meta</div>
-            <div className="mt-1 font-mono">{Math.round(client.metaBudgetMonthly).toLocaleString('es-ES')} €</div>
+            <div className="mt-1 font-mono">{formatHeaderBudget(client.metaBudgetMonthly)}</div>
           </div>
           <div className="p-2 border border-os-border bg-os-surface2 text-sm">
             <div className="text-[11px] text-os-dim uppercase tracking-wide">Fecha de inicio</div>
-            <div className="mt-1">{client.startDate}</div>
+            <div className="mt-1">{formatHeaderStartDate(client.startDate)}</div>
           </div>
           <div className="p-2 border border-os-border bg-os-surface2 text-sm">
             <div className="text-[11px] text-os-dim uppercase tracking-wide">Responsable</div>
