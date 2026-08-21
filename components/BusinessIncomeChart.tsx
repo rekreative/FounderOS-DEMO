@@ -4,28 +4,30 @@ import { useState } from 'react';
 import type { BusinessSeries, IncomeRange, MonthPoint } from '@/lib/bank-statements';
 
 const RANGES: { label: string; value: IncomeRange }[] = [
-  { label: '30 days', value: 1 },
-  { label: '60 days', value: 2 },
-  { label: '3 months', value: 3 },
-  { label: '6 months', value: 6 },
-  { label: '12 months', value: 12 },
-  { label: 'All time', value: 'all' },
+  { label: '30 días', value: 1 },
+  { label: '60 días', value: 2 },
+  { label: '3 meses', value: 3 },
+  { label: '6 meses', value: 6 },
+  { label: '12 meses', value: 12 },
+  { label: 'Todo', value: 'all' },
 ];
 
 /** What the card plots: deposits, outflow, or what's left after outflow. */
 type Metric = 'in' | 'out' | 'net';
 const METRICS: { label: string; value: Metric }[] = [
-  { label: 'Money in', value: 'in' },
-  { label: 'Money out', value: 'out' },
-  { label: 'Net after out', value: 'net' },
+  { label: 'Ingresos', value: 'in' },
+  { label: 'Gastos', value: 'out' },
+  { label: 'Neto tras gastos', value: 'net' },
 ];
 const metricCents = (m: MonthPoint, metric: Metric): number =>
   metric === 'in' ? m.creditsCents : metric === 'out' ? m.debitsCents : m.netCents;
 
-const usd = (cents: number) =>
-  (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-const signedUsd = (cents: number) => `${cents < 0 ? '−' : '+'}${usd(Math.abs(cents))}`;
-const fmtMonth = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+// REKREATIVE's internal finance view presents every value in EUR — same
+// display convention as app/finances/page.tsx's eur().
+const eur = (cents: number) =>
+  `${(cents / 100).toLocaleString('es-ES', { maximumFractionDigits: 0, useGrouping: true })} €`;
+const signedEur = (cents: number) => `${cents < 0 ? '−' : '+'}${eur(Math.abs(cents))}`;
+const fmtMonth = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString('es-ES', { month: 'short', timeZone: 'UTC' });
 
 /** Per-business bank-statement money with range + metric dropdowns — money
     in (deposits), money out (outflow), or the net that's left after it, as a
@@ -45,12 +47,12 @@ export function BusinessIncomeChart({ series }: { series: BusinessSeries }) {
     metric === 'in' ? 'text-os-ok' : metric === 'out' ? 'text-os-err' : net >= 0 ? 'text-os-ok' : 'text-os-err';
   const subLabel =
     metric === 'in' ? (
-      <span className={`font-mono text-[11px] ${net >= 0 ? 'text-os-ok' : 'text-os-err'}`}>{signedUsd(net)} net</span>
+      <span className={`font-mono text-[11px] ${net >= 0 ? 'text-os-ok' : 'text-os-err'}`}>{signedEur(net)} neto</span>
     ) : metric === 'out' ? (
-      <span className="font-mono text-[11px] text-os-dim">of {usd(totalIn)} in</span>
+      <span className="font-mono text-[11px] text-os-dim">de {eur(totalIn)} ingresos</span>
     ) : (
       <span className="font-mono text-[11px] text-os-dim">
-        {usd(totalIn)} in − {usd(totalOut)} out
+        {eur(totalIn)} ingresos − {eur(totalOut)} gastos
       </span>
     );
 
@@ -60,7 +62,7 @@ export function BusinessIncomeChart({ series }: { series: BusinessSeries }) {
         <div>
           <div className="text-sm font-semibold">{series.business}</div>
           <div className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-os-dim">
-            {metric === 'in' ? 'income · bank deposits' : metric === 'out' ? 'outflow · bank debits' : 'net · after money out'}
+            {metric === 'in' ? 'ingresos · depósitos bancarios' : metric === 'out' ? 'gastos · cargos bancarios' : 'neto · tras gastos'}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -91,13 +93,13 @@ export function BusinessIncomeChart({ series }: { series: BusinessSeries }) {
 
       <div className="mt-3 flex items-baseline gap-2">
         <span className={`font-mono text-[26px] font-semibold tracking-[-0.02em] ${headlineClass}`}>
-          {metric === 'net' && net < 0 ? `−${usd(Math.abs(net))}` : usd(total)}
+          {metric === 'net' && net < 0 ? `−${eur(Math.abs(net))}` : eur(total)}
         </span>
         {subLabel}
       </div>
 
       {shown.length === 0 ? (
-        <div className="mt-4 font-mono text-[11px] text-os-dim">no statements in range</div>
+        <div className="mt-4 font-mono text-[11px] text-os-dim">sin extractos en este rango</div>
       ) : (
         <div className="mt-4 flex items-end gap-1.5" style={{ height: 104 }}>
           {shown.map((m) => {
@@ -121,7 +123,7 @@ export function BusinessIncomeChart({ series }: { series: BusinessSeries }) {
                       className="fin-tip pointer-events-none absolute left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-sm-t border border-os-border-strong bg-os-surface2 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-os-text"
                       style={{ bottom: `${h + 6}px` }}
                     >
-                      {metric === 'net' ? signedUsd(cents) : usd(cents)}
+                      {metric === 'net' ? signedEur(cents) : eur(cents)}
                     </span>
                   )}
                   <div

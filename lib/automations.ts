@@ -1,5 +1,20 @@
 import { getClients } from '@/lib/clients';
 
+// REKREATIVE is the agency's own internal acquisition/infrastructure, never
+// a client — scope distinguishes "REKREATIVE's own automations" (internal,
+// clientId null) from "a client's automations" (client, clientId required).
+// Same invariant style as lib/leads.ts / lib/meta-ads.ts / lib/content-
+// items.ts. Deliberately independent of AutomationPlatform — the "Interno"
+// platform chip (AUTOMATION_PLATFORM_OPTIONS below) describes a step's
+// tooling, never who owns the automation; an internal-scope automation can
+// use Meta/Make/OpenAI/WhatsApp, and a client automation can still contain
+// an "Interno" platform step. Never model REKREATIVE as a fake Client row.
+export const AUTOMATION_SCOPE_OPTIONS = [
+  { id: 'internal', label: 'REKREATIVE' },
+  { id: 'client', label: 'Clientes' },
+] as const;
+export type AutomationScope = (typeof AUTOMATION_SCOPE_OPTIONS)[number]['id'];
+
 // ── Lifecycle status — who/what decided this automation should run ─────────
 // Deliberately excludes "error": operational problems are DERIVED from run
 // state (see AutomationHealth below), never stored as a lifecycle value.
@@ -77,7 +92,9 @@ export type AutomationTrigger = {
 
 export type Automation = {
   id: string;
-  clientId: string;
+  scope: AutomationScope;
+  /** Required when scope === 'client'; always null when scope === 'internal'. */
+  clientId: string | null;
 
   /** Future Make/ManyChat/WhatsApp scenario id once a live integration exists. Null until then. */
   externalProvider: AutomationPlatform | null;
@@ -121,7 +138,10 @@ export type AutomationRun = {
 };
 
 export type CreateAutomationInput = {
-  clientId: string;
+  /** Defaults to 'client' when omitted — preserves every existing call
+   * site's prior behavior (a required clientId) without a migration. */
+  scope?: AutomationScope;
+  clientId?: string | null;
   externalProvider?: AutomationPlatform | null;
   externalAutomationId?: string | null;
   name: string;
@@ -175,6 +195,33 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
+function assertScopeInvariant(scope: AutomationScope, clientId: string | null): void {
+  if (scope === 'client') {
+    if (!clientId) {
+      throw new Error('A client-scoped automation requires a clientId');
+    }
+    if (!getClients().some((client) => client.id === clientId)) {
+      throw new Error('Cannot create automation for a missing client id');
+    }
+  }
+}
+
+/** Safe read-time migration: every Automation persisted before `scope`
+ * existed (JSON.parse yields `undefined`) was, by definition, a client
+ * automation — this repo had no internal-automation concept until now.
+ * Backfilling here means existing seeded/manual data is never rewritten or
+ * lost, only the new field is filled in, the same way every time it's read
+ * (same pattern as lib/leads.ts's normalizeLead / lib/meta-ads.ts's
+ * normalizeCampaign). */
+function normalizeAutomation(raw: Automation): Automation {
+  if (raw.scope === 'internal' || raw.scope === 'client') return raw;
+  return { ...raw, scope: 'client' };
+}
+
+function readAutomations(): Automation[] {
+  return readStorage<Automation>(STORAGE_KEY).map(normalizeAutomation);
+}
+
 // ===== SEED / DEMO DATA =====
 // Intentionally obvious REKREATIVE-style demo automations — replace with a
 // live Make/ManyChat/WhatsApp integration later without touching this module's
@@ -192,6 +239,7 @@ function seedDemoAutomations(): Automation[] {
   return [
     {
       id: 'automation-meta-lead-whatsapp',
+      scope: 'client',
       clientId: 'client-acme',
       externalProvider: 'make',
       externalAutomationId: 'make-scenario-48213',
@@ -222,6 +270,7 @@ function seedDemoAutomations(): Automation[] {
     },
     {
       id: 'automation-appointment-reminder',
+      scope: 'client',
       clientId: 'client-northwind',
       externalProvider: 'make',
       externalAutomationId: 'make-scenario-51890',
@@ -249,6 +298,7 @@ function seedDemoAutomations(): Automation[] {
     },
     {
       id: 'automation-ig-nurture',
+      scope: 'client',
       clientId: 'client-lumen',
       externalProvider: 'manychat',
       externalAutomationId: 'manychat-flow-7742',
@@ -276,6 +326,7 @@ function seedDemoAutomations(): Automation[] {
     },
     {
       id: 'automation-review-request',
+      scope: 'client',
       clientId: 'client-acme',
       externalProvider: null,
       externalAutomationId: null,
@@ -302,6 +353,7 @@ function seedDemoAutomations(): Automation[] {
     },
     {
       id: 'automation-onboarding-notification',
+      scope: 'client',
       clientId: 'client-northwind',
       externalProvider: null,
       externalAutomationId: null,
@@ -328,6 +380,7 @@ function seedDemoAutomations(): Automation[] {
     },
     {
       id: 'automation-weekly-digest',
+      scope: 'client',
       clientId: 'client-lumen',
       externalProvider: null,
       externalAutomationId: null,
@@ -349,6 +402,67 @@ function seedDemoAutomations(): Automation[] {
       lastRunStatus: null,
       lastError: null,
       createdAt: daysAgo(75),
+      updatedAt: daysAgo(0),
+      dataSource: 'demo',
+    },
+    // REKREATIVE's own internal infrastructure — never a client. scope:
+    // 'internal', clientId: null. Feeds lead-internal-1/2 and
+    // campaign-internal-1 (lib/leads.ts / lib/meta-ads.ts). Kept small —
+    // 2 automations, not a full internal ops suite.
+    {
+      id: 'automation-internal-lead-intake',
+      scope: 'internal',
+      clientId: null,
+      externalProvider: 'make',
+      externalAutomationId: 'make-scenario-internal-77210',
+      name: 'REKREATIVE Lead Intake → IA → WhatsApp',
+      description:
+        'Meta lead form for REKREATIVE\'s own Captación Centros de Psicología campaign triggers a Make scenario: OpenAI qualifies the prospect, logs it into REKREATIVE\'s own CRM, then WhatsApp Business Cloud sends the welcome template.',
+      status: 'active',
+      type: 'lead_response',
+      platforms: ['meta', 'make', 'openai', 'whatsapp', 'internal'],
+      trigger: {
+        platform: 'meta',
+        event: 'New Lead Ad form submission',
+        description: 'Fires when a prospect submits REKREATIVE\'s own Meta instant form.',
+      },
+      steps: [
+        { id: 'step-1', order: 1, platform: 'make', action: 'Receive Make webhook', description: 'Make scenario receives the raw Meta lead payload.' },
+        { id: 'step-2', order: 2, platform: 'openai', action: 'Qualify prospect', description: 'OpenAI scores intent and extracts qualification fields.' },
+        { id: 'step-3', order: 3, platform: 'internal', action: 'Create CRM lead', description: 'Prospect is written into REKREATIVE\'s own Leads CRM (scope: internal) with AI analysis attached.' },
+        { id: 'step-4', order: 4, platform: 'whatsapp', action: 'Send welcome template', description: 'WhatsApp Business Cloud sends the approved welcome template.' },
+      ],
+      lastRunAt: null,
+      lastRunStatus: null,
+      lastError: null,
+      createdAt: daysAgo(30),
+      updatedAt: daysAgo(0),
+      dataSource: 'demo',
+    },
+    {
+      id: 'automation-internal-digest',
+      scope: 'internal',
+      clientId: null,
+      externalProvider: null,
+      externalAutomationId: null,
+      name: 'REKREATIVE Lead Alert / Daily Digest',
+      description: 'Every morning, summarizes new REKREATIVE-internal leads and their stage changes for the team.',
+      status: 'active',
+      type: 'reporting',
+      platforms: ['internal', 'google_sheets'],
+      trigger: {
+        platform: 'internal',
+        event: 'Every day 08:00',
+        description: 'Scheduled trigger, once a day.',
+      },
+      steps: [
+        { id: 'step-1', order: 1, platform: 'internal', action: 'Aggregate daily numbers', description: 'Pulls the past 24h of REKREATIVE-internal leads and stage changes.' },
+        { id: 'step-2', order: 2, platform: 'google_sheets', action: 'Write digest sheet', description: 'Writes the summary into REKREATIVE\'s own internal tracker.' },
+      ],
+      lastRunAt: null,
+      lastRunStatus: null,
+      lastError: null,
+      createdAt: daysAgo(45),
       updatedAt: daysAgo(0),
       dataSource: 'demo',
     },
@@ -385,6 +499,17 @@ function seedDemoAutomationRuns(): AutomationRun[] {
     { id: 'run-wd-3', automationId: 'automation-weekly-digest', status: 'success', startedAt: hoursAgo(168), finishedAt: hoursAgo(168), summary: 'Digest written to Google Sheets', error: null, source: 'system' },
 
     // automation-review-request and automation-onboarding-notification are intentionally never run.
+
+    // automation-internal-lead-intake — active, healthy: REKREATIVE's own
+    // funnel, recurring successful runs.
+    { id: 'run-ili-1', automationId: 'automation-internal-lead-intake', status: 'success', startedAt: hoursAgo(160), finishedAt: hoursAgo(160), summary: 'Prospect qualified and welcome template delivered', error: null, source: 'make' },
+    { id: 'run-ili-2', automationId: 'automation-internal-lead-intake', status: 'success', startedAt: hoursAgo(48), finishedAt: hoursAgo(48), summary: 'Prospect qualified and welcome template delivered', error: null, source: 'make' },
+    { id: 'run-ili-3', automationId: 'automation-internal-lead-intake', status: 'success', startedAt: hoursAgo(6), finishedAt: hoursAgo(6), summary: 'Prospect qualified and welcome template delivered', error: null, source: 'make' },
+
+    // automation-internal-digest — active, healthy, recurring daily.
+    { id: 'run-idg-1', automationId: 'automation-internal-digest', status: 'success', startedAt: hoursAgo(72), finishedAt: hoursAgo(72), summary: 'Digest written to internal tracker', error: null, source: 'system' },
+    { id: 'run-idg-2', automationId: 'automation-internal-digest', status: 'success', startedAt: hoursAgo(48), finishedAt: hoursAgo(48), summary: 'Digest written to internal tracker', error: null, source: 'system' },
+    { id: 'run-idg-3', automationId: 'automation-internal-digest', status: 'success', startedAt: hoursAgo(24), finishedAt: hoursAgo(24), summary: 'Digest written to internal tracker', error: null, source: 'system' },
   ];
 
   return runs;
@@ -462,14 +587,19 @@ function applySeedRunDenormalization(automations: Automation[], runs: Automation
 
 // ===== READ =====
 
+/** No clientId → every automation (internal + client — see AUTOMATIONS-
+ * scope filtering in components/AutomationsBoard.tsx). A clientId → only
+ * that client's own automations (never internal, never another client's) —
+ * the exact contract Client Workspace's ClientAutomationsPanel relies on
+ * for isolation. */
 export function getAutomations(clientId?: string): Automation[] {
-  const automations = readStorage<Automation>(STORAGE_KEY);
+  const automations = readAutomations();
   const result = !clientId ? automations : automations.filter((automation) => automation.clientId === clientId);
   return result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
 export function getAutomationById(id: string): Automation | null {
-  return readStorage<Automation>(STORAGE_KEY).find((automation) => automation.id === id) ?? null;
+  return readAutomations().find((automation) => automation.id === id) ?? null;
 }
 
 export function getAutomationRuns(automationId: string): AutomationRun[] {
@@ -481,16 +611,15 @@ export function getAutomationRuns(automationId: string): AutomationRun[] {
 // ===== WRITE =====
 
 export function createAutomation(input: CreateAutomationInput): Automation {
-  const clients = getClients();
-  const clientExists = clients.some((client) => client.id === input.clientId);
-  if (!clientExists) {
-    throw new Error('Cannot create automation for a missing client id');
-  }
+  const scope: AutomationScope = input.scope ?? 'client';
+  const clientId = scope === 'client' ? input.clientId ?? null : null;
+  assertScopeInvariant(scope, clientId);
 
   const now = isoNow();
   const created: Automation = {
     id: `automation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    clientId: input.clientId,
+    scope,
+    clientId,
     externalProvider: input.externalProvider ?? null,
     externalAutomationId: input.externalAutomationId?.trim() || null,
     name: input.name.trim(),
@@ -508,33 +637,31 @@ export function createAutomation(input: CreateAutomationInput): Automation {
     dataSource: input.dataSource ?? 'manual',
   };
 
-  const automations = readStorage<Automation>(STORAGE_KEY);
+  const automations = readAutomations();
   writeStorage(STORAGE_KEY, [created, ...automations]);
   return created;
 }
 
 export function updateAutomation(id: string, patch: UpdateAutomationInput): Automation | null {
-  const automations = readStorage<Automation>(STORAGE_KEY);
+  const automations = readAutomations();
   const index = automations.findIndex((automation) => automation.id === id);
   if (index === -1) return null;
 
-  if (patch.clientId) {
-    const clients = getClients();
-    const clientExists = clients.some((client) => client.id === patch.clientId);
-    if (!clientExists) {
-      throw new Error('Cannot move automation to a missing client id');
-    }
-  }
-
-  const updated: Automation = {
+  const merged: Automation = {
     ...automations[index],
     ...patch,
     updatedAt: isoNow(),
   };
 
-  automations[index] = updated;
+  if (merged.scope === 'internal') {
+    merged.clientId = null;
+  } else {
+    assertScopeInvariant(merged.scope, merged.clientId);
+  }
+
+  automations[index] = merged;
   writeStorage(STORAGE_KEY, automations);
-  return updated;
+  return merged;
 }
 
 export function setAutomationStatus(id: string, status: AutomationStatus): Automation | null {
@@ -570,7 +697,7 @@ export function appendAutomationRun(
   const runs = readStorage<AutomationRun>(RUNS_STORAGE_KEY);
   writeStorage(RUNS_STORAGE_KEY, [...runs, created]);
 
-  const automations = readStorage<Automation>(STORAGE_KEY);
+  const automations = readAutomations();
   const index = automations.findIndex((automation) => automation.id === automationId);
   if (index >= 0) {
     automations[index] = {
@@ -645,9 +772,10 @@ export function summarizeAutomations(automations: Automation[]): AutomationsSumm
 
 // ===== LABELS =====
 
-export function getClientNameForAutomation(clientId: string): string {
+export function getClientNameForAutomation(clientId: string | null): string {
+  if (!clientId) return 'Interno';
   const client = getClients().find((item) => item.id === clientId);
-  return client?.name ?? 'Unknown client';
+  return client?.name ?? 'Cliente desconocido';
 }
 
 export function getStatusLabel(status: AutomationStatus): string {

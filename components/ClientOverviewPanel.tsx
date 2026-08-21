@@ -148,7 +148,7 @@ export function ClientOverviewPanel({
               </div>
             </div>
             <Link
-              href={`/clients/${client.id}/results`}
+              href={`/clients/${client.id}/results?period=all`}
               className="mt-3 self-start font-mono text-[9.5px] uppercase tracking-wide text-os-dim hover:text-os-accent"
             >
               Ver dashboard completo →

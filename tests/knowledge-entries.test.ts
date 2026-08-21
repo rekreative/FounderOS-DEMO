@@ -420,7 +420,7 @@ describe('CRUD + scope invariant (browser-like storage)', () => {
   });
 
   it('getClientNameForKnowledgeEntry resolves a real client name and labels internal/unknown honestly', () => {
-    expect(getClientNameForKnowledgeEntry(null)).toBe('Interno · REKREATIVE');
+    expect(getClientNameForKnowledgeEntry(null)).toBe('REKREATIVE');
     expect(getClientNameForKnowledgeEntry('client-acme')).toBe('Acme Co');
     expect(getClientNameForKnowledgeEntry('client-does-not-exist')).toBe('Cliente desconocido');
   });

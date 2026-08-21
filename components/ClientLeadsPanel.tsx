@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { getStageLabel, type Lead, type LeadStage } from '@/lib/leads';
+import { getStageLabel, type Lead, type LeadIntent, type LeadStage } from '@/lib/leads';
 import { Badge, type BadgeTone } from '@/components/terminal';
 
 // Client-scoped Leads tab — reads the SAME Lead store the global /leads page
@@ -12,6 +12,16 @@ import { Badge, type BadgeTone } from '@/components/terminal';
 // enforces between counts.leads and metaLeads.
 
 const CLOSED_STAGES: LeadStage[] = ['converted', 'disqualified', 'no_response'];
+
+// Presentation-only mapping — lead.aiAnalysis.intent itself is never
+// touched, just how it reads here. Matches app/leads/page.tsx's
+// AI_INTENT_LABEL exactly, so the global and client-scoped Leads views never
+// disagree. Kept explicitly separate from CRM stage (the "Etapa" column).
+const AI_INTENT_LABEL: Record<LeadIntent, string> = {
+  hot: 'ALTA',
+  warm: 'MEDIA',
+  cold: 'BAJA',
+};
 
 const STAGE_TONE: Record<LeadStage, BadgeTone> = {
   new: 'accent',
@@ -86,7 +96,7 @@ export function ClientLeadsPanel({ leads }: { leads: Lead[] }) {
                     </td>
                     <td className="px-3 py-2.5 font-mono text-[10.5px] text-os-muted">{lead.source}</td>
                     <td className="px-3 py-2.5 font-mono text-[10.5px] text-os-muted">
-                      {lead.aiAnalysis?.intent ? lead.aiAnalysis.intent.toUpperCase() : '—'}
+                      {lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—'}
                     </td>
                     <td className="px-3 py-2.5 font-mono text-[10.5px] text-os-dim">
                       {formatRelative(lead.lastActivityAt)}

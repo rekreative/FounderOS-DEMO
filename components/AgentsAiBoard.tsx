@@ -1,5 +1,6 @@
 'use client';
 
+import { Search } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getClients, initializeStoreIfNeeded, type Client } from '@/lib/clients';
 import {
@@ -12,7 +13,6 @@ import {
   getAiAgentCapabilityLabel,
   getAiAgentChannelLabel,
   getAiAgentConfigurationStatus,
-  getAiAgentConfigurationStatusLabel,
   getAiAgentProviderLabel,
   getAiAgentUseCaseLabel,
   getAiAgents,
@@ -24,6 +24,7 @@ import {
   type AiAgent,
   type AiAgentCapability,
   type AiAgentChannel,
+  type AiAgentConfigurationStatus,
   type AiAgentProvider,
   type AiAgentScope,
   type AiAgentStatus,
@@ -34,10 +35,30 @@ import { Badge } from '@/components/terminal';
 const STATUS_FILTERS = [{ id: 'all', label: 'Todos' }, ...AI_AGENT_STATUS_OPTIONS];
 const PROVIDER_FILTERS = [{ id: 'all', label: 'Todos los proveedores' }, ...AI_AGENT_PROVIDER_OPTIONS];
 const CHANNEL_FILTERS = [{ id: 'all', label: 'Todos los canales' }, ...AI_AGENT_CHANNEL_OPTIONS];
-const INTERNAL_FILTER = '__internal__';
+
+// Primary scope selector labels — presentation only, local to this board.
+// Deliberately NOT sourced from AI_AGENT_SCOPE_OPTIONS (lib/agents-ai.ts):
+// that array's 'Cliente'/'Interno' labels back the per-record "Ámbito"
+// concept elsewhere (getAiAgentScopeLabel, tested) and are left untouched.
+// Same non-invasive approach as AUTOMATION_SCOPE_OPTIONS in
+// lib/automations.ts, just kept out of the data module since nothing else
+// needs it yet.
+const MODULE_SCOPE_OPTIONS: { id: AiAgentScope; label: string }[] = [
+  { id: 'internal', label: 'REKREATIVE' },
+  { id: 'client', label: 'Clientes' },
+];
+
+// Compact configuration-status labels for the card's "Configuración · …"
+// row — getAiAgentConfigurationStatusLabel() already returns the full
+// "Configuración completa/incompleta" string (used elsewhere, e.g.
+// ClientAgentsPanel), which would duplicate the word "Configuración" next
+// to its own prefix here.
+const CONFIGURATION_STATUS_COMPACT_LABEL: Record<AiAgentConfigurationStatus, string> = {
+  complete: 'Completa',
+  incomplete: 'Incompleta',
+};
 
 type DraftAgent = {
-  scope: AiAgentScope;
   clientId: string;
   name: string;
   role: string;
@@ -53,7 +74,6 @@ type DraftAgent = {
 };
 
 const emptyDraft = (clientId = ''): DraftAgent => ({
-  scope: 'client',
   clientId,
   name: '',
   role: '',
@@ -82,7 +102,7 @@ const STATUS_TONE: Record<AiAgentStatus, string> = {
 
 function ConfigurationStatusBadge({ agent }: { agent: AiAgent }) {
   const status = getAiAgentConfigurationStatus(agent);
-  return <Badge tone={status === 'complete' ? 'ok' : 'warn'}>{getAiAgentConfigurationStatusLabel(status)}</Badge>;
+  return <Badge tone={status === 'complete' ? 'ok' : 'warn'}>{CONFIGURATION_STATUS_COMPACT_LABEL[status]}</Badge>;
 }
 
 function DataSourceTag({ dataSource }: { dataSource: AiAgent['dataSource'] }) {
@@ -128,6 +148,7 @@ function BrandChip({ logo, label }: { logo: ReactNode; label: string }) {
 function AgentCard({
   agent,
   clientName,
+  showClientName,
   providerLogos,
   channelLogos,
   channelIconsLarge,
@@ -139,6 +160,10 @@ function AgentCard({
 }: {
   agent: AiAgent;
   clientName: string;
+  /** REKREATIVE scope: every visible card is already known to be internal,
+   * so a "Cliente: Interno" label would be redundant — hidden there, shown
+   * as-is in CLIENTES scope. Same pattern as AutomationsBoard. */
+  showClientName: boolean;
   providerLogos: Record<string, ReactNode>;
   channelLogos: Record<string, ReactNode>;
   channelIconsLarge: Record<string, ReactNode>;
@@ -157,29 +182,34 @@ function AgentCard({
           <div className="min-w-0">
             <div className="truncate text-[13.5px] font-semibold leading-tight text-os-text">{agent.name || 'Sin nombre'}</div>
             <div className="mt-1 flex flex-wrap items-center gap-x-1.5 font-mono text-[10px] text-os-muted">
-              <span className="truncate">{clientName}</span>
-              {agent.role && (
-                <>
-                  <span className="text-os-dim">·</span>
-                  <span className="truncate text-os-dim">{agent.role}</span>
-                </>
-              )}
+              {showClientName && <span className="truncate">{clientName}</span>}
+              {showClientName && agent.role && <span className="text-os-dim">·</span>}
+              {agent.role && <span className="truncate text-os-dim">{agent.role}</span>}
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <ConfigurationStatusBadge agent={agent} />
-          <select
-            value={agent.status}
-            onChange={(event) => onStatusChange(event.target.value as AiAgentStatus)}
-            className={`border border-os-border bg-os-surface px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide outline-none ${STATUS_TONE[agent.status]}`}
-          >
-            {AI_AGENT_STATUS_OPTIONS.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          {/* CONFIGURACIÓN (field completeness, derived) and ESTADO
+              (lifecycle, stored) are two distinct axes — configuration
+              completeness never implies the agent is running/connected. */}
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Configuración ·</span>
+            <ConfigurationStatusBadge agent={agent} />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Estado ·</span>
+            <select
+              value={agent.status}
+              onChange={(event) => onStatusChange(event.target.value as AiAgentStatus)}
+              className={`border border-os-border bg-os-surface px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide outline-none ${STATUS_TONE[agent.status]}`}
+            >
+              {AI_AGENT_STATUS_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -284,17 +314,31 @@ export function AgentsAiBoard({
 }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [agents, setAgents] = useState<AiAgent[]>([]);
+  // Primary scope: REKREATIVE's own agents vs. client agents — conceptually
+  // ABOVE client filtering, never a fake client. Defaults to REKREATIVE.
+  // Local UI state only, same as every other filter here. Same pattern as
+  // AutomationsBoard's moduleScope.
+  const [moduleScope, setModuleScope] = useState<AiAgentScope>('internal');
   const [statusFilter, setStatusFilter] = useState<'all' | AiAgentStatus>('all');
   const [clientFilter, setClientFilter] = useState<'all' | string>('all');
   const [providerFilter, setProviderFilter] = useState<'all' | AiAgentProvider>('all');
   const [channelFilter, setChannelFilter] = useState<'all' | AiAgentChannel>('all');
+  const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [showForm, setShowForm] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftAgent>(emptyDraft());
 
+  // In REKREATIVE scope the client selector is hidden and irrelevant, so
+  // always load the full set (internal agents have no clientId to filter
+  // by); the scope filter below narrows it. In CLIENTES scope, behavior is
+  // unchanged from before this scope selector existed.
   const loadAgents = () => {
-    const activeClient = clientFilter === 'all' || clientFilter === INTERNAL_FILTER ? undefined : clientFilter;
+    if (moduleScope === 'internal') {
+      setAgents(getAiAgents());
+      return;
+    }
+    const activeClient = clientFilter === 'all' ? undefined : clientFilter;
     setAgents(getAiAgents(activeClient));
   };
 
@@ -309,24 +353,59 @@ export function AgentsAiBoard({
   useEffect(() => {
     loadAgents();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientFilter]);
+  }, [clientFilter, moduleScope]);
+
+  // Scope filter — sits above search/status/provider/channel. "Todos los
+  // clientes" (CLIENTES scope, no client picked) must never include
+  // REKREATIVE's own agents; this guarantees it regardless of what `agents`
+  // holds.
+  const scopedAgents = useMemo(() => agents.filter((agent) => agent.scope === moduleScope), [agents, moduleScope]);
+
+  // Search is client-side, UI-only state — never persisted. Matches agent
+  // name, purpose, client name, provider, model, channel, use case and
+  // capabilities, case-insensitively. Operates only within the currently
+  // selected scope.
+  const searchedAgents = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return scopedAgents;
+    return scopedAgents.filter((agent) => {
+      const clientName = getClientNameForAiAgent(agent.clientId).toLowerCase();
+      const providerLabel = agent.provider ? getAiAgentProviderLabel(agent.provider).toLowerCase() : '';
+      const channelLabel = agent.channel ? getAiAgentChannelLabel(agent.channel).toLowerCase() : '';
+      const useCaseLabel = agent.useCase ? getAiAgentUseCaseLabel(agent.useCase).toLowerCase() : '';
+      const capabilityLabels = agent.capabilities.map((capability) => getAiAgentCapabilityLabel(capability).toLowerCase());
+      return (
+        agent.name.toLowerCase().includes(q) ||
+        agent.purpose.toLowerCase().includes(q) ||
+        clientName.includes(q) ||
+        providerLabel.includes(q) ||
+        (agent.model ?? '').toLowerCase().includes(q) ||
+        channelLabel.includes(q) ||
+        useCaseLabel.includes(q) ||
+        capabilityLabels.some((label) => label.includes(q))
+      );
+    });
+  }, [scopedAgents, query]);
 
   const visibleAgents = useMemo(
     () =>
-      agents.filter((agent) => {
-        if (clientFilter === INTERNAL_FILTER && agent.clientId !== null) return false;
+      searchedAgents.filter((agent) => {
         if (statusFilter !== 'all' && agent.status !== statusFilter) return false;
         if (providerFilter !== 'all' && agent.provider !== providerFilter) return false;
         if (channelFilter !== 'all' && agent.channel !== channelFilter) return false;
         return true;
       }),
-    [agents, statusFilter, providerFilter, channelFilter, clientFilter],
+    [searchedAgents, statusFilter, providerFilter, channelFilter],
   );
 
+  // KPI row recalculates from only the currently selected scope — same
+  // summarizeAiAgents() call, just fed the scope-filtered set (see
+  // scopedAgents → searchedAgents → visibleAgents above).
   const summary = useMemo(() => summarizeAiAgents(visibleAgents), [visibleAgents]);
+  const showClientName = moduleScope === 'client';
 
   const openCreateForm = () => {
-    const firstClient = clients[0]?.id ?? '';
+    const firstClient = moduleScope === 'client' ? clients[0]?.id ?? '' : '';
     setDraft(emptyDraft(firstClient));
     setEditingAgentId(null);
     setShowForm(true);
@@ -335,7 +414,6 @@ export function AgentsAiBoard({
   const openEditForm = (agent: AiAgent) => {
     setEditingAgentId(agent.id);
     setDraft({
-      scope: agent.scope,
       clientId: agent.clientId ?? '',
       name: agent.name,
       role: agent.role,
@@ -355,7 +433,7 @@ export function AgentsAiBoard({
   const closeForm = () => {
     setShowForm(false);
     setEditingAgentId(null);
-    setDraft(emptyDraft(clients[0]?.id ?? ''));
+    setDraft(emptyDraft(moduleScope === 'client' ? clients[0]?.id ?? '' : ''));
   };
 
   const toggleCapability = (capability: AiAgentCapability) => {
@@ -370,11 +448,13 @@ export function AgentsAiBoard({
   const submitAgent = () => {
     const name = draft.name.trim();
     if (!name) return;
-    if (draft.scope === 'client' && !draft.clientId) return;
+    const scope: AiAgentScope = moduleScope;
+    const clientId = scope === 'client' ? draft.clientId : null;
+    if (scope === 'client' && !clientId) return;
 
     const payload = {
-      scope: draft.scope,
-      clientId: draft.scope === 'client' ? draft.clientId : null,
+      scope,
+      clientId,
       name,
       role: draft.role.trim(),
       purpose: draft.purpose.trim(),
@@ -394,20 +474,18 @@ export function AgentsAiBoard({
       createAiAgent({ ...payload, dataSource: 'manual' });
     }
 
-    const activeClient = clientFilter === 'all' || clientFilter === INTERNAL_FILTER ? undefined : clientFilter;
-    setAgents(getAiAgents(activeClient));
+    loadAgents();
     closeForm();
   };
 
   const handleStatusChange = (agentId: string, next: AiAgentStatus) => {
     setAiAgentStatus(agentId, next);
-    const activeClient = clientFilter === 'all' || clientFilter === INTERNAL_FILTER ? undefined : clientFilter;
-    setAgents(getAiAgents(activeClient));
+    loadAgents();
   };
 
   return (
     <div className="p-4">
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      <div className="mb-1.5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="font-mono text-[9.5px] uppercase tracking-[0.24em] text-os-dim">REKREATIVE INTELIGENCIA</div>
           <h1 className="mt-1 text-[25px] font-bold uppercase tracking-[0.06em] text-os-text">Agentes</h1>
@@ -423,7 +501,36 @@ export function AgentsAiBoard({
         </div>
       </div>
 
-      {/* KPI summary */}
+      {/* Subtle clarification: configuration completeness ≠ operational
+          health — this module has no runtime behind it in V1. */}
+      <p className="mb-4 max-w-2xl font-mono text-[9.5px] leading-relaxed text-os-dim">
+        La configuración indica si el agente tiene los campos necesarios completos; no verifica ejecución en vivo.
+      </p>
+
+      {/* Primary scope — REKREATIVE's own agents vs. client agents.
+          Conceptually above every filter below, including the KPI row;
+          REKREATIVE is never a client, so this never touches the client
+          selector's options. */}
+      <div className="mb-4 flex items-center gap-1.5">
+        {MODULE_SCOPE_OPTIONS.map((option) => {
+          const active = moduleScope === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setModuleScope(option.id)}
+              className={`border px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-wide ${
+                active ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim hover:border-os-border-strong hover:text-os-muted'
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* KPI summary — recalculated from only the currently selected scope
+          (see scopedAgents → searchedAgents → visibleAgents → summary above). */}
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {[
           { label: 'Activos', value: String(summary.active) },
@@ -440,6 +547,17 @@ export function AgentsAiBoard({
 
       {/* Filters */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-os-dim" />
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Buscar agente..."
+            className="border border-os-border bg-os-surface py-1.5 pl-8 pr-2.5 text-[12.5px] text-os-text outline-none placeholder:text-os-dim focus:border-os-border-strong"
+          />
+        </div>
+
         <div className="flex flex-wrap items-center gap-1.5">
           {STATUS_FILTERS.map((option) => {
             const active = statusFilter === option.id;
@@ -488,28 +606,29 @@ export function AgentsAiBoard({
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
-          <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
-          <select
-            value={clientFilter}
-            onChange={(event) => setClientFilter(event.target.value)}
-            className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
-          >
-            <option value="all">Todos los clientes</option>
-            <option value={INTERNAL_FILTER}>Interno</option>
-            {clients.map((client) => (
-              <option key={client.id} value={client.id}>
-                {client.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {moduleScope === 'client' && (
+          <div className="flex items-center gap-2">
+            <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
+            <select
+              value={clientFilter}
+              onChange={(event) => setClientFilter(event.target.value)}
+              className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
+            >
+              <option value="all">Todos los clientes</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Agent cards */}
       {visibleAgents.length === 0 ? (
         <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-          No hay agentes en este segmento.
+          No hay agentes que coincidan con estos filtros.
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -518,6 +637,7 @@ export function AgentsAiBoard({
               key={agent.id}
               agent={agent}
               clientName={getClientNameForAiAgent(agent.clientId)}
+              showClientName={showClientName}
               providerLogos={providerLogos}
               channelLogos={channelLogos}
               channelIconsLarge={channelIconsLarge}
@@ -542,25 +662,7 @@ export function AgentsAiBoard({
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Ámbito</span>
-                <div className="flex gap-1.5">
-                  {(['client', 'internal'] as AiAgentScope[]).map((scope) => (
-                    <button
-                      key={scope}
-                      type="button"
-                      onClick={() => setDraft((prev) => ({ ...prev, scope, clientId: scope === 'internal' ? '' : prev.clientId }))}
-                      className={`border px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wide ${
-                        draft.scope === scope ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim'
-                      }`}
-                    >
-                      {scope === 'client' ? 'Cliente' : 'Interno'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {draft.scope === 'client' && (
+              {moduleScope === 'client' ? (
                 <label className="col-span-2">
                   <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
                   <select
@@ -575,6 +677,15 @@ export function AgentsAiBoard({
                       </option>
                     ))}
                   </select>
+                </label>
+              ) : (
+                <label className="col-span-2">
+                  <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
+                  <input
+                    disabled
+                    value="Interno · REKREATIVE"
+                    className="w-full cursor-not-allowed border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-dim"
+                  />
                 </label>
               )}
 

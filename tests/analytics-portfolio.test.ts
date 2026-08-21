@@ -40,6 +40,7 @@ function makeClient(overrides: Partial<Client> & Pick<Client, 'id'>): Client {
 
 function makeLead(overrides: Partial<Lead> & Pick<Lead, 'id' | 'clientId' | 'stage' | 'createdAt'>): Lead {
   return {
+    scope: 'client',
     name: 'Lead',
     email: null,
     phone: null,
@@ -59,6 +60,7 @@ function makeLead(overrides: Partial<Lead> & Pick<Lead, 'id' | 'clientId' | 'sta
 
 function makeCampaign(overrides: Partial<MetaCampaign> & Pick<MetaCampaign, 'id' | 'clientId'>): MetaCampaign {
   return {
+    scope: 'client',
     externalCampaignId: null,
     name: 'Campaign',
     status: 'active',
@@ -82,6 +84,7 @@ function makeCampaign(overrides: Partial<MetaCampaign> & Pick<MetaCampaign, 'id'
 
 function makeAutomation(overrides: Partial<Automation> & Pick<Automation, 'id' | 'clientId'>): Automation {
   return {
+    scope: 'client',
     externalProvider: null,
     externalAutomationId: null,
     name: 'Automation',
@@ -473,5 +476,168 @@ describe('includesDemoPortfolioData', () => {
         connections: [makeConnection({ id: 'con1', dataSource: 'manual' })],
       }),
     ).toBe(false);
+  });
+
+  // A demo-sourced REKREATIVE-internal record is excluded from every client
+  // metric above — it must not be the sole reason this badge shows either.
+  it('is false when the only demo record is a REKREATIVE-internal campaign/automation/agent', () => {
+    expect(
+      includesDemoPortfolioData({
+        campaigns: [makeCampaign({ id: 'c1', scope: 'internal', clientId: null, dataSource: 'demo' })],
+        automations: [makeAutomation({ id: 'a1', scope: 'internal', clientId: null, dataSource: 'demo' })],
+        agents: [makeAgent({ id: 'ag1', scope: 'internal', clientId: null, dataSource: 'demo' })],
+      }),
+    ).toBe(false);
+  });
+
+  // Connections are deliberately NOT scope-filtered here: an internal/shared
+  // connection's demo-ness genuinely IS reflected in what Analytics renders
+  // (Integraciones verification counts, shared-connection onboarding).
+  it('is still true for a demo-sourced internal connection — it visibly affects the Integraciones section', () => {
+    expect(includesDemoPortfolioData({ connections: [makeConnection({ id: 'con1', scope: 'internal', clientId: null, dataSource: 'demo' })] })).toBe(
+      true,
+    );
+  });
+});
+
+// ── DATA-SCOPE CORRECTNESS: REKREATIVE-internal records must never leak
+// into client-portfolio Analytics. Every test below uses a MIXED
+// internal+client fixture so a leak reappearing later fails loudly. ────────
+
+describe('client-portfolio scope correctness (internal REKREATIVE records excluded)', () => {
+  const events: LeadEvent[] = [];
+
+  it('1. internal REKREATIVE leads do not change client acquisition analytics (source rows + intent/priority distribution)', () => {
+    const leads = [
+      makeLead({ id: 'client-1', clientId: 'client-a', stage: 'converted', createdAt: '2026-01-01T00:00:00.000Z', source: 'Meta Ads' }),
+      makeLead({ id: 'client-2', clientId: 'client-a', stage: 'new', createdAt: '2026-01-01T00:00:00.000Z', source: 'Meta Ads' }),
+      // REKREATIVE's own internal lead — same source, would inflate "Meta Ads"
+      // to 3 leads and the analyzed/unanalyzed split if it leaked in.
+      makeLead({
+        id: 'internal-1',
+        scope: 'internal',
+        clientId: null,
+        stage: 'new',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        source: 'Meta Ads',
+        aiAnalysis: { summary: 's', intent: 'hot', priority: 'high', qualification: null, analyzedAt: '2026-01-01T00:00:00.000Z' },
+      }),
+    ];
+
+    const bySource = buildAcquisitionBySource(leads, events);
+    const meta = bySource.find((r) => r.source === 'Meta Ads')!;
+    expect(meta.leads).toBe(2); // not 3
+    expect(bySource.reduce((sum, r) => sum + r.leads, 0)).toBe(2);
+
+    const dist = buildLeadIntentDistribution(leads);
+    expect(dist.analyzed + dist.unanalyzed).toBe(2); // not 3
+    expect(dist.analyzed).toBe(0); // the only analyzed lead was internal
+    expect(dist.byIntent.length).toBe(0); // internal lead's 'hot' intent never counted
+  });
+
+  it('2. internal REKREATIVE Meta campaigns do not change portfolio campaign counts', () => {
+    const campaigns = [
+      makeCampaign({ id: 'c1', clientId: 'client-a', status: 'active', objective: 'leads' }),
+      makeCampaign({ id: 'c2', clientId: 'client-b', status: 'active', objective: 'leads' }),
+      makeCampaign({ id: 'c3', clientId: 'client-c', status: 'active', objective: 'leads' }),
+      // REKREATIVE's own internal acquisition campaign — would make ACTIVA
+      // read 4 instead of 3 if it leaked into the client portfolio mix.
+      makeCampaign({ id: 'internal-c', scope: 'internal', clientId: null, status: 'active', objective: 'leads', name: 'REKREATIVE — Captación Centros de Psicología' }),
+    ];
+    const mix = buildCampaignPortfolioMix(campaigns);
+    expect(mix.total).toBe(3);
+    expect(mix.byStatus.find((s) => s.status === 'active')?.count).toBe(3);
+  });
+
+  it('3. internal REKREATIVE automations do not change client automation-health analytics (including run stats)', () => {
+    const automations = [
+      makeAutomation({ id: 'a1', clientId: 'client-a', lastRunAt: '2026-01-02T00:00:00.000Z', lastRunStatus: 'success' }),
+      // Internal automation whose latest run FAILED — if its health/run stats
+      // leaked in, client "needsAttention" and runStats would be wrong.
+      makeAutomation({ id: 'internal-a', scope: 'internal', clientId: null, lastRunAt: '2026-01-02T00:00:00.000Z', lastRunStatus: 'failed' }),
+    ];
+    const runs = [
+      makeRun({ id: 'r1', automationId: 'a1', status: 'success' }),
+      makeRun({ id: 'r-internal', automationId: 'internal-a', status: 'failed' }),
+    ];
+    const summary = buildAutomationsOperationalSummary(automations, runs);
+
+    expect(summary.total).toBe(1);
+    expect(summary.healthy).toBe(1);
+    expect(summary.needsAttention).toBe(0); // internal's failure excluded
+    expect(summary.runStats.totalRuns).toBe(1); // internal's run excluded
+    expect(summary.runStats.successRate).toBe(1); // would be 0.5 if the internal failed run leaked in
+  });
+
+  it('4. internal REKREATIVE agents do not change client-agent configuration analytics', () => {
+    const agents = [
+      makeAgent({ id: 'ag1', clientId: 'client-a', status: 'active', instructions: 'Full setup' }),
+      // Internal agent, active with incomplete config — would inflate
+      // configIncomplete/active counts if it leaked in.
+      makeAgent({ id: 'internal-ag', scope: 'internal', clientId: null, status: 'active', instructions: null, provider: null, model: null }),
+    ];
+    const summary = buildAiAgentsConfigurationSummary(agents);
+
+    expect(summary.total).toBe(1);
+    expect(summary.active).toBe(1);
+    expect(summary.configComplete).toBe(1);
+    expect(summary.configIncomplete).toBe(0); // internal agent's incompleteness excluded
+  });
+
+  it('5. a shared internal Make/OpenAI-style connection still satisfies a client integration requirement (the valid exception)', () => {
+    const clients = [makeClient({ id: 'client-a' })];
+    const requirements = [makeRequirement({ id: 'r1', clientId: 'client-a', platform: 'openai', requirement: 'required', connectionScope: 'internal' })];
+    const connections = [
+      makeConnection({ id: 'shared-openai', scope: 'internal', clientId: null, platform: 'openai', verificationStatus: 'not_verified' }),
+    ];
+    const coverage = buildPortfolioIntegrationCoverage(clients, requirements, connections);
+    expect(coverage.totalRequiredConfigured).toBe(1); // satisfied by the shared connection
+    expect(coverage.totalRequiredPending).toBe(0);
+  });
+
+  it("6. another client's owned connection cannot satisfy a different client's owned (non-shared) requirement", () => {
+    const clients = [makeClient({ id: 'client-a' }), makeClient({ id: 'client-b' })];
+    const requirements = [makeRequirement({ id: 'r1', clientId: 'client-a', platform: 'meta', requirement: 'required', connectionScope: 'client' })];
+    const connections = [
+      // Owned by client-b, not client-a, and not internal/shared.
+      makeConnection({ id: 'con-b', scope: 'client', clientId: 'client-b', platform: 'meta', externalRef: 'act_999', verificationStatus: 'verified' }),
+    ];
+    const coverage = buildPortfolioIntegrationCoverage(clients, requirements, connections);
+    expect(coverage.totalRequiredConfigured).toBe(0);
+    expect(coverage.totalRequiredPending).toBe(1); // client-a's requirement stays unmet
+  });
+
+  it('7. the portfolio benchmark aggregates client totals first, excluding internal REKREATIVE leads from the denominator', () => {
+    const leads = [
+      makeLead({ id: 'client-1', clientId: 'client-a', stage: 'converted', createdAt: '2026-01-01T00:00:00.000Z' }),
+      makeLead({ id: 'client-2', clientId: 'client-a', stage: 'new', createdAt: '2026-01-01T00:00:00.000Z' }),
+      // An internal lead that is ALSO 'converted' — if it leaked into the
+      // per-client cohort it would skew the aggregate qualification/close rate.
+      makeLead({ id: 'internal-1', scope: 'internal', clientId: null, stage: 'converted', createdAt: '2026-01-01T00:00:00.000Z' }),
+    ];
+    const perClientCounts = buildPerClientLeadFunnelCounts([{ id: 'client-a' }], leads, events);
+    const benchmark = buildPortfolioBenchmark(perClientCounts.map((c) => c.counts));
+
+    expect(benchmark.totals.leads).toBe(2); // not 3
+    expect(benchmark.totals.converted).toBe(1); // not 2
+    expect(benchmark.closeRate).toBeCloseTo(0.5); // 1/2, not 2/3
+  });
+
+  it('opportunities feed never generates a client-portfolio finding from an internal REKREATIVE automation/agent/connection', () => {
+    const findings = buildOpportunitiesFeed({
+      clients: [makeClient({ id: 'client-a', name: 'Acme' })],
+      campaigns: [],
+      automations: [
+        makeAutomation({ id: 'internal-a', scope: 'internal', clientId: null, name: 'Internal flow', status: 'active', lastRunAt: '2026-01-01T00:00:00.000Z', lastRunStatus: 'failed' }),
+      ],
+      agents: [
+        makeAgent({ id: 'internal-ag', scope: 'internal', clientId: null, name: 'Internal agent', status: 'active', instructions: null }),
+      ],
+      connections: [
+        makeConnection({ id: 'internal-con', scope: 'internal', clientId: null, platform: 'make', verificationStatus: 'failed' }),
+      ],
+      requirements: [],
+    });
+    expect(findings).toHaveLength(0);
   });
 });

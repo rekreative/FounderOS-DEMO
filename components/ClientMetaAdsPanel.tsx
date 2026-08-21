@@ -21,16 +21,24 @@ import { Badge, type BadgeTone } from '@/components/terminal';
 // data exists anywhere in the repo (see lib/results.ts's resolveAdSpend for
 // the same constraint).
 
+// Explicit useGrouping avoids a runtime quirk where bare
+// .toLocaleString('es-ES') silently drops the thousands separator (same fix
+// already applied in components/ClientsList.tsx / the global Meta Ads and
+// Results modules).
 function formatCurrency(value: number): string {
-  return `${Math.round(value).toLocaleString('es-ES')} €`;
+  return `${Math.round(value).toLocaleString('es-ES', { useGrouping: true })} €`;
 }
 
 function formatNumber(value: number): string {
   return value.toLocaleString('es-ES');
 }
 
+// CPL — same grouping fix as formatCurrency, decimals preserved (2dp, comma
+// per es-ES) for the sub-euro/low-value rates these actually are. Matches
+// the already-approved global /meta-ads formatMoneyRate exactly.
 function formatMoneyRate(value: number | null): string {
-  return value == null ? '—' : `${value.toFixed(2).replace('.', ',')} €`;
+  if (value == null) return '—';
+  return `${value.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: true })} €`;
 }
 
 const STATUS_TONE: Record<MetaCampaignStatus, BadgeTone> = {

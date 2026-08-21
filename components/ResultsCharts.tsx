@@ -84,7 +84,22 @@ export function DemoDataBadge() {
  * without a container-query breakpoint this codebase doesn't have. Single
  * ink hue throughout — no categorical color, consistent with the rest of
  * REKREATIVE's monochrome terminal system. */
-export function FunnelBars({ stages }: { stages: FunnelStageRow[] }) {
+export function FunnelBars({
+  stages,
+  showRates = true,
+}: {
+  stages: FunnelStageRow[];
+  /** Adjacent-stage rates assert that each stage is a strict subset of the
+   * previous one — true for a single client's own CRM funnel, but not for
+   * the agency-wide milestone rollup: "Asistidas" and "Conversiones" are
+   * independent axes there (see lib/results.ts's maxReachedStageRank/
+   * buildLeadFunnel), so a summed count can make a later milestone exceed an
+   * earlier one and render an impossible rate like "200%". Defaults to true
+   * (unchanged) for the existing per-client dashboards; the global
+   * portfolio view opts out explicitly instead. Counts are never hidden
+   * either way. */
+  showRates?: boolean;
+}) {
   return (
     <div className="flex flex-wrap gap-2">
       {stages.map((stage, index) => (
@@ -95,7 +110,7 @@ export function FunnelBars({ stages }: { stages: FunnelStageRow[] }) {
           <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-os-dim">{stage.label}</div>
           <div className="mt-2 font-mono text-[26px] font-bold leading-none text-os-text">{stage.count}</div>
           <div className="mt-2 h-3 font-mono text-[10px] uppercase tracking-wide text-os-dim">
-            {index === 0 ? '' : `→ ${formatRate(stage.rateFromPrevious)}`}
+            {showRates && index !== 0 ? `→ ${formatRate(stage.rateFromPrevious)}` : ''}
           </div>
         </div>
       ))}

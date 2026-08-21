@@ -275,7 +275,7 @@ export function ClientContentPanel({
         <h3 className="text-lg font-semibold">Contenido</h3>
         <div className="flex items-center gap-3">
           <Link href="/content" className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim hover:text-os-accent">
-            Ver Contenido interno →
+            Ver contenido de REKREATIVE →
           </Link>
           <button
             type="button"

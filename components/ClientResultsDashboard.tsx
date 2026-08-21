@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { getClientById, initializeStoreIfNeeded, type Client } from '@/lib/clients';
 import { getLeadEvents, getLeads, initializeLeadsStoreIfNeeded, type Lead, type LeadEvent } from '@/lib/leads';
 import { getCampaigns, initializeMetaCampaignsStoreIfNeeded, type MetaCampaign } from '@/lib/meta-ads';
@@ -61,6 +62,13 @@ type RevenueDraft = { amount: string; occurredAt: string; notes: string };
 const emptyRevenueDraft = (): RevenueDraft => ({ amount: '', occurredAt: new Date().toISOString().slice(0, 10), notes: '' });
 
 export function ClientResultsDashboard({ clientId }: { clientId: string }) {
+  // Arriving from the Resumen/Results-preview "Ver dashboard completo" link
+  // (?period=all) must always land on the same all-time view those previews
+  // just showed — never a stale global period preference left over from a
+  // previous /results session (see ClientResultsPreview.tsx / ClientOverviewPanel.tsx).
+  const searchParams = useSearchParams();
+  const forceAllPeriod = searchParams.get('period') === 'all';
+
   const [client, setClient] = useState<Client | null>(null);
   const [notFoundChecked, setNotFoundChecked] = useState(false);
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -93,10 +101,14 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
     setNotFoundChecked(true);
     refresh();
 
-    const preference = getStoredPeriodPreference();
-    setPeriodPreset(preference.preset);
-    if (preference.preset === 'custom') {
-      setCustomRange({ start: preference.start ?? '', end: preference.end ?? '' });
+    if (forceAllPeriod) {
+      setPeriodPreset('all');
+    } else {
+      const preference = getStoredPeriodPreference();
+      setPeriodPreset(preference.preset);
+      if (preference.preset === 'custom') {
+        setCustomRange({ start: preference.start ?? '', end: preference.end ?? '' });
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);

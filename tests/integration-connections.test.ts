@@ -1,10 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { initializeStoreIfNeeded as initializeClientsStoreIfNeeded } from '@/lib/clients';
 import {
   INTEGRATION_PLATFORM_OPTIONS,
   createIntegrationConnection,
   getClientNameForIntegrationConnection,
   getIntegrationConfigurationStatus,
   getIntegrationConfigurationStatusLabel,
+  getIntegrationConnections,
   getIntegrationPlatformLabel,
   getIntegrationScopeLabel,
   getIntegrationVerificationStatusLabel,
@@ -12,6 +14,37 @@ import {
   summarizeIntegrationConnections,
   type IntegrationConnection,
 } from '@/lib/integration-connections';
+
+// Browser-like storage stand-in — same minimal pattern already established
+// in tests/leads.test.ts / tests/meta-ads.test.ts / tests/automations.test.ts
+// / tests/agents-ai.test.ts for exercising localStorage-backed CRUD under
+// vitest's `node` environment.
+class MemoryStorage {
+  private store = new Map<string, string>();
+  getItem(key: string): string | null {
+    return this.store.has(key) ? this.store.get(key)! : null;
+  }
+  setItem(key: string, value: string): void {
+    this.store.set(key, value);
+  }
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+  clear(): void {
+    this.store.clear();
+  }
+}
+
+function installBrowserLikeStorage() {
+  const storage = new MemoryStorage();
+  (globalThis as unknown as { window: unknown }).window = { localStorage: storage };
+  (globalThis as unknown as { localStorage: unknown }).localStorage = storage;
+}
+
+function uninstallBrowserLikeStorage() {
+  delete (globalThis as unknown as { window?: unknown }).window;
+  delete (globalThis as unknown as { localStorage?: unknown }).localStorage;
+}
 
 // Same rationale as tests/automations.test.ts / tests/agents-ai.test.ts: this
 // suite runs under vitest's `node` environment (no window/localStorage).
@@ -258,5 +291,46 @@ describe('server-side (no window) behavior', () => {
         name: 'Test connection',
       }),
     ).toThrow('A client-scoped integration connection requires a clientId');
+  });
+});
+
+describe('Client Workspace isolation (browser-like storage)', () => {
+  beforeEach(() => {
+    installBrowserLikeStorage();
+    initializeClientsStoreIfNeeded();
+    initializeIntegrationConnectionsStoreIfNeeded();
+  });
+
+  afterEach(() => {
+    uninstallBrowserLikeStorage();
+  });
+
+  it("getIntegrationConnections(clientId) returns only that client's connections — excludes internal and other clients", () => {
+    createIntegrationConnection({ scope: 'client', clientId: 'client-acme', platform: 'meta', name: 'Acme connection' });
+    createIntegrationConnection({ scope: 'client', clientId: 'client-northwind', platform: 'whatsapp', name: 'Northwind connection' });
+    createIntegrationConnection({ scope: 'internal', platform: 'make', name: 'REKREATIVE internal connection' });
+
+    const acmeConnections = getIntegrationConnections('client-acme');
+    expect(acmeConnections.length).toBeGreaterThan(0);
+    expect(acmeConnections.every((connection) => connection.clientId === 'client-acme')).toBe(true);
+    expect(acmeConnections.some((connection) => connection.scope === 'internal')).toBe(false);
+    expect(acmeConnections.some((connection) => connection.clientId === 'client-northwind')).toBe(false);
+  });
+
+  it("getIntegrationConnections() with no clientId includes both internal and client connections (scope filtering is the caller's job)", () => {
+    createIntegrationConnection({ scope: 'client', clientId: 'client-acme', platform: 'meta', name: 'Acme connection' });
+    createIntegrationConnection({ scope: 'internal', platform: 'make', name: 'REKREATIVE internal connection' });
+
+    const all = getIntegrationConnections();
+    expect(all.some((connection) => connection.scope === 'internal')).toBe(true);
+    expect(all.some((connection) => connection.scope === 'client' && connection.clientId === 'client-acme')).toBe(true);
+  });
+
+  it('every internal connection has clientId null, regardless of how many clients exist', () => {
+    createIntegrationConnection({ scope: 'internal', platform: 'openai', name: 'REKREATIVE internal connection' });
+    createIntegrationConnection({ scope: 'client', clientId: 'client-acme', platform: 'meta', name: 'Acme connection' });
+
+    const internalOnly = getIntegrationConnections().filter((connection) => connection.scope === 'internal');
+    expect(internalOnly.every((connection) => connection.clientId === null)).toBe(true);
   });
 });

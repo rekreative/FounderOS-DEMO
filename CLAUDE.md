@@ -74,9 +74,13 @@ G-Brain core) · `/comms` unified feed · `/social` Zernio growth dashboard ·
 `/agents` roster with Run buttons + last-run state · `/org` hierarchy board
 (operator → Conductor super agent → 5 pillars: Sales, Marketing/Growth, TECH,
 Finances, Communications → worker pills; broadcast composer; markup frozen —
-do not restructure) · `/brain` G-Brain knowledge core (signature `BrainViz`
-rings + live `gbrain ›` query card + doctor warnings, with the original
-capture / life-map / pipeline / graph / query-path sections kept underneath) ·
+do not restructure) · `/brain` REKREATIVE structured KnowledgeBoard —
+institutional knowledge (decisions, learnings, SOPs, strategy, client
+context), scoped client/internal, no graph and no fake AI · `/brain/legacy`
+the preserved FounderOS Brain implementation (`BrainViz` rings, live
+`gbrain ›` query card, doctor warnings, capture / life-map / pipeline / graph
+/ query-path) — kept for reference/debugging, reachable only by direct URL,
+intentionally absent from primary REKREATIVE navigation ·
 `/roadmap` phases + quarters · `/analytics` real connector numbers ·
 `/funnel` living client-journey flow (Vantage + Launchpad Cohort: stage
 columns left→right, one node per client, 4–5 touch markers per path; seeded

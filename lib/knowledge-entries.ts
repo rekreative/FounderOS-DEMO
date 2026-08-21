@@ -476,8 +476,13 @@ export function summarizeKnowledgeEntries(entries: KnowledgeEntry[]): KnowledgeE
 
 // ===== LABELS =====
 
+/** "REKREATIVE" alone for internal entries — not "Interno · REKREATIVE",
+ * which reads redundantly once this label is combined with a source/type
+ * label at the call site (e.g. "REKREATIVE · Análisis"). Client entries keep
+ * their name plain, same as before. Presentation only — scope/clientId
+ * themselves are untouched. */
 export function getClientNameForKnowledgeEntry(clientId: string | null): string {
-  if (!clientId) return 'Interno · REKREATIVE';
+  if (!clientId) return 'REKREATIVE';
   const client = getClients().find((item) => item.id === clientId);
   return client?.name ?? 'Cliente desconocido';
 }

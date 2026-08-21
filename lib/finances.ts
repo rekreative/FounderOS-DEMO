@@ -13,13 +13,16 @@
 export type IncomeAccount = {
   id: string;
   processor: string; // 'Stripe' | 'PayPal' | 'FanBasis' | 'Wise'
-  label: string; // display label, incl. the business for multi-account processors
+  label: string; // display label, incl. the account for multi-account processors
   configured: boolean; // does this account have credentials in the env?
   live: boolean; // actually pulling real income right now (Stripe only, for now)
-  income: number | null; // month-to-date income in USD (null = pending)
+  /** Month-to-date income, presented in EUR for REKREATIVE's internal view
+   *  (null = pending). No FX conversion happens here — this is a display
+   *  convention, not a currency model; see app/finances/page.tsx's eur(). */
+  income: number | null;
 };
 
-/** Recent outgoing transfer (e.g. Wise) — money Alex sent out. */
+/** Recent outgoing transfer (e.g. Wise) — REKREATIVE's own outgoing transfers. */
 export type OutgoingTransfer = {
   amountCents: number;
   currency: string;
@@ -29,20 +32,29 @@ export type OutgoingTransfer = {
 };
 
 /**
- * Every processor Alex runs money through. Stripe carries its real
- * month-to-date income when connected; the rest are multi-account-ready slots
- * (two FanBasis for Vantage / Launchpad Cohort, two Wise). `configured` flags
- * which accounts have keys in the env (from `configuredProcessors`); `live`
- * means a real pull is actually happening — true only for Stripe today, so a
- * key-set-but-not-yet-integrated account reads "key set", never a faked number.
+ * The visible REKREATIVE demo account set: Stripe, PayPal, Wise — one row
+ * each. Stripe carries its real month-to-date income when connected;
+ * `configured` flags which accounts have keys in the env (from
+ * `configuredProcessors`); `live` means a real pull is actually happening —
+ * true only for Stripe today, so a key-set-but-not-yet-integrated account
+ * reads "key set", never a faked number.
+ *
+ * This is a DEFAULT VISIBLE LIST, not the processor architecture: FanBasis
+ * and the full multi-account registry (fanbasis-vantage/fanbasis-lc,
+ * wise-1/wise-2) still exist and stay fully wired in
+ * lib/connectors/payments.ts's configuredProcessors/fanbasisMonthToDateIncome
+ * — only unnecessary for REKREATIVE's current, much simpler processor set to
+ * show by default here. The `account` helper below is intentionally generic
+ * (any id/processor/label) so a real second account — FanBasis or otherwise
+ * — can be added back to this list later without changing its shape.
  */
 export function incomeAccounts(
   stripe: { connected: boolean; mtdUsd: number | null },
   configured: Record<string, boolean> = {},
   liveIncomeUsd: Record<string, number> = {},
 ): IncomeAccount[] {
-  // Non-Stripe accounts light up when a real month-to-date income is supplied
-  // (e.g. FanBasis via its customers API); otherwise they're honest pending.
+  // Non-Stripe accounts light up when a real month-to-date income is supplied;
+  // otherwise they're honest pending.
   const account = (id: string, processor: string, label: string): IncomeAccount => {
     const live = liveIncomeUsd[id] != null;
     return {
@@ -58,16 +70,16 @@ export function incomeAccounts(
     {
       id: 'stripe',
       processor: 'Stripe',
-      label: 'Stripe · Launchpad Cohort',
+      label: 'Stripe · REKREATIVE',
       configured: configured.stripe ?? stripe.connected,
       live: stripe.connected,
       income: stripe.connected ? stripe.mtdUsd : null,
     },
-    account('paypal', 'PayPal', 'PayPal'),
-    account('fanbasis-vantage', 'FanBasis', 'FanBasis · Vantage'),
-    account('fanbasis-lc', 'FanBasis', 'FanBasis · Launchpad Cohort'),
-    account('wise-1', 'Wise', 'Wise · Account 1'),
-    account('wise-2', 'Wise', 'Wise · Account 2'),
+    account('paypal', 'PayPal', 'PayPal · REKREATIVE'),
+    // wise-1 is the sole visible Wise row — collapses the previous two
+    // generic demo slots into one; its id/env var (WISE_1_TOKEN, see
+    // configuredProcessors) is unchanged, so a real key still lights it up.
+    account('wise-1', 'Wise', 'Wise · REKREATIVE'),
   ];
 }
 
@@ -94,14 +106,14 @@ export const SAMPLE_EXPENSES: ExpenseItem[] = [
   { id: 'figma', label: 'Figma', category: 'Software', monthly: 15 },
   { id: 'notion', label: 'Notion', category: 'Software', monthly: 10 },
   { id: 'wispr', label: 'Wispr Flow', category: 'Software', monthly: 15 },
-  { id: 'vercel', label: 'Vercel Pro', category: 'Infrastructure', monthly: 20 },
-  { id: 'supabase', label: 'Supabase', category: 'Infrastructure', monthly: 25 },
-  { id: 'domains', label: 'Domains & DNS', category: 'Infrastructure', monthly: 12 },
-  { id: 'attio', label: 'Attio', category: 'CRM & Revenue', monthly: 29 },
-  { id: 'fathom', label: 'Fathom', category: 'CRM & Revenue', monthly: 19 },
-  { id: 'meta-ads', label: 'Meta Ads', category: 'Advertising', monthly: 1500 },
-  { id: 'editor', label: 'Video editor (contract)', category: 'Contractors', monthly: 1200 },
-  { id: 'va', label: 'Virtual assistant', category: 'Contractors', monthly: 800 },
+  { id: 'vercel', label: 'Vercel Pro', category: 'Infraestructura', monthly: 20 },
+  { id: 'supabase', label: 'Supabase', category: 'Infraestructura', monthly: 25 },
+  { id: 'domains', label: 'Domains & DNS', category: 'Infraestructura', monthly: 12 },
+  { id: 'attio', label: 'Attio', category: 'CRM y ventas', monthly: 29 },
+  { id: 'fathom', label: 'Fathom', category: 'CRM y ventas', monthly: 19 },
+  { id: 'meta-ads', label: 'Meta Ads', category: 'Publicidad', monthly: 1500 },
+  { id: 'editor', label: 'Video editor (contract)', category: 'Colaboradores', monthly: 1200 },
+  { id: 'va', label: 'Virtual assistant', category: 'Colaboradores', monthly: 800 },
 ];
 
 /** Sum of every recurring monthly cost. */

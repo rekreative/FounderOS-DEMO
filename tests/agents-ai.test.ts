@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { initializeStoreIfNeeded as initializeClientsStoreIfNeeded } from '@/lib/clients';
 import {
   AI_AGENT_CAPABILITY_OPTIONS,
   createAiAgent,
@@ -10,10 +11,41 @@ import {
   getAiAgentScopeLabel,
   getAiAgentStatusLabel,
   getAiAgentUseCaseLabel,
+  getAiAgents,
   initializeAiAgentsStoreIfNeeded,
   summarizeAiAgents,
   type AiAgent,
 } from '@/lib/agents-ai';
+
+// Browser-like storage stand-in — same minimal pattern already established
+// in tests/leads.test.ts / tests/meta-ads.test.ts / tests/automations.test.ts
+// for exercising localStorage-backed CRUD under vitest's `node` environment.
+class MemoryStorage {
+  private store = new Map<string, string>();
+  getItem(key: string): string | null {
+    return this.store.has(key) ? this.store.get(key)! : null;
+  }
+  setItem(key: string, value: string): void {
+    this.store.set(key, value);
+  }
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+  clear(): void {
+    this.store.clear();
+  }
+}
+
+function installBrowserLikeStorage() {
+  const storage = new MemoryStorage();
+  (globalThis as unknown as { window: unknown }).window = { localStorage: storage };
+  (globalThis as unknown as { localStorage: unknown }).localStorage = storage;
+}
+
+function uninstallBrowserLikeStorage() {
+  delete (globalThis as unknown as { window?: unknown }).window;
+  delete (globalThis as unknown as { localStorage?: unknown }).localStorage;
+}
 
 // Same rationale as tests/automations.test.ts: this suite runs under vitest's
 // `node` environment (no window/localStorage), exactly like lib/clients.ts,
@@ -182,5 +214,49 @@ describe('server-side (no window) behavior', () => {
         name: 'Test agent',
       }),
     ).toThrow('A client-scoped agent requires a clientId');
+  });
+});
+
+describe('Client Workspace isolation (browser-like storage)', () => {
+  beforeEach(() => {
+    installBrowserLikeStorage();
+    initializeClientsStoreIfNeeded();
+    initializeAiAgentsStoreIfNeeded();
+  });
+
+  afterEach(() => {
+    uninstallBrowserLikeStorage();
+  });
+
+  it("getAiAgents(clientId) returns only that client's agents — excludes internal and other clients", () => {
+    createAiAgent({ scope: 'client', clientId: 'client-acme', name: 'Acme agent' });
+    createAiAgent({ scope: 'client', clientId: 'client-northwind', name: 'Northwind agent' });
+    createAiAgent({ scope: 'internal', name: 'REKREATIVE internal agent' });
+
+    const acmeAgents = getAiAgents('client-acme');
+    expect(acmeAgents.length).toBeGreaterThan(0);
+    expect(acmeAgents.every((agent) => agent.clientId === 'client-acme')).toBe(true);
+    expect(acmeAgents.some((agent) => agent.scope === 'internal')).toBe(false);
+    expect(acmeAgents.some((agent) => agent.clientId === 'client-northwind')).toBe(false);
+  });
+
+  it("getAiAgents() with no clientId includes both internal and client agents (scope filtering is the caller's job)", () => {
+    createAiAgent({ scope: 'client', clientId: 'client-acme', name: 'Acme agent' });
+    createAiAgent({ scope: 'internal', name: 'REKREATIVE internal agent' });
+
+    const all = getAiAgents();
+    expect(all.some((agent) => agent.scope === 'internal')).toBe(true);
+    expect(all.some((agent) => agent.scope === 'client' && agent.clientId === 'client-acme')).toBe(true);
+  });
+
+  it('a client filtered by internal-only scope never appears when a real client id is requested', () => {
+    createAiAgent({ scope: 'internal', name: 'REKREATIVE internal agent' });
+    createAiAgent({ scope: 'client', clientId: 'client-acme', name: 'Acme agent' });
+
+    const scopedToInternalOnly = getAiAgents().filter((agent) => agent.scope === 'internal');
+    expect(scopedToInternalOnly.every((agent) => agent.clientId === null)).toBe(true);
+
+    const acmeAgents = getAiAgents('client-acme').filter((agent) => agent.scope === 'client');
+    expect(acmeAgents.every((agent) => agent.clientId === 'client-acme')).toBe(true);
   });
 });

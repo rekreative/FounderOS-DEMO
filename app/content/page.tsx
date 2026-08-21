@@ -1,30 +1,33 @@
 import Link from 'next/link';
 import { ArrowUpRight } from 'lucide-react';
 import { ContentBoard } from '@/components/ContentBoard';
+import { Label } from '@/components/terminal';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * REKREATIVE content production pipeline (Content V1). The FounderOS content
- * agent roster, Vantage Intel backlinks, and Zernio recent-posts feed that
- * used to live here have moved out of the primary view — they're real
- * systems, kept intact, just not what this page is about anymore. Reachable
- * from the links below instead of rendered as full dashboard sections.
+ * REKREATIVE content production pipeline (Content V1) — REKREATIVE's own
+ * internal content workspace; client content lives at
+ * /clients/[clientId] → Contenido instead, by route/context, never a scope
+ * toggle here. The legacy FounderOS content agent roster and Zernio
+ * Social pipeline that used to be linked from here are real systems, kept
+ * intact at their legacy routes, but are FounderOS/Zernio demo surfaces,
+ * not REKREATIVE OS — no longer part of normal Content navigation. Lead
+ * Magnets is the one legacy-adjacent tool that IS a REKREATIVE
+ * acquisition/content utility, so it stays, framed as secondary.
  */
 export default function ContentPage() {
   return (
     <div>
       <ContentBoard />
 
-      <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-os-border pt-4 font-mono text-[10px] uppercase tracking-wide text-os-dim">
-        <Link href="/content/lead-magnets" className="inline-flex items-center gap-1 hover:text-os-accent">
-          Lead magnets <ArrowUpRight className="h-3 w-3" />
-        </Link>
-        <Link href="/social" className="inline-flex items-center gap-1 hover:text-os-accent">
-          Pipeline Zernio (Social) <ArrowUpRight className="h-3 w-3" />
-        </Link>
-        <Link href="/agents" className="inline-flex items-center gap-1 hover:text-os-accent">
-          Agentes de contenido <ArrowUpRight className="h-3 w-3" />
+      <div className="mt-8 border-t border-os-border pt-4">
+        <Label>Herramientas</Label>
+        <Link
+          href="/content/lead-magnets"
+          className="mt-2 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wide text-os-dim hover:text-os-accent"
+        >
+          Lead Magnets <ArrowUpRight className="h-3 w-3" />
         </Link>
       </div>
     </div>

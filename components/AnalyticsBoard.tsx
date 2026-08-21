@@ -136,10 +136,17 @@ export function AnalyticsBoard() {
   );
 
   // ---- 3. Acquisition quality ----
+  // buildAcquisitionBySource/buildLeadIntentDistribution already filter to
+  // scope==='client' internally. groupLeadsByPeriod (lib/results.ts) is a
+  // shared utility with no scope concept of its own, so the client-only
+  // filter for the lead-volume trend happens here instead, at this one call
+  // site — REKREATIVE's own internal leads must never appear in a
+  // client-portfolio trend chart.
   const acquisitionBySource = useMemo(() => buildAcquisitionBySource(leads, events), [leads, events]);
   const intentDistribution = useMemo(() => buildLeadIntentDistribution(leads), [leads]);
+  const clientLeads = useMemo(() => leads.filter((lead) => lead.scope === 'client'), [leads]);
   const trendGranularity = resolveTrendGranularity('all', { start: null, end: null });
-  const leadTrend = useMemo(() => groupLeadsByPeriod(leads, trendGranularity), [leads, trendGranularity]);
+  const leadTrend = useMemo(() => groupLeadsByPeriod(clientLeads, trendGranularity), [clientLeads, trendGranularity]);
   const nonZeroTrendPoints = leadTrend.filter((point) => point.value > 0).length;
 
   // ---- 4. Operational infrastructure ----

@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Search } from 'lucide-react';
 import { getClients, initializeStoreIfNeeded, type Client } from '@/lib/clients';
 import {
   CAMPAIGN_OBJECTIVE_OPTIONS,
   CAMPAIGN_STATUS_OPTIONS,
+  META_CAMPAIGN_SCOPE_OPTIONS,
   createCampaign,
   getCampaignCPC,
   getCampaignCPL,
@@ -21,6 +23,7 @@ import {
   type MetaCampaignBudgetType,
   type MetaCampaignDataSource,
   type MetaCampaignObjective,
+  type MetaCampaignScope,
   type MetaCampaignStatus,
 } from '@/lib/meta-ads';
 
@@ -60,8 +63,10 @@ const emptyDraft = (clientId = ''): DraftCampaign => ({
   endDate: '',
 });
 
+// Explicit useGrouping avoids a runtime quirk where bare
+// .toLocaleString('es-ES') silently drops the thousands separator.
 function formatCurrency(value: number): string {
-  return `${Math.round(value).toLocaleString('es-ES')} €`;
+  return `${Math.round(value).toLocaleString('es-ES', { useGrouping: true })} €`;
 }
 
 function formatNumber(value: number): string {
@@ -72,8 +77,11 @@ function formatPercent(value: number | null): string {
   return value == null ? '—' : `${(value * 100).toFixed(2).replace('.', ',')}%`;
 }
 
+// CPC/CPL — same grouping fix as formatCurrency, decimals preserved (2dp,
+// comma per es-ES) for the sub-euro/low-value rates these actually are.
 function formatMoneyRate(value: number | null): string {
-  return value == null ? '—' : `${value.toFixed(2).replace('.', ',')} €`;
+  if (value == null) return '—';
+  return `${value.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: true })} €`;
 }
 
 function formatBudget(campaign: Pick<MetaCampaign, 'budgetType' | 'dailyBudget' | 'lifetimeBudget'>): string {
@@ -109,6 +117,8 @@ function DataSourceTag({ dataSource }: { dataSource: MetaCampaignDataSource }) {
 function CampaignRow({
   campaign,
   clientName,
+  showClientColumn,
+  columnCount,
   expanded,
   onToggle,
   onStatusChange,
@@ -116,6 +126,12 @@ function CampaignRow({
 }: {
   campaign: MetaCampaign;
   clientName: string;
+  /** REKREATIVE scope: every row is already known to be internal, so the
+   * Cliente column is redundant — hidden there, shown as-is in CLIENTES scope. */
+  showClientColumn: boolean;
+  /** Current visible column count (12 with Cliente shown, 11 without) — keeps
+   * the expanded detail row's colSpan aligned with the header in both scopes. */
+  columnCount: number;
   expanded: boolean;
   onToggle: () => void;
   onStatusChange: (next: MetaCampaignStatus) => void;
@@ -146,7 +162,7 @@ function CampaignRow({
             </div>
           </div>
         </td>
-        <td className="px-3 py-3 text-left font-mono text-[10.5px] text-os-muted">{clientName}</td>
+        {showClientColumn && <td className="px-3 py-3 text-left font-mono text-[10.5px] text-os-muted">{clientName}</td>}
         <td className="px-3 py-3 text-left">
           <select
             value={campaign.status}
@@ -176,7 +192,7 @@ function CampaignRow({
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={12} className="border-t border-os-border bg-os-surface px-3 py-3">
+          <td colSpan={columnCount} className="border-t border-os-border bg-os-surface px-3 py-3">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
               <div>
                 <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Fecha de inicio</div>
@@ -211,14 +227,27 @@ function CampaignRow({
 export default function MetaAdsPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [campaigns, setCampaigns] = useState<MetaCampaign[]>([]);
+  // Primary scope: REKREATIVE's own campaigns vs. client campaigns —
+  // conceptually ABOVE client filtering, never a fake client. Defaults to
+  // REKREATIVE. Local UI state only, same as every other filter here.
+  const [moduleScope, setModuleScope] = useState<MetaCampaignScope>('internal');
   const [statusFilter, setStatusFilter] = useState<'all' | MetaCampaignStatus>('all');
   const [clientFilter, setClientFilter] = useState<'all' | string>('all');
+  const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [showForm, setShowForm] = useState(false);
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftCampaign>(emptyDraft());
 
+  // In REKREATIVE scope the client selector is hidden and irrelevant, so
+  // always load the full set (internal campaigns have no clientId to filter
+  // by); the scope filter below narrows it. In CLIENTES scope, behavior is
+  // unchanged from before scope existed.
   const loadCampaigns = () => {
+    if (moduleScope === 'internal') {
+      setCampaigns(getCampaigns());
+      return;
+    }
     const activeClient = clientFilter === 'all' ? undefined : clientFilter;
     setCampaigns(getCampaigns(activeClient));
   };
@@ -233,21 +262,56 @@ export default function MetaAdsPage() {
   useEffect(() => {
     loadCampaigns();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientFilter]);
+  }, [clientFilter, moduleScope]);
+
+  // Scope filter — sits above search/status. "Todos los clientes" (CLIENTES
+  // scope, no client picked) must never include REKREATIVE's own
+  // campaigns; this guarantees it regardless of what `campaigns` holds.
+  const scopedCampaigns = useMemo(() => campaigns.filter((c) => c.scope === moduleScope), [campaigns, moduleScope]);
+
+  // Search is client-side, UI-only state — never persisted, matches
+  // campaign name, client name, and objective case-insensitively. Operates
+  // only within the currently selected scope.
+  const searchedCampaigns = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return scopedCampaigns;
+    return scopedCampaigns.filter((campaign) => {
+      const clientName = getClientNameForCampaign(campaign.clientId).toLowerCase();
+      const objective = getObjectiveLabel(campaign.objective).toLowerCase();
+      return campaign.name.toLowerCase().includes(q) || clientName.includes(q) || objective.includes(q);
+    });
+  }, [scopedCampaigns, query]);
+
+  // Status filter counts — computed from the already-loaded, search-filtered
+  // campaigns (never a new metric/store); reacts live as the search narrows.
+  const statusCounts = useMemo(() => {
+    const counts: Record<'all' | MetaCampaignStatus, number> = {
+      all: searchedCampaigns.length,
+    } as Record<'all' | MetaCampaignStatus, number>;
+    for (const option of CAMPAIGN_STATUS_OPTIONS) {
+      counts[option.id] = searchedCampaigns.filter((campaign) => campaign.status === option.id).length;
+    }
+    return counts;
+  }, [searchedCampaigns]);
 
   const visibleCampaigns = useMemo(
     () =>
-      campaigns.filter((campaign) => {
+      searchedCampaigns.filter((campaign) => {
         if (statusFilter !== 'all' && campaign.status !== statusFilter) return false;
         return true;
       }),
-    [campaigns, statusFilter],
+    [searchedCampaigns, statusFilter],
   );
 
   const summary = useMemo(() => summarizeCampaigns(visibleCampaigns), [visibleCampaigns]);
 
+  // REKREATIVE scope: every row is already known to be internal, so the
+  // Cliente column is redundant there — shown as-is in CLIENTES scope.
+  const showClientColumn = moduleScope === 'client';
+  const columnCount = showClientColumn ? 12 : 11;
+
   const openCreateForm = () => {
-    const firstClient = clients[0]?.id ?? '';
+    const firstClient = moduleScope === 'client' ? clients[0]?.id ?? '' : '';
     setDraft(emptyDraft(firstClient));
     setEditingCampaignId(null);
     setShowForm(true);
@@ -256,7 +320,7 @@ export default function MetaAdsPage() {
   const openEditForm = (campaign: MetaCampaign) => {
     setEditingCampaignId(campaign.id);
     setDraft({
-      clientId: campaign.clientId,
+      clientId: campaign.clientId ?? '',
       externalCampaignId: campaign.externalCampaignId ?? '',
       name: campaign.name,
       status: campaign.status,
@@ -280,18 +344,16 @@ export default function MetaAdsPage() {
     setDraft(emptyDraft(clients[0]?.id ?? ''));
   };
 
-  const refreshCampaigns = () => {
-    const activeClient = clientFilter === 'all' ? undefined : clientFilter;
-    setCampaigns(getCampaigns(activeClient));
-  };
-
   const submitCampaign = () => {
     const name = draft.name.trim();
-    if (!name || !draft.clientId) return;
+    const scope: MetaCampaignScope = moduleScope;
+    const clientId = scope === 'client' ? draft.clientId : null;
+    if (!name || (scope === 'client' && !clientId)) return;
 
     const budgetAmount = draft.budgetAmount.trim() === '' ? null : Number(draft.budgetAmount);
     const normalized = {
-      clientId: draft.clientId,
+      scope,
+      clientId,
       externalCampaignId: draft.externalCampaignId.trim() || null,
       name,
       status: draft.status,
@@ -314,13 +376,13 @@ export default function MetaAdsPage() {
       createCampaign({ ...normalized, dataSource: 'manual' });
     }
 
-    refreshCampaigns();
+    loadCampaigns();
     closeForm();
   };
 
   const handleStatusChange = (campaignId: string, next: MetaCampaignStatus) => {
     setCampaignStatus(campaignId, next);
-    refreshCampaigns();
+    loadCampaigns();
   };
 
   return (
@@ -341,24 +403,62 @@ export default function MetaAdsPage() {
         </div>
       </div>
 
-      {/* KPI summary */}
+      {/* Primary scope — REKREATIVE's own acquisition vs. client campaigns.
+          Conceptually above every filter below, including the KPI row;
+          REKREATIVE is never a client, so this never touches the client
+          selector's options. */}
+      <div className="mb-4 flex items-center gap-1.5">
+        {META_CAMPAIGN_SCOPE_OPTIONS.map((option) => {
+          const active = moduleScope === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setModuleScope(option.id)}
+              className={`border px-3 py-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-wide ${
+                active ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim hover:border-os-border-strong hover:text-os-muted'
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* KPI summary — recalculated from only the currently selected scope
+          (see scopedCampaigns → searchedCampaigns → visibleCampaigns →
+          summary below). "Leads Meta" is explicit: Meta-platform-attributed
+          leads, never CRM leads (see /leads). CPL below stays this same
+          Meta-attributed count / spend, unchanged. */}
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {[
-          { label: 'Gasto', value: formatCurrency(summary.spend) },
-          { label: 'Leads', value: formatNumber(summary.leads) },
-          { label: 'CPL', value: formatMoneyRate(summary.cpl) },
-          { label: 'Impresiones', value: formatNumber(summary.impressions) },
-          { label: 'CTR', value: formatPercent(summary.ctr) },
+          { label: 'Gasto', value: formatCurrency(summary.spend), unit: null },
+          { label: 'Leads Meta', value: formatNumber(summary.leads), unit: 'atribuidos por Meta' },
+          { label: 'CPL', value: formatMoneyRate(summary.cpl), unit: null },
+          { label: 'Impresiones', value: formatNumber(summary.impressions), unit: null },
+          { label: 'CTR', value: formatPercent(summary.ctr), unit: null },
         ].map((tile) => (
           <div key={tile.label} className="border border-os-border bg-os-surface px-3 py-3">
             <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-os-dim">{tile.label}</div>
             <div className="mt-1.5 font-mono text-[18px] font-semibold text-os-text">{tile.value}</div>
+            {tile.unit && <div className="mt-0.5 font-mono text-[9px] text-os-dim">{tile.unit}</div>}
           </div>
         ))}
       </div>
 
       {/* Filters */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-os-dim" />
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Buscar campaña..."
+            className="border border-os-border bg-os-surface py-1.5 pl-8 pr-2.5 text-[12.5px] text-os-text outline-none placeholder:text-os-dim focus:border-os-border-strong"
+          />
+        </div>
+
         <div className="flex flex-wrap items-center gap-1.5">
           {STATUS_FILTERS.map((option) => {
             const active = statusFilter === option.id;
@@ -371,36 +471,38 @@ export default function MetaAdsPage() {
                   active ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim hover:border-os-border-strong hover:text-os-muted'
                 }`}
               >
-                {option.label}
+                {option.label} <span className="opacity-70">{statusCounts[option.id as 'all' | MetaCampaignStatus] ?? 0}</span>
               </button>
             );
           })}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
-          <select
-            value={clientFilter}
-            onChange={(event) => setClientFilter(event.target.value)}
-            className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
-          >
-            <option value="all">Todos los clientes</option>
-            {clients.map((client) => (
-              <option key={client.id} value={client.id}>
-                {client.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {moduleScope === 'client' && (
+          <div className="ml-auto flex items-center gap-2">
+            <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
+            <select
+              value={clientFilter}
+              onChange={(event) => setClientFilter(event.target.value)}
+              className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
+            >
+              <option value="all">Todos los clientes</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Campaign table */}
-      <div className="overflow-hidden rounded-sm-t border border-os-border bg-os-surface">
-        <table className="w-full border-collapse text-left text-sm">
+      <div className="overflow-x-auto rounded-sm-t border border-os-border bg-os-surface">
+        <table className="w-full min-w-[1080px] border-collapse text-left text-sm">
           <thead>
             <tr className="bg-os-surface2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">
               <th className="px-3 py-2 font-normal">Campaña</th>
-              <th className="px-3 py-2 font-normal">Cliente</th>
+              {showClientColumn && <th className="px-3 py-2 font-normal">Cliente</th>}
               <th className="px-3 py-2 font-normal">Estado</th>
               <th className="px-3 py-2 font-normal">Objetivo</th>
               <th className="px-3 py-2 font-normal">Presupuesto</th>
@@ -408,7 +510,7 @@ export default function MetaAdsPage() {
               <th className="px-3 py-2 font-normal">Impresiones</th>
               <th className="px-3 py-2 font-normal">Clics</th>
               <th className="px-3 py-2 font-normal">CTR</th>
-              <th className="px-3 py-2 font-normal">Leads</th>
+              <th className="px-3 py-2 font-normal">Leads Meta</th>
               <th className="px-3 py-2 font-normal">CPL</th>
               <th className="px-3 py-2 font-normal text-right">Acciones</th>
             </tr>
@@ -416,8 +518,8 @@ export default function MetaAdsPage() {
           <tbody>
             {visibleCampaigns.length === 0 ? (
               <tr>
-                <td colSpan={12} className="px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-                  No hay campañas en este segmento.
+                <td colSpan={columnCount} className="px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+                  No hay campañas que coincidan con estos filtros.
                 </td>
               </tr>
             ) : (
@@ -426,6 +528,8 @@ export default function MetaAdsPage() {
                   key={campaign.id}
                   campaign={campaign}
                   clientName={getClientNameForCampaign(campaign.clientId)}
+                  showClientColumn={showClientColumn}
+                  columnCount={columnCount}
                   expanded={Boolean(expanded[campaign.id])}
                   onToggle={() => setExpanded((prev) => ({ ...prev, [campaign.id]: !prev[campaign.id] }))}
                   onStatusChange={(next) => handleStatusChange(campaign.id, next)}
@@ -448,20 +552,31 @@ export default function MetaAdsPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <label className="col-span-2">
-                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
-                <select
-                  value={draft.clientId}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, clientId: event.target.value }))}
-                  className="w-full border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-text"
-                >
-                  {clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {moduleScope === 'client' ? (
+                <label className="col-span-2">
+                  <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
+                  <select
+                    value={draft.clientId}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, clientId: event.target.value }))}
+                    className="w-full border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-text"
+                  >
+                    {clients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label className="col-span-2">
+                  <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
+                  <input
+                    disabled
+                    value="Interno · REKREATIVE"
+                    className="w-full cursor-not-allowed border border-os-border bg-os-surface2 px-2 py-2 font-mono text-[10px] uppercase tracking-wide text-os-dim"
+                  />
+                </label>
+              )}
 
               <label className="col-span-2">
                 <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Nombre</span>

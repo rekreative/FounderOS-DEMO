@@ -33,7 +33,7 @@ export function ClientResultsPreview({
         </p>
       </div>
       <Link
-        href={`/clients/${clientId}/results`}
+        href={`/clients/${clientId}/results?period=all`}
         className="border border-os-border bg-os-surface px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-text hover:border-os-border-strong hover:text-os-accent"
       >
         Ver dashboard completo →
