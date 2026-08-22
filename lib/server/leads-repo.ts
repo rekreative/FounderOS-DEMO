@@ -12,6 +12,7 @@ import {
   type LeadStage,
 } from '@/lib/leads';
 import { query, withTransaction } from './db';
+import { normalizePhoneDigits } from '../phone';
 
 /**
  * Server-only PostgreSQL repository for Leads + LeadEvents (Backend V1).
@@ -129,6 +130,7 @@ type LeadEventRow = {
   occurred_at: Date;
   summary: string;
   details: Record<string, unknown> | null;
+  external_event_id?: string | null;
 };
 
 function rowToLead(row: LeadRow): ServerLead {
@@ -244,6 +246,71 @@ async function insertLeadEvent(
     input.occurredAt,
   ]);
   return rowToLeadEvent(row.rows[0]);
+}
+
+/**
+ * Idempotent variant for externally-reported events (Make-reported WhatsApp
+ * sends/deliveries/replies) that carry a provider message id. Same shape as
+ * insertLeadEvent, but ON CONFLICT on (type, external_event_id) — see the
+ * lead_events_type_external_id_unique partial index — resolves to the
+ * existing row instead of inserting a duplicate. Kept separate from
+ * insertLeadEvent rather than adding an optional param to it: every other
+ * caller (createLead, setLeadStage, ingestLeadTransactional,
+ * appendLeadEvent) never supplies an external_event_id and must always get
+ * a freshly inserted row back, never a "maybe undefined" row to guard
+ * against.
+ */
+async function insertLeadEventIdempotent(
+  client: PoolClient,
+  input: {
+    leadId: string;
+    type: LeadEventType;
+    source: LeadEventSource;
+    summary: string;
+    details?: Record<string, unknown> | null;
+    occurredAt: Date;
+    externalEventId: string;
+  },
+): Promise<{ event: LeadEvent; deduped: boolean }> {
+  const id = generateEventId();
+  const inserted = await client.query<LeadEventRow>(
+    `INSERT INTO lead_events (id, lead_id, type, source, occurred_at, summary, details, external_event_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (type, external_event_id) WHERE external_event_id IS NOT NULL DO NOTHING
+     RETURNING *`,
+    [
+      id,
+      input.leadId,
+      input.type,
+      input.source,
+      input.occurredAt,
+      input.summary,
+      input.details ? JSON.stringify(input.details) : null,
+      input.externalEventId,
+    ],
+  );
+
+  if (inserted.rowCount && inserted.rowCount > 0) {
+    await client.query('UPDATE leads SET last_activity_at = GREATEST(last_activity_at, $2) WHERE id = $1', [
+      input.leadId,
+      input.occurredAt,
+    ]);
+    return { event: rowToLeadEvent(inserted.rows[0]), deduped: false };
+  }
+
+  // ON CONFLICT DO NOTHING hit — the same (type, externalEventId) already
+  // exists (a retried Make/webhook delivery). Resolve to it rather than
+  // silently returning nothing.
+  const existing = await client.query<LeadEventRow>(
+    'SELECT * FROM lead_events WHERE type = $1 AND external_event_id = $2',
+    [input.type, input.externalEventId],
+  );
+  if (existing.rowCount === 0) {
+    throw new Error(
+      `Idempotent insert conflicted but no existing lead_event found for type=${input.type} externalEventId=${input.externalEventId}`,
+    );
+  }
+  return { event: rowToLeadEvent(existing.rows[0]), deduped: true };
 }
 
 export async function listLeads(options: ListLeadsOptions = {}): Promise<ServerLead[]> {
@@ -402,38 +469,51 @@ export async function updateLead(id: string, patch: UpdateLeadInput): Promise<Se
 }
 
 /**
- * Atomic: read+lock the current row → no-op if the stage is unchanged (never
- * a misleading duplicate stage_changed event) → else UPDATE stage → append
- * the stage_changed event, mirroring lib/leads.ts's setLeadStage exactly.
+ * Read+lock the current row → no-op if the stage is unchanged (never a
+ * misleading duplicate stage_changed event) → else UPDATE stage → append
+ * the stage_changed event. Runs on a caller-supplied client so it can be
+ * composed into a larger transaction (see appendWhatsAppEvent, which needs
+ * the whatsapp_sent event and its automatic new→contacted transition to
+ * commit or roll back together) as well as as its own standalone
+ * transaction (see setLeadStage below).
  */
+async function setLeadStageOnClient(
+  client: PoolClient,
+  id: string,
+  nextStage: LeadStage,
+  source: LeadEventSource,
+): Promise<{ lead: ServerLead; event: LeadEvent | null } | null> {
+  const current = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1 FOR UPDATE', [id]);
+  if (current.rowCount === 0) return null;
+
+  const existing = rowToLead(current.rows[0]);
+  if (existing.stage === nextStage) {
+    return { lead: existing, event: null };
+  }
+
+  await client.query('UPDATE leads SET stage = $2 WHERE id = $1', [id, nextStage]);
+
+  const event = await insertLeadEvent(client, {
+    leadId: id,
+    type: 'stage_changed',
+    source,
+    summary: `Stage changed to ${stageLabel(nextStage)}`,
+    details: { from: existing.stage, to: nextStage },
+    occurredAt: new Date(),
+  });
+
+  const finalRow = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1', [id]);
+  return { lead: rowToLead(finalRow.rows[0]), event };
+}
+
+/** Public, standalone-transaction entry point — mirrors lib/leads.ts's old
+ *  setLeadStage exactly. See setLeadStageOnClient for the atomic core. */
 export async function setLeadStage(
   id: string,
   nextStage: LeadStage,
   source: LeadEventSource = 'manual',
 ): Promise<{ lead: ServerLead; event: LeadEvent | null } | null> {
-  return withTransaction(async (client) => {
-    const current = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1 FOR UPDATE', [id]);
-    if (current.rowCount === 0) return null;
-
-    const existing = rowToLead(current.rows[0]);
-    if (existing.stage === nextStage) {
-      return { lead: existing, event: null };
-    }
-
-    await client.query('UPDATE leads SET stage = $2 WHERE id = $1', [id, nextStage]);
-
-    const event = await insertLeadEvent(client, {
-      leadId: id,
-      type: 'stage_changed',
-      source,
-      summary: `Stage changed to ${stageLabel(nextStage)}`,
-      details: { from: existing.stage, to: nextStage },
-      occurredAt: new Date(),
-    });
-
-    const finalRow = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1', [id]);
-    return { lead: rowToLead(finalRow.rows[0]), event };
-  });
+  return withTransaction((client) => setLeadStageOnClient(client, id, nextStage, source));
 }
 
 /** Public append surface — checks the lead exists first (LeadNotFoundError
@@ -614,5 +694,118 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
 
     const finalRow = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1', [id]);
     return { lead: rowToLead(finalRow.rows[0]), event, deduped: false };
+  });
+}
+
+// ── WhatsApp event reporting (Make → REKREATIVE OS) ──────────────────────
+// Outbound (Make performed a send) and inbound (Make relays a WhatsApp
+// Business Cloud webhook it owns) both land through the one primitive
+// below — see app/api/leads/whatsapp-events/route.ts. A future direct
+// WhatsApp Cloud adapter can call appendWhatsAppEvent the same way without
+// any change here.
+
+const WHATSAPP_NUMBER_LOOKUP_SQL = `regexp_replace(whatsapp, '\\D', '', 'g') = $1`;
+
+/** Resolves a lead by WhatsApp number, comparing digits only (see
+ *  lib/phone.ts's normalizePhoneDigits) so formatting differences between
+ *  what a lead's whatsapp field holds and what the provider sends don't
+ *  cause a false miss. Null for an unparseable number or no match — never
+ *  throws, since "no lead has this number yet" is an expected outcome, not
+ *  an error. */
+export async function findByWhatsapp(whatsappNumber: string): Promise<ServerLead | null> {
+  const digits = normalizePhoneDigits(whatsappNumber);
+  if (!digits) return null;
+  const result = await query<LeadRow>(`SELECT * FROM leads WHERE ${WHATSAPP_NUMBER_LOOKUP_SQL} LIMIT 1`, [digits]);
+  return result.rowCount === 0 ? null : rowToLead(result.rows[0]);
+}
+
+type WhatsAppEventCommon = {
+  type: 'whatsapp_sent' | 'whatsapp_delivered' | 'lead_replied';
+  source: LeadEventSource;
+  externalEventId: string;
+  summary: string;
+  details?: Record<string, unknown> | null;
+  occurredAt?: string;
+};
+
+// Each branch fully spelled out (rather than a common type intersected
+// with a union) so `'leadId' in input` narrows cleanly — TS's control-flow
+// analysis doesn't reliably distribute an `in` check across an
+// intersection-with-a-union shape.
+export type AppendWhatsAppEventInput =
+  | (WhatsAppEventCommon & { leadId: string; whatsappNumber?: undefined })
+  | (WhatsAppEventCommon & { leadId?: undefined; whatsappNumber: string });
+
+export type AppendWhatsAppEventResult =
+  | { matched: true; lead: ServerLead; event: LeadEvent; deduped: boolean }
+  | { matched: false };
+
+/**
+ * Atomic: resolve the target lead (by id for outbound events, by WhatsApp
+ * number for inbound ones) → idempotently append the event → for
+ * whatsapp_sent only, advance stage new→contacted through the exact same
+ * setLeadStageOnClient core the UI's setLeadStage uses (never a bespoke
+ * stage write, never backwards, never past an already-further-along
+ * stage — the `existing.stage === 'new'` guard is what enforces that, and
+ * is safe to re-check on every replay since a second call simply finds the
+ * stage is no longer 'new').
+ *
+ * leadId not found → throws LeadNotFoundError (Make already has a real id
+ * from ingestion, so an unknown one is a genuine integration error — same
+ * convention as appendLeadEvent). whatsappNumber not found → returns
+ * { matched: false }, a safe no-op: the phone/lead mapping gap is expected
+ * (e.g. an inbound message from a number no ingested lead carries yet),
+ * never grounds for fabricating a lead.
+ */
+export async function appendWhatsAppEvent(input: AppendWhatsAppEventInput): Promise<AppendWhatsAppEventResult> {
+  // Resolved to plain nullable locals before the transaction closure below —
+  // TS's 'in' narrowing on a union-typed parameter doesn't reliably survive
+  // capture inside a nested async callback, so the branch is settled here
+  // instead of re-narrowing `input` itself inside withTransaction.
+  const leadId = 'leadId' in input ? input.leadId : null;
+  const whatsappNumber = 'whatsappNumber' in input ? input.whatsappNumber : null;
+
+  return withTransaction(async (client) => {
+    let lead: ServerLead;
+
+    if (leadId) {
+      const found = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1 FOR UPDATE', [leadId]);
+      if (found.rowCount === 0) throw new LeadNotFoundError(leadId);
+      lead = rowToLead(found.rows[0]);
+    } else if (whatsappNumber) {
+      const digits = normalizePhoneDigits(whatsappNumber);
+      if (!digits) return { matched: false };
+      const found = await client.query<LeadRow>(
+        `SELECT * FROM leads WHERE ${WHATSAPP_NUMBER_LOOKUP_SQL} FOR UPDATE LIMIT 1`,
+        [digits],
+      );
+      if (found.rowCount === 0) return { matched: false };
+      lead = rowToLead(found.rows[0]);
+    } else {
+      // Unreachable given AppendWhatsAppEventInput's type — satisfies
+      // control flow analysis without a non-null assertion.
+      return { matched: false };
+    }
+
+    const { event, deduped } = await insertLeadEventIdempotent(client, {
+      leadId: lead.id,
+      type: input.type,
+      source: input.source,
+      summary: input.summary,
+      details: input.details ?? null,
+      occurredAt: input.occurredAt ? new Date(input.occurredAt) : new Date(),
+      externalEventId: input.externalEventId,
+    });
+
+    // Approved V1 rule: whatsapp_sent advances new→contacted only. Never
+    // lead_replied→qualified (a reply isn't necessarily commercial
+    // qualification) and never whatsapp_delivered (a delivery receipt isn't
+    // a business milestone).
+    if (input.type === 'whatsapp_sent' && lead.stage === 'new') {
+      await setLeadStageOnClient(client, lead.id, 'contacted', 'make');
+    }
+
+    const finalRow = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1', [lead.id]);
+    return { matched: true, lead: rowToLead(finalRow.rows[0]), event, deduped };
   });
 }

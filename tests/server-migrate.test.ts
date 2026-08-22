@@ -6,9 +6,9 @@ import { applyMigrations, listMigrationFiles, MIGRATIONS_DIR } from '@/lib/serve
 import { resolveTestDatabaseUrl } from './helpers/pg-test-env';
 
 describe('migration file discovery', () => {
-  it('finds 0001_init.sql and returns migrations in deterministic filename order', () => {
+  it('finds every migration file and returns them in deterministic filename order', () => {
     const files = listMigrationFiles();
-    expect(files).toEqual(['0001_init.sql']);
+    expect(files).toEqual(['0001_init.sql', '0002_lead_events_whatsapp.sql']);
   });
 });
 
@@ -86,6 +86,26 @@ describe('0001_init.sql contains the critical Backend V1 invariants', () => {
     expect(sql).toMatch(/ingestion_source TEXT NULL/);
     expect(sql).toMatch(/external_lead_id TEXT NULL/);
     expect(sql).toMatch(/ingest_delivery_id TEXT NULL/);
+  });
+});
+
+describe('0002_lead_events_whatsapp.sql contains the WhatsApp + Lead Lifecycle V1 additions', () => {
+  const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, '0002_lead_events_whatsapp.sql'), 'utf8');
+
+  it('adds external_event_id to lead_events, additively', () => {
+    expect(sql).toMatch(/ALTER TABLE lead_events ADD COLUMN IF NOT EXISTS external_event_id TEXT NULL/);
+  });
+
+  it('enforces idempotency on (type, external_event_id), not external_event_id alone', () => {
+    expect(sql).toMatch(
+      /CREATE UNIQUE INDEX IF NOT EXISTS lead_events_type_external_id_unique\s+ON lead_events \(type, external_event_id\)\s+WHERE external_event_id IS NOT NULL/,
+    );
+  });
+
+  it('adds a digits-only lookup index on leads.whatsapp', () => {
+    expect(sql).toMatch(
+      /CREATE INDEX IF NOT EXISTS idx_leads_whatsapp_digits\s+ON leads \(regexp_replace\(whatsapp, '\\D', '', 'g'\)\)\s+WHERE whatsapp IS NOT NULL/,
+    );
   });
 });
 

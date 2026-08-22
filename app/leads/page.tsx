@@ -561,8 +561,13 @@ export default function LeadsPage() {
   };
 
   const handleToggle = (leadId: string) => {
+    // Refetch on every collapse→expand transition, not just the first time
+    // a row is opened — a lead's timeline can gain events from outside this
+    // page (Make-reported WhatsApp sends/deliveries/replies), so a cached
+    // first fetch would otherwise go stale for the rest of the session.
+    const opening = !expanded[leadId];
     setExpanded((prev) => ({ ...prev, [leadId]: !prev[leadId] }));
-    if (!eventsByLeadId[leadId] && !eventsLoadingId[leadId]) {
+    if (opening && !eventsLoadingId[leadId]) {
       setEventsLoadingId((prev) => ({ ...prev, [leadId]: true }));
       getLeadEvents(leadId)
         .then((events) => setEventsByLeadId((prev) => ({ ...prev, [leadId]: events })))

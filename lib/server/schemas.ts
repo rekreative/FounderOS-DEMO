@@ -141,6 +141,38 @@ const ingestLeadAiAnalysisSchema = z
   })
   .strict();
 
+// WhatsApp event types Make may report — a deliberate subset of
+// LeadEventTypeSchema. `source` is NOT part of this body: it's derived
+// server-side from `type` (see app/api/leads/whatsapp-events/route.ts),
+// never caller-supplied, so a request can't spoof provenance the same way
+// a caller-supplied `stage` could bypass setLeadStage's event semantics.
+export const WhatsAppEventTypeSchema = z.enum(['whatsapp_sent', 'whatsapp_delivered', 'lead_replied']);
+
+const whatsAppEventCommonFields = {
+  type: WhatsAppEventTypeSchema,
+  // The provider (WhatsApp Business Cloud) message id — the idempotency
+  // key, paired with `type` (see the lead_events_type_external_id_unique
+  // partial index: the same message id legitimately produces both a
+  // whatsapp_sent and a later whatsapp_delivered event).
+  externalEventId: z.string().trim().min(1),
+  summary: z.string().trim().min(1).optional(),
+  occurredAt: isoDateTime.optional(),
+  details: z.record(z.unknown()).optional(),
+};
+
+/**
+ * POST /api/leads/whatsapp-events request shape. Exactly one of `leadId`
+ * (outbound — Make already has this from POST /api/ingest/leads' response)
+ * or `whatsappNumber` (inbound — all Make's WhatsApp Business Cloud webhook
+ * gives it) must be present. Each branch is `.strict()`, so a body carrying
+ * both keys fails every branch and the union — mutual exclusivity is
+ * enforced by shape, not a separate refine.
+ */
+export const WhatsAppEventBodySchema = z.union([
+  z.object({ ...whatsAppEventCommonFields, leadId: z.string().trim().min(1) }).strict(),
+  z.object({ ...whatsAppEventCommonFields, whatsappNumber: z.string().trim().min(1) }).strict(),
+]);
+
 /**
  * POST /api/ingest/leads request shape. Deliberately has NO `stage` field —
  * Make must never choose a lead's lifecycle state; every ingested lead
