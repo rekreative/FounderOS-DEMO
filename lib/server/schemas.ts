@@ -284,6 +284,31 @@ export const ManualCommercialEventBodySchema = z.discriminatedUnion('type', [
  * invariants enforced by leads-repo.ts's assertScopeInvariant (422), not
  * shape validation (400).
  */
+// Results Real + Home Real V1 (lib/server/results-repo.ts,
+// app/api/results/route.ts, app/api/results/home/route.ts). Query params
+// only — every field arrives as a string off URLSearchParams, same
+// convention as ListLeadsQuerySchema; numeric-looking fields (limit/days)
+// stay strings here and are Number()-converted in the route handler after
+// validation, not coerced inside Zod, matching how this file validates every
+// other query param.
+export const ResultsPeriodPresetSchema = z.enum(['all', 'this_month', 'last_month', 'last_30_days', 'custom']);
+
+export const ResultsQuerySchema = z
+  .object({
+    clientId: z.string().trim().min(1).optional(),
+    preset: ResultsPeriodPresetSchema.optional(),
+    start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'start must be YYYY-MM-DD').optional(),
+    end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'end must be YYYY-MM-DD').optional(),
+  })
+  .strict();
+
+export const ResultsHomeQuerySchema = z
+  .object({
+    limit: z.string().regex(/^\d+$/, 'limit must be a positive integer').optional(),
+    days: z.string().regex(/^\d+$/, 'days must be a positive integer').optional(),
+  })
+  .strict();
+
 export const IngestLeadBodySchema = z
   .object({
     deliveryId: z.string().trim().min(1),

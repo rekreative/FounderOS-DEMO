@@ -92,9 +92,19 @@ export type UpdateLeadInput = Partial<{
 export type ListLeadsOptions = {
   clientId?: string;
   scope?: LeadScope;
+  /** Inclusive lower bound on leads.created_at — Results V1's acquisition-
+   * cohort filter (lib/server/results-repo.ts). Omitted = unbounded. */
+  createdFrom?: Date;
+  /** Exclusive upper bound on leads.created_at — pairs with createdFrom. */
+  createdTo?: Date;
 };
 
-type LeadRow = {
+// Exported (not just `type`, the row shape too) so results-repo.ts can build
+// its own bounded queries against `leads`/`lead_events` (Home's operational
+// widgets need orderings/filters listLeads/listLeadEvents don't offer) while
+// still going through the exact same row→domain mapping — one mapping
+// implementation, not a second copy.
+export type LeadRow = {
   id: string;
   scope: string;
   client_id: string | null;
@@ -122,7 +132,7 @@ type LeadRow = {
   last_activity_at: Date;
 };
 
-type LeadEventRow = {
+export type LeadEventRow = {
   id: string;
   lead_id: string;
   type: string;
@@ -133,7 +143,7 @@ type LeadEventRow = {
   external_event_id?: string | null;
 };
 
-function rowToLead(row: LeadRow): ServerLead {
+export function rowToLead(row: LeadRow): ServerLead {
   const hasAiAnalysis =
     row.ai_intent !== null || row.ai_priority !== null || row.ai_summary !== null || row.ai_qualification !== null || row.ai_analyzed_at !== null;
 
@@ -170,7 +180,7 @@ function rowToLead(row: LeadRow): ServerLead {
   };
 }
 
-function rowToLeadEvent(row: LeadEventRow): LeadEvent {
+export function rowToLeadEvent(row: LeadEventRow): LeadEvent {
   return {
     id: row.id,
     leadId: row.lead_id,
@@ -325,6 +335,14 @@ export async function listLeads(options: ListLeadsOptions = {}): Promise<ServerL
     params.push(options.scope);
     conditions.push(`scope = $${params.length}`);
   }
+  if (options.createdFrom) {
+    params.push(options.createdFrom);
+    conditions.push(`created_at >= $${params.length}`);
+  }
+  if (options.createdTo) {
+    params.push(options.createdTo);
+    conditions.push(`created_at < $${params.length}`);
+  }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const result = await query<LeadRow>(`SELECT * FROM leads ${where} ORDER BY last_activity_at DESC`, params);
@@ -340,6 +358,24 @@ export async function listLeadEvents(leadId: string): Promise<LeadEvent[]> {
   const result = await query<LeadEventRow>(
     'SELECT * FROM lead_events WHERE lead_id = $1 ORDER BY occurred_at ASC, created_at ASC, id ASC',
     [leadId],
+  );
+  return result.rows.map(rowToLeadEvent);
+}
+
+/**
+ * Every event for a whole set of leads, in ONE bounded query — the
+ * Results/Home aggregation layer's replacement for "GET all leads → GET
+ * events once per lead" (see lib/server/results-repo.ts). No date filter:
+ * Results V1's acquisition-cohort semantics require a lead's FULL event
+ * history regardless of when those events occurred, only leads.created_at
+ * is ever range-bound. Returns [] without querying for an empty leadIds
+ * list — `= ANY($1)` on an empty array is valid SQL but a wasted round trip.
+ */
+export async function listLeadEventsForLeadIds(leadIds: string[]): Promise<LeadEvent[]> {
+  if (leadIds.length === 0) return [];
+  const result = await query<LeadEventRow>(
+    'SELECT * FROM lead_events WHERE lead_id = ANY($1) ORDER BY occurred_at ASC, created_at ASC, id ASC',
+    [leadIds],
   );
   return result.rows.map(rowToLeadEvent);
 }

@@ -22,23 +22,56 @@ import { Badge } from '@/components/terminal';
 
 // ===== KPI strip =====
 
-export function ResultsKpiTile({ label, value }: { label: string; value: string }) {
+/**
+ * `value === null` renders `unavailableLabel` in a smaller, dimmer style —
+ * distinct from a computed "no data yet" state (still shown via the default
+ * '—') specifically for KPIs that depend on a source that isn't live yet
+ * (Meta Ads spend/ROAS/CAC in V1) — see the ad-spend-dependent tiles in
+ * ResultsKpiStrip below. Never a fabricated 0 either way.
+ */
+export function ResultsKpiTile({
+  label,
+  value,
+  unavailableLabel = '—',
+}: {
+  label: string;
+  value: string | null;
+  unavailableLabel?: string;
+}) {
   return (
     <div className="border border-os-border bg-os-surface px-4 py-4">
       <div className="font-mono text-[9.5px] uppercase tracking-[0.2em] text-os-dim">{label}</div>
-      <div className="mt-2 font-mono text-[26px] font-semibold leading-none text-os-text">{value}</div>
+      <div
+        className={`mt-2 font-mono leading-none ${
+          value == null ? 'text-[12px] text-os-dim' : 'text-[26px] font-semibold text-os-text'
+        }`}
+      >
+        {value ?? unavailableLabel}
+      </div>
     </div>
   );
 }
 
 export type ResultsKpiValues = {
+  /** Always null in V1 — Meta Ads spend has no live connector yet (see
+   * lib/connectors/meta-ads.ts). Kept in the shape so the tile/architecture
+   * exists for when it's wired, never sourced from lib/meta-ads.ts's demo
+   * MetaCampaign store. */
   adSpend: number | null;
   crmLeads: number;
   converted: number;
-  attributedRevenue: number;
+  /** Real: SUM(Lead.conversionValue) over converted leads in scope — "Valor
+   * generado", never "Ingresos" (conversionValue is commercial value
+   * associated with a conversion, not collected cash). Never mixed with
+   * RevenueRecord (lib/results.ts) — that stays a separate manual log. */
+  valueGenerated: number | null;
+  /** Always null in V1 — depends on adSpend. */
   roas: number | null;
+  /** Always null in V1 — depends on adSpend. */
   cac: number | null;
 };
+
+const META_UNAVAILABLE_LABEL = 'Sin datos de Meta';
 
 /** The approved six-KPI hierarchy, in the approved order — the one place
  * that order and formatting live, so /results and /clients/[clientId]/results
@@ -46,15 +79,32 @@ export type ResultsKpiValues = {
 export function ResultsKpiStrip({ values }: { values: ResultsKpiValues }) {
   return (
     <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
-      <ResultsKpiTile label="Gasto publicitario" value={values.adSpend == null ? '—' : formatEUR(values.adSpend)} />
+      <ResultsKpiTile
+        label="Gasto publicitario"
+        value={values.adSpend == null ? null : formatEUR(values.adSpend)}
+        unavailableLabel={META_UNAVAILABLE_LABEL}
+      />
       <ResultsKpiTile label="Leads CRM" value={String(values.crmLeads)} />
       <ResultsKpiTile label="Conversiones" value={String(values.converted)} />
-      <ResultsKpiTile label="Ingresos atribuidos" value={formatEUR(values.attributedRevenue)} />
-      <ResultsKpiTile label="ROAS" value={formatRoas(values.roas)} />
-      <ResultsKpiTile label="CAC publicitario" value={values.cac == null ? '—' : formatEUR(values.cac)} />
+      <ResultsKpiTile label="Valor generado" value={values.valueGenerated == null ? null : formatEUR(values.valueGenerated)} />
+      <ResultsKpiTile
+        label="ROAS"
+        value={values.roas == null ? null : formatRoas(values.roas)}
+        unavailableLabel={META_UNAVAILABLE_LABEL}
+      />
+      <ResultsKpiTile
+        label="CAC publicitario"
+        value={values.cac == null ? null : formatEUR(values.cac)}
+        unavailableLabel={META_UNAVAILABLE_LABEL}
+      />
     </div>
   );
 }
+
+/** Shared explanatory copy for every Meta-Ads-dependent section (KPI note,
+ * Adquisición panel, CPL tile) — one string, so the reason never drifts
+ * between call sites. */
+export const META_ADS_UNAVAILABLE_NOTE = 'No disponible hasta conectar Meta Ads.';
 
 // ===== Demo indicator =====
 

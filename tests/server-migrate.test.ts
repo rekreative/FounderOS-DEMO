@@ -8,7 +8,7 @@ import { resolveTestDatabaseUrl } from './helpers/pg-test-env';
 describe('migration file discovery', () => {
   it('finds every migration file and returns them in deterministic filename order', () => {
     const files = listMigrationFiles();
-    expect(files).toEqual(['0001_init.sql', '0002_lead_events_whatsapp.sql']);
+    expect(files).toEqual(['0001_init.sql', '0002_lead_events_whatsapp.sql', '0003_leads_created_at_index.sql']);
   });
 });
 
@@ -106,6 +106,14 @@ describe('0002_lead_events_whatsapp.sql contains the WhatsApp + Lead Lifecycle V
     expect(sql).toMatch(
       /CREATE INDEX IF NOT EXISTS idx_leads_whatsapp_digits\s+ON leads \(regexp_replace\(whatsapp, '\\D', '', 'g'\)\)\s+WHERE whatsapp IS NOT NULL/,
     );
+  });
+});
+
+describe('0003_leads_created_at_index.sql contains the Results Real + Home Real V1 addition', () => {
+  const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, '0003_leads_created_at_index.sql'), 'utf8');
+
+  it('adds an index on leads.created_at, additively', () => {
+    expect(sql).toMatch(/CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads \(created_at\)/);
   });
 });
 

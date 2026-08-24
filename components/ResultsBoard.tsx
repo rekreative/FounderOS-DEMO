@@ -3,82 +3,45 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useClientsRegistry } from '@/components/ClientsProvider';
-import { getLeadEvents, getLeads, type Lead, type LeadEvent } from '@/lib/api/leads';
-import { getCampaigns, initializeMetaCampaignsStoreIfNeeded, type MetaCampaign } from '@/lib/meta-ads';
+import { getResults, type ResultsResponse } from '@/lib/api/results';
 import {
   PERIOD_PRESET_OPTIONS,
-  aggregateResultsTotals,
-  buildClientComparison,
-  buildFunnelStages,
-  computeClientResults,
   formatEUR,
-  formatRoas,
-  getAdSpendUnavailableNote,
-  getRevenueRecords,
   getStoredPeriodPreference,
-  includesDemoData,
-  initializeResultsStoreIfNeeded,
-  resolvePeriod,
   setStoredPeriodPreference,
-  sumFunnelCounts,
   type PeriodPreset,
-  type RevenueRecord,
 } from '@/lib/results';
 import { SectionHead } from '@/components/terminal';
 import { PageHeader } from '@/components/PageHeader';
-import { BarListChart, DemoDataBadge, FunnelBars, ResultsKpiStrip } from '@/components/ResultsCharts';
+import { BarListChart, FunnelBars, ResultsKpiStrip } from '@/components/ResultsCharts';
 
 /** REKREATIVE Resultados — the executive portfolio overview. Selecting a
  * client navigates to its dedicated /clients/[clientId]/results dashboard;
- * this page never swaps into a per-client detail mode itself. */
+ * this page never swaps into a per-client detail mode itself.
+ *
+ * Every number on this page is real PostgreSQL (lib/server/results-repo.ts
+ * via GET /api/results) — an acquisition-cohort funnel + "Valor generado"
+ * (SUM Lead.conversionValue over converted leads), scoped by the selected
+ * period and, per client, by clientId. Ad spend/ROAS/CAC have no live
+ * source yet (Meta Ads) and are never computed here — see the KPI strip's
+ * "Sin datos de Meta" tiles. RevenueRecord (the manual revenue log) isn't
+ * shown on this page at all in V1 — it stays fully visible/editable on each
+ * client's own /clients/[clientId]/results dashboard. */
 export function ResultsBoard() {
   // Canonical PostgreSQL registry — same source /clients and /leads read.
   const { clients, error: clientsError } = useClientsRegistry();
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [events, setEvents] = useState<LeadEvent[]>([]);
-  const [leadsError, setLeadsError] = useState<string | null>(null);
-  const [campaigns, setCampaigns] = useState<MetaCampaign[]>([]);
-  const [revenueRecords, setRevenueRecords] = useState<RevenueRecord[]>([]);
+  const [resultsData, setResultsData] = useState<ResultsResponse | null>(null);
+  const [resultsError, setResultsError] = useState<string | null>(null);
 
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
   const [customRange, setCustomRange] = useState({ start: '', end: '' });
 
-  // Leads + their events: PostgreSQL, async, cancellation-guarded.
-  // computeClientResults filters by lead.clientId === client.id (unchanged),
-  // so REKREATIVE's own internal leads (clientId null) never match any real
-  // client and never leak into this client-only portfolio view.
   useEffect(() => {
-    let cancelled = false;
-    getLeads()
-      .then(async (loadedLeads) => {
-        if (cancelled) return;
-        setLeads(loadedLeads);
-        const eventLists = await Promise.all(loadedLeads.map((lead) => getLeadEvents(lead.id)));
-        if (!cancelled) setEvents(eventLists.flat());
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setLeadsError(error instanceof Error ? error.message : 'No se pudieron cargar los leads.');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    initializeMetaCampaignsStoreIfNeeded();
-    initializeResultsStoreIfNeeded();
-
-    setCampaigns(getCampaigns());
-    setRevenueRecords(getRevenueRecords());
-
-    // Restore the last-viewed period (shared with /clients/[clientId]/results)
-    // so a refresh (F5) or a return visit doesn't silently reset to "Todo".
     const preference = getStoredPeriodPreference();
     setPeriodPreset(preference.preset);
     if (preference.preset === 'custom') {
       setCustomRange({ start: preference.start ?? '', end: preference.end ?? '' });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -89,64 +52,79 @@ export function ResultsBoard() {
     });
   }, [periodPreset, customRange]);
 
-  const period = useMemo(
-    () => resolvePeriod(periodPreset, periodPreset === 'custom' ? customRange : undefined),
-    [periodPreset, customRange],
-  );
+  // Real cohort/funnel/value fetch — server-resolved period (Europe/Madrid),
+  // clientId-scoped per row via the byClient breakdown, no client-side N+1.
+  useEffect(() => {
+    if (periodPreset === 'custom' && (!customRange.start || !customRange.end)) return;
+    let cancelled = false;
+    getResults({
+      preset: periodPreset,
+      start: periodPreset === 'custom' ? customRange.start : undefined,
+      end: periodPreset === 'custom' ? customRange.end : undefined,
+    })
+      .then((result) => {
+        if (!cancelled) setResultsData(result);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setResultsError(error instanceof Error ? error.message : 'No se pudieron cargar los resultados.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [periodPreset, customRange]);
 
-  const perClient = useMemo(
-    () => clients.map((client) => computeClientResults(client.id, leads, events, campaigns, revenueRecords, period, periodPreset)),
-    [clients, leads, events, campaigns, revenueRecords, period, periodPreset],
-  );
-
-  const aggregate = useMemo(
-    () =>
-      aggregateResultsTotals(
-        perClient.map((c) => ({
-          adSpend: c.adSpend,
-          crmLeads: c.counts.leads,
-          converted: c.counts.converted,
-          attributedRevenue: c.attributedRevenue,
-        })),
-      ),
-    [perClient],
-  );
-
-  const globalFunnelStages = useMemo(
-    () => buildFunnelStages(sumFunnelCounts(perClient.map((c) => c.counts))),
-    [perClient],
-  );
+  const byClientMap = useMemo(() => {
+    const map = new Map<string, ResultsResponse['byClient'][number]>();
+    for (const row of resultsData?.byClient ?? []) {
+      if (row.clientId) map.set(row.clientId, row);
+    }
+    return map;
+  }, [resultsData]);
 
   const comparison = useMemo(
-    () => buildClientComparison(clients.map((c) => ({ id: c.id, name: c.name })), perClient),
-    [clients, perClient],
+    () =>
+      clients
+        .map((client) => {
+          const row = byClientMap.get(client.id);
+          return {
+            clientId: client.id,
+            clientName: client.name,
+            crmLeads: row?.funnel.leads ?? 0,
+            converted: row?.funnel.converted ?? 0,
+            valueGenerated: row?.value.total ?? null,
+          };
+        })
+        .sort((a, b) => (b.valueGenerated ?? 0) - (a.valueGenerated ?? 0)),
+    [clients, byClientMap],
   );
 
-  const revenueByClient = useMemo(
-    () => comparison.map((row) => ({ key: row.clientId, label: row.clientName, value: row.attributedRevenue })),
+  const valueByClient = useMemo(
+    () => comparison.filter((row) => (row.valueGenerated ?? 0) > 0).map((row) => ({ key: row.clientId, label: row.clientName, value: row.valueGenerated ?? 0 })),
     [comparison],
   );
   const leadsByClient = useMemo(
-    () => comparison.map((row) => ({ key: row.clientId, label: row.clientName, value: row.crmLeads })).sort((a, b) => b.value - a.value),
+    () =>
+      comparison
+        .filter((row) => row.crmLeads > 0)
+        .map((row) => ({ key: row.clientId, label: row.clientName, value: row.crmLeads }))
+        .sort((a, b) => b.value - a.value),
     [comparison],
   );
 
-  const showDemoBadge = includesDemoData({ revenueRecords, campaigns });
-  const spendUnavailable = periodPreset !== 'all';
+  const overall = resultsData?.overall;
 
   return (
     <div className="p-4">
       <PageHeader eyebrow="REKREATIVE OPERACIONES" title="Resultados" />
       <div className="-mt-4 mb-5 flex flex-wrap items-center gap-2.5">
         <p className="max-w-2xl text-[12px] text-os-muted">
-          Visión global del rendimiento comercial y financiero generado para los clientes de REKREATIVE.
+          Visión global del rendimiento comercial generado para los clientes de REKREATIVE, a partir de los leads y eventos reales del CRM.
         </p>
-        {showDemoBadge && <DemoDataBadge />}
       </div>
 
-      {(clientsError || leadsError) && (
+      {(clientsError || resultsError) && (
         <div className="mb-5 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">
-          {clientsError ?? leadsError}
+          {clientsError ?? resultsError}
         </div>
       )}
 
@@ -191,22 +169,16 @@ export function ResultsBoard() {
         )}
       </div>
 
-      {spendUnavailable && (
-        <div className="mb-5 border border-dashed border-os-border bg-os-surface2 px-3 py-2 font-mono text-[10px] text-os-dim">
-          {getAdSpendUnavailableNote()}
-        </div>
-      )}
-
       {/* Global KPI strip */}
       <div className="mb-6">
         <ResultsKpiStrip
           values={{
-            adSpend: aggregate.adSpend,
-            crmLeads: aggregate.crmLeads,
-            converted: aggregate.converted,
-            attributedRevenue: aggregate.attributedRevenue,
-            roas: aggregate.roas,
-            cac: aggregate.cac,
+            adSpend: null,
+            crmLeads: overall?.funnel.leads ?? 0,
+            converted: overall?.funnel.converted ?? 0,
+            valueGenerated: overall?.value.total ?? null,
+            roas: null,
+            cac: null,
           }}
         />
       </div>
@@ -218,21 +190,21 @@ export function ResultsBoard() {
         <div className="border border-os-border bg-os-surface p-4">
           {/* "Hitos comerciales" (milestones), not a strict sequential
               funnel: these are summed across every client's own cohort, so
-              e.g. "Asistidas" and "Conversiones" are independent axes (see
-              lib/results.ts's buildLeadFunnel) that can make a later
-              milestone exceed an earlier one — an adjacent-stage percentage
-              here could render an impossible rate like "200%". Counts stay
-              fully visible; only the misleading rate labels are omitted
-              (showRates={false}). Per-client dashboards keep their existing
-              funnel + rates unchanged (a single client's own cohort makes
-              that framing legitimate there). */}
+              e.g. "Asistidas" and "Conversiones" are independent axes that
+              can make a later milestone exceed an earlier one — an
+              adjacent-stage percentage here could render an impossible rate
+              like "200%". Counts stay fully visible; only the misleading
+              rate labels are omitted (showRates={false}). Per-client
+              dashboards keep their existing funnel + rates unchanged (a
+              single client's own cohort makes that framing legitimate
+              there). */}
           <SectionHead label="Hitos comerciales · clientes" />
-          <FunnelBars stages={globalFunnelStages} showRates={false} />
+          <FunnelBars stages={overall?.stages ?? []} showRates={false} />
         </div>
         <div className="flex flex-col gap-4">
           <div className="border border-os-border bg-os-surface p-4">
-            <SectionHead label="Ingresos atribuidos por cliente" />
-            <BarListChart rows={revenueByClient} formatValue={formatEUR} emptyLabel="Sin ingresos atribuidos todavía." />
+            <SectionHead label="Valor generado por cliente" />
+            <BarListChart rows={valueByClient} formatValue={formatEUR} emptyLabel="Sin conversiones con valor todavía." />
           </div>
           <div className="border border-os-border bg-os-surface p-4">
             <SectionHead label="Leads CRM por cliente" />
@@ -256,10 +228,6 @@ export function ResultsBoard() {
                   <div className="truncate text-[14px] font-semibold leading-tight text-os-text">{row.clientName}</div>
                   <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2">
                     <div>
-                      <div className="font-mono text-[8.5px] uppercase tracking-[0.16em] text-os-dim">Gasto</div>
-                      <div className="mt-0.5 font-mono text-[13px] text-os-text">{row.adSpend == null ? '—' : formatEUR(row.adSpend)}</div>
-                    </div>
-                    <div>
                       <div className="font-mono text-[8.5px] uppercase tracking-[0.16em] text-os-dim">Leads CRM</div>
                       <div className="mt-0.5 font-mono text-[13px] text-os-text">{row.crmLeads}</div>
                     </div>
@@ -267,17 +235,11 @@ export function ResultsBoard() {
                       <div className="font-mono text-[8.5px] uppercase tracking-[0.16em] text-os-dim">Conversiones</div>
                       <div className="mt-0.5 font-mono text-[13px] text-os-text">{row.converted}</div>
                     </div>
-                    <div>
-                      <div className="font-mono text-[8.5px] uppercase tracking-[0.16em] text-os-dim">Ingresos atrib.</div>
-                      <div className="mt-0.5 font-mono text-[13px] text-os-text">{formatEUR(row.attributedRevenue)}</div>
-                    </div>
-                    <div>
-                      <div className="font-mono text-[8.5px] uppercase tracking-[0.16em] text-os-dim">ROAS</div>
-                      <div className="mt-0.5 font-mono text-[13px] text-os-text">{formatRoas(row.roas)}</div>
-                    </div>
-                    <div>
-                      <div className="font-mono text-[8.5px] uppercase tracking-[0.16em] text-os-dim">CAC public.</div>
-                      <div className="mt-0.5 font-mono text-[13px] text-os-text">{row.cac == null ? '—' : formatEUR(row.cac)}</div>
+                    <div className="col-span-2">
+                      <div className="font-mono text-[8.5px] uppercase tracking-[0.16em] text-os-dim">Valor generado</div>
+                      <div className="mt-0.5 font-mono text-[13px] text-os-text">
+                        {row.valueGenerated == null ? '—' : formatEUR(row.valueGenerated)}
+                      </div>
                     </div>
                   </div>
                 </div>

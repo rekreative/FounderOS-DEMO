@@ -75,13 +75,23 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
   test('the API smoke net covers every GET route under app/api (no route escapes)', () => {
     // skills/[slug] reads the local ~/.claude/skills dir at runtime (404 without
     // a slug on disk), so it is not a 200-required smoke route.
-    // Backend V1's clients/leads routes read real PostgreSQL (DATABASE_URL),
-    // not the throwaway SQLite temp db this file uses — they have their own
-    // full 200-path integration coverage against a real dev database in
-    // tests/api-clients.test.ts and tests/api-leads.test.ts (both skip
-    // cleanly without DATABASE_URL, same as this file has zero DB
-    // dependency by design).
-    const IGNORE = new Set(['skills/[slug]', 'clients', 'clients/[id]', 'leads', 'leads/[id]', 'leads/[id]/events']);
+    // Backend V1's clients/leads routes, plus Results Real + Home Real V1's
+    // results routes, read real PostgreSQL (DATABASE_URL), not the
+    // throwaway SQLite temp db this file uses — they have their own full
+    // 200-path integration coverage against a real dev database in
+    // tests/api-clients.test.ts, tests/api-leads.test.ts, and
+    // tests/api-results.test.ts (all skip cleanly without DATABASE_URL,
+    // same as this file has zero DB dependency by design).
+    const IGNORE = new Set([
+      'skills/[slug]',
+      'clients',
+      'clients/[id]',
+      'leads',
+      'leads/[id]',
+      'leads/[id]/events',
+      'results',
+      'results/home',
+    ]);
     const discovered = discoverGetRoutes(path.join(process.cwd(), 'app', 'api')).filter((r) => !IGNORE.has(r)).sort();
     const covered = ROUTES.map((r) => r.route).sort();
     expect(covered).toEqual(discovered);

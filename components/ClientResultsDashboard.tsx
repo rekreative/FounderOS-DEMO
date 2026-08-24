@@ -5,26 +5,19 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { Client } from '@/lib/clients';
 import { getClientById } from '@/lib/api/clients';
-import { getLeadEvents, getLeads, type Lead, type LeadEvent } from '@/lib/api/leads';
-import { getCampaigns, initializeMetaCampaignsStoreIfNeeded, type MetaCampaign } from '@/lib/meta-ads';
+import { getResults, type ResultsResponse } from '@/lib/api/results';
 import {
   PERIOD_PRESET_OPTIONS,
-  attendanceRate,
-  bookingRate,
-  closeRate,
-  computeClientResults,
   createRevenueRecord,
+  filterRevenueRecordsByPeriod,
   formatEUR,
   formatRate,
-  getAdSpendUnavailableNote,
   getRevenueRecords,
   getRevenueSourceLabel,
   getStoredPeriodPreference,
-  groupLeadsByPeriod,
   groupRevenueByPeriod,
-  includesDemoData,
+  hasDemoRevenueRecords,
   initializeResultsStoreIfNeeded,
-  qualificationRate,
   resolvePeriod,
   resolveTrendGranularity,
   setStoredPeriodPreference,
@@ -37,6 +30,7 @@ import {
   BarSeriesChart,
   DemoDataBadge,
   FunnelBars,
+  META_ADS_UNAVAILABLE_NOTE,
   ResultsKpiStrip,
   RevenueDataSourceTag,
   SparseTrendState,
@@ -62,6 +56,11 @@ type RevenueDraft = { amount: string; occurredAt: string; notes: string };
 
 const emptyRevenueDraft = (): RevenueDraft => ({ amount: '', occurredAt: new Date().toISOString().slice(0, 10), notes: '' });
 
+/** Real CRM funnel/rates/value (lib/server/results-repo.ts via GET
+ * /api/results?clientId=...) plus a SEPARATE manual revenue log
+ * (RevenueRecord, localStorage — lib/results.ts) that is never summed into
+ * "Valor generado". Meta Ads spend/leads have no live source yet and are
+ * always shown as unavailable, never from the demo MetaCampaign store. */
 export function ClientResultsDashboard({ clientId }: { clientId: string }) {
   // Arriving from the Resumen/Results-preview "Ver dashboard completo" link
   // (?period=all) must always land on the same all-time view those previews
@@ -73,9 +72,8 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
   const [client, setClient] = useState<Client | null>(null);
   const [notFoundChecked, setNotFoundChecked] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [events, setEvents] = useState<LeadEvent[]>([]);
-  const [campaigns, setCampaigns] = useState<MetaCampaign[]>([]);
+  const [resultsData, setResultsData] = useState<ResultsResponse | null>(null);
+  const [resultsError, setResultsError] = useState<string | null>(null);
   const [revenueRecords, setRevenueRecords] = useState<RevenueRecord[]>([]);
 
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
@@ -85,25 +83,11 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
   const [editingRevenueId, setEditingRevenueId] = useState<string | null>(null);
   const [revenueDraft, setRevenueDraft] = useState<RevenueDraft>(emptyRevenueDraft());
 
-  // Client identity + Leads: canonical PostgreSQL. computeClientResults
-  // filters by lead.clientId === clientId (unchanged), so REKREATIVE's own
-  // internal leads never leak into this client-only dashboard.
-  const refresh = async () => {
-    setCampaigns(getCampaigns());
-    setRevenueRecords(getRevenueRecords());
-    try {
-      const loadedLeads = await getLeads({ clientId });
-      setLeads(loadedLeads);
-      const eventLists = await Promise.all(loadedLeads.map((lead) => getLeadEvents(lead.id)));
-      setEvents(eventLists.flat());
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : 'No se pudieron cargar los leads.');
-    }
-  };
+  const refreshRevenue = () => setRevenueRecords(getRevenueRecords(clientId));
 
+  // Client identity: canonical PostgreSQL.
   useEffect(() => {
     let cancelled = false;
-    initializeMetaCampaignsStoreIfNeeded();
     initializeResultsStoreIfNeeded();
 
     setLoadError(null);
@@ -118,7 +102,7 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
         setLoadError(error instanceof Error ? error.message : 'No se pudo cargar el cliente.');
         setNotFoundChecked(true);
       });
-    refresh();
+    refreshRevenue();
 
     if (forceAllPeriod) {
       setPeriodPreset('all');
@@ -143,35 +127,57 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
     });
   }, [periodPreset, customRange]);
 
-  const period = useMemo(
+  // Real CRM funnel/rates/value — acquisition-cohort, server-resolved
+  // (Europe/Madrid) period, clientId-scoped in SQL.
+  useEffect(() => {
+    if (periodPreset === 'custom' && (!customRange.start || !customRange.end)) return;
+    let cancelled = false;
+    getResults({
+      clientId,
+      preset: periodPreset,
+      start: periodPreset === 'custom' ? customRange.start : undefined,
+      end: periodPreset === 'custom' ? customRange.end : undefined,
+    })
+      .then((result) => {
+        if (!cancelled) setResultsData(result);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setResultsError(error instanceof Error ? error.message : 'No se pudieron cargar los resultados.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, periodPreset, customRange]);
+
+  const results = resultsData?.overall;
+
+  // The manual revenue log keeps its own (unchanged, UTC-based) period
+  // filtering — it's a secondary, manually-entered ledger, not the real
+  // acquisition-cohort funnel above, so Madrid-precision isn't load-bearing
+  // for it the way it is for Results' real numbers.
+  const revenuePeriod = useMemo(
     () => resolvePeriod(periodPreset, periodPreset === 'custom' ? customRange : undefined),
     [periodPreset, customRange],
   );
-
-  const results = useMemo(
-    () => computeClientResults(clientId, leads, events, campaigns, revenueRecords, period, periodPreset),
-    [clientId, leads, events, campaigns, revenueRecords, period, periodPreset],
+  const revenueGranularity = useMemo(() => resolveTrendGranularity(periodPreset, revenuePeriod), [periodPreset, revenuePeriod]);
+  const revenueRecordsInPeriod = useMemo(
+    () => filterRevenueRecordsByPeriod(revenueRecords, revenuePeriod),
+    [revenueRecords, revenuePeriod],
   );
-
-  const granularity = useMemo(() => resolveTrendGranularity(periodPreset, period), [periodPreset, period]);
-  const leadTrend = useMemo(() => groupLeadsByPeriod(results.cohortLeads, granularity), [results.cohortLeads, granularity]);
   const revenueTrend = useMemo(
-    () => groupRevenueByPeriod(results.revenueRecordsInPeriod, granularity),
-    [results.revenueRecordsInPeriod, granularity],
+    () => groupRevenueByPeriod(revenueRecordsInPeriod, revenueGranularity),
+    [revenueRecordsInPeriod, revenueGranularity],
   );
-
-  // Presentation-only sparseness reads — never fabricate/interpolate a
-  // bucket, only decide how much chart real estate the real ones deserve.
-  const leadNonZeroBuckets = useMemo(() => leadTrend.filter((point) => point.value > 0).length, [leadTrend]);
   const revenueNonZeroBuckets = useMemo(() => revenueTrend.filter((point) => point.value > 0).length, [revenueTrend]);
   const revenueChartHeight = revenueNonZeroBuckets <= 1 ? 'h-20' : revenueNonZeroBuckets <= 3 ? 'h-28' : 'h-36';
+  const manualRevenueTotal = useMemo(
+    () => revenueRecordsInPeriod.reduce((sum, record) => sum + record.amount, 0),
+    [revenueRecordsInPeriod],
+  );
 
-  const clientCampaigns = useMemo(() => campaigns.filter((c) => c.clientId === clientId), [campaigns, clientId]);
-  const clientRevenueAll = useMemo(() => revenueRecords.filter((r) => r.clientId === clientId), [revenueRecords, clientId]);
-  const showDemoBadge = includesDemoData({ revenueRecords: clientRevenueAll, campaigns: clientCampaigns });
+  const leadNonZeroBuckets = useMemo(() => (results?.trend.points ?? []).filter((point) => point.value > 0).length, [results]);
 
-  const spendUnavailable = periodPreset !== 'all';
-  const metaCrmDifference = results.metaLeads == null ? null : results.metaLeads - results.counts.leads;
+  const showDemoBadge = hasDemoRevenueRecords(revenueRecords);
 
   const openCreateRevenueForm = () => {
     setEditingRevenueId(null);
@@ -207,7 +213,7 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
       createRevenueRecord(payload);
     }
 
-    refresh();
+    refreshRevenue();
     closeRevenueForm();
   };
 
@@ -260,11 +266,16 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
           </div>
           <h1 className="text-[28px] font-bold uppercase leading-[1.1] tracking-[0.06em]">{client.name}</h1>
           <p className="mt-1.5 max-w-xl text-[12px] text-os-muted">
-            Qué resultado comercial y financiero está generando REKREATIVE para {client.name}.
+            Qué resultado comercial está generando REKREATIVE para {client.name}, a partir de los leads y eventos reales del CRM.
           </p>
         </div>
-        {showDemoBadge && <DemoDataBadge />}
       </div>
+
+      {(loadError || resultsError) && (
+        <div className="mb-5 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">
+          {loadError ?? resultsError}
+        </div>
+      )}
 
       {/* Period controls */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -306,22 +317,16 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
         )}
       </div>
 
-      {spendUnavailable && (
-        <div className="mb-5 border border-dashed border-os-border bg-os-surface2 px-3 py-2 font-mono text-[10px] text-os-dim">
-          {getAdSpendUnavailableNote()}
-        </div>
-      )}
-
       {/* Primary KPIs */}
       <div className="mb-6">
         <ResultsKpiStrip
           values={{
-            adSpend: results.adSpend,
-            crmLeads: results.counts.leads,
-            converted: results.counts.converted,
-            attributedRevenue: results.attributedRevenue,
-            roas: results.roas,
-            cac: results.cac,
+            adSpend: null,
+            crmLeads: results?.funnel.leads ?? 0,
+            converted: results?.funnel.converted ?? 0,
+            valueGenerated: results?.value.total ?? null,
+            roas: null,
+            cac: null,
           }}
         />
       </div>
@@ -329,7 +334,7 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
       {/* Commercial funnel */}
       <div className="mb-6 border border-os-border bg-os-surface p-5">
         <SectionHead label="Funnel comercial" />
-        <FunnelBars stages={results.stages} />
+        <FunnelBars stages={results?.stages ?? []} />
       </div>
 
       {/* Efficiency + acquisition — side by side, secondary to the funnel/KPIs above */}
@@ -337,27 +342,21 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
         <div className="border border-os-border bg-os-surface p-5">
           <SectionHead label="Eficiencia comercial" />
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-            <EfficiencyTile label="Tasa de cualificación" value={formatRate(qualificationRate(results.counts))} />
-            <EfficiencyTile label="Lead → Cita" value={formatRate(bookingRate(results.counts))} />
-            <EfficiencyTile label="Tasa de asistencia" value={formatRate(attendanceRate(results.counts))} />
-            <EfficiencyTile label="Tasa de cierre" value={formatRate(closeRate(results.counts))} />
-            <EfficiencyTile label="CPL CRM" value={results.cplCrm == null ? '—' : formatEUR(results.cplCrm)} />
+            <EfficiencyTile label="Tasa de cualificación" value={formatRate(results?.rates.qualification ?? null)} />
+            <EfficiencyTile label="Lead → Cita" value={formatRate(results?.rates.booking ?? null)} />
+            <EfficiencyTile label="Tasa de asistencia" value={formatRate(results?.rates.attendance ?? null)} />
+            <EfficiencyTile label="Tasa de cierre" value={formatRate(results?.rates.close ?? null)} />
+            <EfficiencyTile
+              label="Valor medio por conversión"
+              value={results?.value.average == null ? '—' : formatEUR(results.value.average)}
+            />
+            <EfficiencyTile label="CPL CRM" value="Sin datos de Meta" />
           </div>
         </div>
 
         <div className="border border-os-border bg-os-surface p-5">
           <SectionHead label="Adquisición" />
-          {results.metaLeads == null ? (
-            <p className="font-mono text-[10.5px] text-os-dim">
-              Leads Meta no disponible fuera de &quot;Todo&quot; — mismo motivo que el gasto publicitario (sin datos históricos sincronizados).
-            </p>
-          ) : (
-            <div className="grid grid-cols-3 gap-2.5">
-              <EfficiencyTile label="Leads Meta" value={String(results.metaLeads)} />
-              <EfficiencyTile label="Leads CRM" value={String(results.counts.leads)} />
-              <EfficiencyTile label="Diferencia de registro" value={metaCrmDifference == null ? '—' : (metaCrmDifference >= 0 ? '+' : '') + metaCrmDifference} />
-            </div>
-          )}
+          <p className="font-mono text-[10.5px] text-os-dim">{META_ADS_UNAVAILABLE_NOTE}</p>
         </div>
       </div>
 
@@ -366,27 +365,40 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
       <div className="mb-6 border border-os-border bg-os-surface p-5">
         <SectionHead label="Evolución de leads" />
         {leadNonZeroBuckets < 2 ? (
-          <SparseTrendState points={leadTrend} granularity={granularity} formatValue={(value) => String(value)} />
+          <SparseTrendState points={results?.trend.points ?? []} granularity={results?.trend.granularity ?? 'month'} formatValue={(value) => String(value)} />
         ) : (
-          <BarSeriesChart points={leadTrend} granularity={granularity} formatValue={(value) => String(value)} emptyLabel="Sin leads en este periodo." />
+          <BarSeriesChart
+            points={results?.trend.points ?? []}
+            granularity={results?.trend.granularity ?? 'month'}
+            formatValue={(value) => String(value)}
+            emptyLabel="Sin leads en este periodo."
+          />
         )}
       </div>
 
-      {/* Attributed revenue: chart + total + records */}
+      {/* Manual revenue log — a secondary, hand-entered ledger. NEVER summed
+          into "Valor generado" above (which is real, from Lead.conversionValue
+          on converted leads). */}
       <div className="mb-6 border border-os-border bg-os-surface p-5">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <SectionHead label="Ingresos atribuidos" />
-          <button
-            type="button"
-            onClick={openCreateRevenueForm}
-            className="border border-os-border bg-os-surface px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-text hover:border-os-border-strong hover:text-os-accent"
-          >
-            + Registrar ingreso
-          </button>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+          <SectionHead label="Registro manual de ingresos" />
+          <div className="flex items-center gap-2">
+            {showDemoBadge && <DemoDataBadge />}
+            <button
+              type="button"
+              onClick={openCreateRevenueForm}
+              className="border border-os-border bg-os-surface px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-text hover:border-os-border-strong hover:text-os-accent"
+            >
+              + Registrar ingreso
+            </button>
+          </div>
         </div>
+        <p className="mb-4 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">
+          Entradas manuales, no combinadas con &quot;Valor generado&quot; ni con la facturación total del cliente.
+        </p>
 
         <div className="mb-4 flex items-baseline gap-2">
-          <span className="font-mono text-[22px] font-semibold text-os-text">{formatEUR(results.attributedRevenue)}</span>
+          <span className="font-mono text-[22px] font-semibold text-os-text">{formatEUR(manualRevenueTotal)}</span>
           <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-os-dim">total del periodo</span>
         </div>
 
@@ -394,16 +406,16 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
             how sparse the bucketed series actually is. */}
         <BarSeriesChart
           points={revenueTrend}
-          granularity={granularity}
+          granularity={revenueGranularity}
           formatValue={formatEUR}
-          emptyLabel="Sin ingresos atribuidos en este periodo."
+          emptyLabel="Sin entradas manuales en este periodo."
           heightClassName={revenueChartHeight}
         />
 
         <div className="mt-5 border-t border-os-border pt-4">
-          {results.revenueRecordsInPeriod.length === 0 ? (
+          {revenueRecordsInPeriod.length === 0 ? (
             <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-              Sin ingresos atribuidos registrados en este periodo.
+              Sin entradas manuales registradas en este periodo.
             </div>
           ) : (
             <div className="overflow-x-auto border border-os-border">
@@ -418,7 +430,7 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {results.revenueRecordsInPeriod.map((record) => (
+                  {revenueRecordsInPeriod.map((record) => (
                     <tr key={record.id} className="border-t border-os-border">
                       <td className="px-3 py-2.5 font-mono text-[10.5px] text-os-muted">{formatDate(record.occurredAt)}</td>
                       <td className="px-3 py-2.5 font-mono text-[11px] font-semibold text-os-text">{formatEUR(record.amount)}</td>
@@ -502,7 +514,7 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
             </div>
 
             <p className="mt-3 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">
-              Este importe representa ingresos atribuidos a la actividad de adquisición de REKREATIVE, no la facturación total del negocio del cliente.
+              Entrada manual de este registro de ingresos — no se combina con &quot;Valor generado&quot; ni representa la facturación total del cliente.
             </p>
 
             <div className="mt-4 flex justify-end gap-2">
