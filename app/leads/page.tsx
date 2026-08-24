@@ -13,12 +13,14 @@ import {
   type LeadStage,
 } from '@/lib/leads';
 import {
+  appendCommercialEvent,
   appendLeadEvent,
   createLead,
   getLeadEvents,
   getLeads,
   setLeadStage,
   updateLead,
+  type CommercialEventType,
   type Lead,
   type LeadEvent,
 } from '@/lib/api/leads';
@@ -53,6 +55,10 @@ type DraftLead = {
   adCreative: string;
   form: string;
   stage: LeadStage;
+  /** datetime-local input value ("YYYY-MM-DDTHH:mm"), or '' when unset. */
+  appointmentDate: string;
+  /** Raw numeric-string input, or '' when unset. */
+  conversionValue: string;
 };
 
 const emptyDraft = (clientId = ''): DraftLead => ({
@@ -66,7 +72,26 @@ const emptyDraft = (clientId = ''): DraftLead => ({
   adCreative: '',
   form: '',
   stage: 'new',
+  appointmentDate: '',
+  conversionValue: '',
 });
+
+/** ISO datetime → the "YYYY-MM-DDTHH:mm" shape <input type="datetime-local">
+ *  needs. Null/unparseable → ''. */
+function toDatetimeLocalValue(value: string | null): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** <input type="datetime-local"> value → ISO, or null when empty/unparseable. */
+function fromDatetimeLocalValue(value: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
 
 function formatDateTime(value: string | null): string {
   if (!value) return '—';
@@ -117,6 +142,7 @@ function LeadRow({
   onStageChange,
   onEdit,
   onAddNote,
+  onCommercialEvent,
 }: {
   lead: Lead;
   clients: { id: string; name: string }[];
@@ -133,9 +159,19 @@ function LeadRow({
   onStageChange: (nextStage: LeadStage) => void;
   onEdit: () => void;
   onAddNote: () => void;
+  onCommercialEvent: (type: CommercialEventType, payload?: { appointmentDate?: string; conversionValue?: number }) => void;
 }) {
   const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
+
+  // Quick-action drafts — local, ephemeral UI state scoped to this row, same
+  // shape as the "Añadir nota" draft one level up. Re-synced whenever the
+  // lead's own stored value changes (e.g. after a successful booking), so a
+  // collapsed/reopened row always starts from the lead's real current state.
+  const [appointmentDraft, setAppointmentDraft] = useState(() => toDatetimeLocalValue(lead.appointmentDate));
+  const [conversionDraft, setConversionDraft] = useState(() => (lead.conversionValue != null ? String(lead.conversionValue) : ''));
+  useEffect(() => setAppointmentDraft(toDatetimeLocalValue(lead.appointmentDate)), [lead.appointmentDate]);
+  useEffect(() => setConversionDraft(lead.conversionValue != null ? String(lead.conversionValue) : ''), [lead.conversionValue]);
 
   return (
     <>
@@ -361,6 +397,68 @@ function LeadRow({
                 </div>
               </div>
             )}
+
+            {/* Semantic commercial quick actions — the canonical manual
+                lifecycle path. Unlike the generic stage selector above
+                (still available as an override/correction tool), these call
+                POST /api/leads/[id]/commercial-events, so Results can read a
+                real appointment_booked/appointment_completed/converted event
+                regardless of whether it originated in Make or here. */}
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-os-border pt-3">
+              <span className="mr-1 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Acciones comerciales</span>
+              <input
+                type="datetime-local"
+                value={appointmentDraft}
+                onChange={(event) => setAppointmentDraft(event.target.value)}
+                className="border border-os-border bg-os-surface2 px-2 py-1 font-mono text-[10px] text-os-text outline-none"
+              />
+              <button
+                type="button"
+                disabled={!appointmentDraft}
+                onClick={() => {
+                  const iso = fromDatetimeLocalValue(appointmentDraft);
+                  if (iso) onCommercialEvent('appointment_booked', { appointmentDate: iso });
+                }}
+                className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Cita agendada
+              </button>
+              <button
+                type="button"
+                onClick={() => onCommercialEvent('appointment_completed')}
+                className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent"
+              >
+                Cita realizada
+              </button>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Valor (€, opcional)"
+                value={conversionDraft}
+                onChange={(event) => setConversionDraft(event.target.value)}
+                className="w-32 border border-os-border bg-os-surface2 px-2 py-1 font-mono text-[10px] text-os-text outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const trimmed = conversionDraft.trim();
+                  const conversionValue = trimmed ? Number(trimmed) : undefined;
+                  if (trimmed && (!Number.isFinite(conversionValue) || (conversionValue as number) < 0)) return;
+                  onCommercialEvent('converted', conversionValue !== undefined ? { conversionValue } : undefined);
+                }}
+                className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent"
+              >
+                Convertido
+              </button>
+              <button
+                type="button"
+                onClick={() => onCommercialEvent('disqualified')}
+                className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-err"
+              >
+                Descartado
+              </button>
+            </div>
           </td>
         </tr>
       )}
@@ -504,6 +602,8 @@ export default function LeadsPage() {
       adCreative: lead.adCreative ?? '',
       form: lead.form ?? '',
       stage: lead.stage,
+      appointmentDate: toDatetimeLocalValue(lead.appointmentDate),
+      conversionValue: lead.conversionValue != null ? String(lead.conversionValue) : '',
     });
     setShowCreate(true);
   };
@@ -525,8 +625,15 @@ export default function LeadsPage() {
     const campaign = draft.campaign.trim() || null;
     const adCreative = draft.adCreative.trim() || null;
     const form = draft.form.trim() || null;
+    const appointmentDate = fromDatetimeLocalValue(draft.appointmentDate);
+    const conversionValueTrimmed = draft.conversionValue.trim();
+    const conversionValue = conversionValueTrimmed ? Number(conversionValueTrimmed) : null;
 
     if (!name || (scope === 'client' && !clientId)) {
+      return;
+    }
+    if (conversionValueTrimmed && (!Number.isFinite(conversionValue) || (conversionValue as number) < 0)) {
+      setLoadError('El valor de conversión debe ser un número no negativo.');
       return;
     }
 
@@ -536,12 +643,37 @@ export default function LeadsPage() {
         // lead exists (see lib/api/leads.ts's UpdateLeadInput); the create
         // form's client selector is disabled in edit mode for this reason.
         const existing = leads.find((lead) => lead.id === editingLeadId);
-        await updateLead(editingLeadId, { name, email, phone, whatsapp, source, campaign, adCreative, form });
+        await updateLead(editingLeadId, {
+          name,
+          email,
+          phone,
+          whatsapp,
+          source,
+          campaign,
+          adCreative,
+          form,
+          appointmentDate,
+          conversionValue,
+        });
         if (existing && existing.stage !== draft.stage) {
           await setLeadStage(editingLeadId, draft.stage);
         }
       } else {
-        await createLead({ scope, clientId, name, email, phone, whatsapp, source, campaign, adCreative, form, stage: draft.stage });
+        await createLead({
+          scope,
+          clientId,
+          name,
+          email,
+          phone,
+          whatsapp,
+          source,
+          campaign,
+          adCreative,
+          form,
+          stage: draft.stage,
+          appointmentDate,
+          conversionValue,
+        });
       }
       await reloadLeads();
       closeForm();
@@ -573,6 +705,27 @@ export default function LeadsPage() {
         .then((events) => setEventsByLeadId((prev) => ({ ...prev, [leadId]: events })))
         .catch(() => setEventsByLeadId((prev) => ({ ...prev, [leadId]: [] })))
         .finally(() => setEventsLoadingId((prev) => ({ ...prev, [leadId]: false })));
+    }
+  };
+
+  const handleCommercialEvent = async (
+    leadId: string,
+    type: CommercialEventType,
+    payload?: { appointmentDate?: string; conversionValue?: number },
+  ) => {
+    try {
+      if (type === 'appointment_booked') {
+        if (!payload?.appointmentDate) return;
+        await appendCommercialEvent(leadId, { type, appointmentDate: payload.appointmentDate });
+      } else if (type === 'converted') {
+        await appendCommercialEvent(leadId, { type, conversionValue: payload?.conversionValue });
+      } else {
+        await appendCommercialEvent(leadId, { type });
+      }
+      await reloadLeads();
+      await refreshEventsForLead(leadId);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'No se pudo registrar el evento comercial.');
     }
   };
 
@@ -729,6 +882,7 @@ export default function LeadsPage() {
                   onStageChange={(nextStage) => handleStageChange(lead.id, nextStage)}
                   onEdit={() => openEditForm(lead)}
                   onAddNote={() => handleAddManualNote(lead.id)}
+                  onCommercialEvent={(type, payload) => handleCommercialEvent(lead.id, type, payload)}
                 />
               ))
             )}
@@ -860,6 +1014,28 @@ export default function LeadsPage() {
                 <input
                   value={draft.form}
                   onChange={(event) => setDraft((prev) => ({ ...prev, form: event.target.value }))}
+                  className="w-full border border-os-border bg-os-surface2 px-2 py-2 text-sm text-os-text outline-none"
+                />
+              </label>
+
+              <label className="col-span-1">
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Fecha de cita</span>
+                <input
+                  type="datetime-local"
+                  value={draft.appointmentDate}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, appointmentDate: event.target.value }))}
+                  className="w-full border border-os-border bg-os-surface2 px-2 py-2 text-sm text-os-text outline-none"
+                />
+              </label>
+
+              <label className="col-span-1">
+                <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Valor de conversión (€)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={draft.conversionValue}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, conversionValue: event.target.value }))}
                   className="w-full border border-os-border bg-os-surface2 px-2 py-2 text-sm text-os-text outline-none"
                 />
               </label>

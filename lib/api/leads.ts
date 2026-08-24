@@ -124,3 +124,29 @@ export async function appendLeadEvent(id: string, input: { summary: string }): P
   });
   return event;
 }
+
+export type CommercialEventType = 'appointment_booked' | 'appointment_completed' | 'converted' | 'disqualified';
+
+// Mirrors ManualCommercialEventBodySchema exactly — no leadId (the URL
+// param), no externalEventId (manual actions are never deduped), no
+// stage/source (always server-controlled). See
+// app/api/leads/[id]/commercial-events/route.ts.
+export type AppendCommercialEventInput =
+  | { type: 'appointment_booked'; appointmentDate: string; summary?: string }
+  | { type: 'appointment_completed'; summary?: string }
+  | { type: 'converted'; conversionValue?: number; summary?: string }
+  | { type: 'disqualified'; summary?: string };
+
+/** Manual commercial quick actions (Cita agendada / Cita realizada /
+ *  Convertido / Descartado) — the manual-facing counterpart to Make's
+ *  POST /api/leads/commercial-events, same appendCommercialEvent primitive
+ *  underneath, source 'manual'. */
+export async function appendCommercialEvent(
+  id: string,
+  input: AppendCommercialEventInput,
+): Promise<{ lead: Lead; event: LeadEvent }> {
+  return apiFetch(`/api/leads/${encodeURIComponent(id)}/commercial-events`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}

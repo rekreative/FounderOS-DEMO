@@ -809,3 +809,134 @@ export async function appendWhatsAppEvent(input: AppendWhatsAppEventInput): Prom
     return { matched: true, lead: rowToLead(finalRow.rows[0]), event, deduped };
   });
 }
+
+// ── Commercial event reporting (Make + manual → REKREATIVE OS) ───────────
+// Shared primitive for the four commercial-lifecycle event types
+// (appointment_booked, appointment_completed, converted, disqualified),
+// used by both POST /api/leads/commercial-events (Make, source 'make',
+// externalEventId required — durable idempotency) and
+// POST /api/leads/[id]/commercial-events (manual UI, source 'manual',
+// externalEventId omitted — never deduped). Neither caller can choose stage
+// or source directly through their request body; this function is the only
+// place that decides both, same discipline as appendWhatsAppEvent.
+
+export type CommercialEventType = 'appointment_booked' | 'appointment_completed' | 'converted' | 'disqualified';
+
+// Every commercial event's target stage, applied only if the lead isn't
+// already in a terminal stage (see TERMINAL_STAGES below). appointment_booked
+// and appointment_completed intentionally share the same target: a completed
+// appointment implies a booked one even if the booked webhook was missed —
+// there is deliberately no separate "appointment completed" stage (Results'
+// funnel derives attendance from the appointment_completed EVENT, never from
+// stage — see lib/results.ts's maxReachedStageRank).
+const COMMERCIAL_EVENT_TARGET_STAGE: Record<CommercialEventType, LeadStage> = {
+  appointment_booked: 'appointment',
+  appointment_completed: 'appointment',
+  converted: 'converted',
+  disqualified: 'disqualified',
+};
+
+// Once a lead reaches either terminal stage, no commercial event — automated
+// or manual — may move it again: 'converted' must never be downgraded to
+// 'disqualified' by a later signal (e.g. a clawback), and 'disqualified'
+// must never be silently "revived" by a stray appointment/conversion event.
+// The event itself is still recorded either way (see appendCommercialEvent
+// below) — only the stage write is skipped. 'no_response' is deliberately
+// NOT in this set: it's a soft "hasn't engaged yet" state, not terminal, so
+// a later appointment/conversion event still advances it normally.
+const TERMINAL_STAGES: ReadonlySet<LeadStage> = new Set(['converted', 'disqualified']);
+
+export type AppendCommercialEventInput = {
+  leadId: string;
+  type: CommercialEventType;
+  source: LeadEventSource;
+  summary: string;
+  details?: Record<string, unknown> | null;
+  occurredAt?: string;
+  /** Idempotency key for Make-reported events — the same (type,
+   *  external_event_id) mechanism WhatsApp lifecycle V1 uses. Omitted for
+   *  manual UI actions, which are never deduped (an operator clicking a
+   *  quick action twice records two events, same as "Añadir nota"). */
+  externalEventId?: string;
+  /** Required (by the caller's own Zod schema) for appointment_booked only. */
+  appointmentDate?: string;
+  /** Optional for converted only; omitted (not null) means "leave the
+   *  lead's existing conversionValue untouched" — never clears it. */
+  conversionValue?: number;
+};
+
+export type AppendCommercialEventResult = {
+  lead: ServerLead;
+  event: LeadEvent;
+  deduped: boolean;
+};
+
+/**
+ * Atomic: lock the lead → idempotently (Make) or plainly (manual) insert the
+ * event → if that resolved to an already-existing event (a retried Make
+ * delivery), return immediately with NO field/stage mutation → otherwise
+ * apply the event's field update (appointmentDate/conversionValue) and, if
+ * the lead isn't already in a terminal stage, advance it to the event's
+ * target stage through the exact same setLeadStageOnClient core every other
+ * stage write in this repo uses. Reuses insertLeadEventIdempotent/
+ * insertLeadEvent and setLeadStageOnClient rather than re-implementing
+ * either.
+ *
+ * leadId not found → LeadNotFoundError, same convention as
+ * appendLeadEvent/appendWhatsAppEvent (both callers already have a real id:
+ * Make from ingestion, the manual UI from the lead row it's rendering).
+ */
+export async function appendCommercialEvent(input: AppendCommercialEventInput): Promise<AppendCommercialEventResult> {
+  return withTransaction(async (client) => {
+    const found = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1 FOR UPDATE', [input.leadId]);
+    if (found.rowCount === 0) throw new LeadNotFoundError(input.leadId);
+    const existing = rowToLead(found.rows[0]);
+
+    const occurredAt = input.occurredAt ? new Date(input.occurredAt) : new Date();
+    let event: LeadEvent;
+    let deduped = false;
+
+    if (input.externalEventId) {
+      const result = await insertLeadEventIdempotent(client, {
+        leadId: input.leadId,
+        type: input.type,
+        source: input.source,
+        summary: input.summary,
+        details: input.details ?? null,
+        occurredAt,
+        externalEventId: input.externalEventId,
+      });
+      event = result.event;
+      deduped = result.deduped;
+    } else {
+      event = await insertLeadEvent(client, {
+        leadId: input.leadId,
+        type: input.type,
+        source: input.source,
+        summary: input.summary,
+        details: input.details ?? null,
+        occurredAt,
+      });
+    }
+
+    // A retried Make delivery resolved to an already-existing event — never
+    // re-apply the field/stage side effects a second time.
+    if (deduped) {
+      return { lead: existing, event, deduped: true };
+    }
+
+    if (input.type === 'appointment_booked' && input.appointmentDate) {
+      await client.query('UPDATE leads SET appointment_date = $2 WHERE id = $1', [input.leadId, input.appointmentDate]);
+    }
+    if (input.type === 'converted' && input.conversionValue !== undefined) {
+      await client.query('UPDATE leads SET conversion_value = $2 WHERE id = $1', [input.leadId, input.conversionValue]);
+    }
+
+    if (!TERMINAL_STAGES.has(existing.stage)) {
+      await setLeadStageOnClient(client, input.leadId, COMMERCIAL_EVENT_TARGET_STAGE[input.type], input.source);
+    }
+
+    const finalRow = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1', [input.leadId]);
+    return { lead: rowToLead(finalRow.rows[0]), event, deduped: false };
+  });
+}

@@ -173,6 +173,108 @@ export const WhatsAppEventBodySchema = z.union([
   z.object({ ...whatsAppEventCommonFields, whatsappNumber: z.string().trim().min(1) }).strict(),
 ]);
 
+// Commercial lifecycle event types Make and the manual UI may report — a
+// deliberate subset of LeadEventTypeSchema, same convention as
+// WhatsAppEventTypeSchema. `source` is NEVER part of either body below: it's
+// always hardcoded server-side per route (see
+// app/api/leads/commercial-events/route.ts and
+// app/api/leads/[id]/commercial-events/route.ts), never caller-supplied —
+// same anti-spoofing discipline as WhatsAppEventTypeSchema's own comment.
+// Neither body ever carries `stage` either — stage is derived server-side by
+// lib/server/leads-repo.ts's appendCommercialEvent.
+export const CommercialEventTypeSchema = z.enum([
+  'appointment_booked',
+  'appointment_completed',
+  'converted',
+  'disqualified',
+]);
+
+const commercialEventSharedFields = {
+  summary: z.string().trim().min(1).optional(),
+};
+
+/**
+ * POST /api/leads/commercial-events request shape (Make). Always addressed
+ * by `leadId` — unlike WhatsAppEventBodySchema, there is no
+ * phone-number-resolution branch: Make already has a real leadId by the
+ * time a booking/commercial workflow reports an event. `externalEventId` is
+ * REQUIRED — the durable (type, external_event_id) idempotency key (see
+ * lead_events_type_external_id_unique / insertLeadEventIdempotent). Note for
+ * Make integrators: externalEventId must identify the semantic occurrence,
+ * not just the provider entity — if a calendar provider reuses the same
+ * event id across a reschedule, Make must derive a new externalEventId
+ * (e.g. providerEventId + kind + start time) so the new appointment_booked
+ * isn't incorrectly deduped against the old one. Discriminated on `type` so
+ * appointmentDate/conversionValue are required/optional exactly where the
+ * domain rules need them (see appendCommercialEvent).
+ */
+export const CommercialEventBodySchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('appointment_booked'),
+      leadId: z.string().trim().min(1),
+      externalEventId: z.string().trim().min(1),
+      appointmentDate: isoDateTime,
+      occurredAt: isoDateTime.optional(),
+      details: z.record(z.unknown()).optional(),
+      ...commercialEventSharedFields,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('appointment_completed'),
+      leadId: z.string().trim().min(1),
+      externalEventId: z.string().trim().min(1),
+      occurredAt: isoDateTime.optional(),
+      details: z.record(z.unknown()).optional(),
+      ...commercialEventSharedFields,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('converted'),
+      leadId: z.string().trim().min(1),
+      externalEventId: z.string().trim().min(1),
+      conversionValue: z.number().finite().nonnegative().optional(),
+      occurredAt: isoDateTime.optional(),
+      details: z.record(z.unknown()).optional(),
+      ...commercialEventSharedFields,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('disqualified'),
+      leadId: z.string().trim().min(1),
+      externalEventId: z.string().trim().min(1),
+      occurredAt: isoDateTime.optional(),
+      details: z.record(z.unknown()).optional(),
+      ...commercialEventSharedFields,
+    })
+    .strict(),
+]);
+
+/**
+ * POST /api/leads/[id]/commercial-events request shape (manual UI quick
+ * actions). No `leadId` (the URL param identifies the lead), no
+ * `externalEventId` (manual actions are never deduped — see
+ * appendCommercialEvent's doc comment), no `details` — kept to the smallest
+ * surface the Leads UI's quick actions actually need. Same
+ * `type`-discriminated shape and the same never-caller-controlled
+ * stage/source discipline as the Make schema above.
+ */
+export const ManualCommercialEventBodySchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('appointment_booked'), appointmentDate: isoDateTime, ...commercialEventSharedFields }).strict(),
+  z.object({ type: z.literal('appointment_completed'), ...commercialEventSharedFields }).strict(),
+  z
+    .object({
+      type: z.literal('converted'),
+      conversionValue: z.number().finite().nonnegative().optional(),
+      ...commercialEventSharedFields,
+    })
+    .strict(),
+  z.object({ type: z.literal('disqualified'), ...commercialEventSharedFields }).strict(),
+]);
+
 /**
  * POST /api/ingest/leads request shape. Deliberately has NO `stage` field —
  * Make must never choose a lead's lifecycle state; every ingested lead
