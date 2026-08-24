@@ -30,7 +30,9 @@ import {
   type AiAgentStatus,
   type AiAgentUseCase,
 } from '@/lib/agents-ai';
-import { Badge } from '@/components/terminal';
+import { Badge, SectionHead } from '@/components/terminal';
+import { getOpsSnapshot as fetchOpsSnapshot } from '@/lib/api/ops-status';
+import { formatOpsRelativeTime, getOpsStatusLabel, OPS_STATUS_TONE, type OpsSnapshot } from '@/lib/ops-status';
 
 const STATUS_FILTERS = [{ id: 'all', label: 'Todos' }, ...AI_AGENT_STATUS_OPTIONS];
 const PROVIDER_FILTERS = [{ id: 'all', label: 'Todos los proveedores' }, ...AI_AGENT_PROVIDER_OPTIONS];
@@ -173,6 +175,12 @@ function AgentCard({
   onStatusChange: (next: AiAgentStatus) => void;
   onEdit: () => void;
 }) {
+  // Demo records have no runtime behind them at all — the page-level note
+  // above already says so, but a green "Configuración completa" badge next
+  // to "Estado: Activo" still visually reads as a live, healthy system.
+  // Gated here so demo cards show their planning nature at a glance instead.
+  const isDemo = agent.dataSource === 'demo';
+
   return (
     <div className="flex flex-col border border-os-border bg-os-surface p-3.5">
       <div className="flex items-start justify-between gap-3">
@@ -190,26 +198,41 @@ function AgentCard({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {/* CONFIGURACIÓN (field completeness, derived) and ESTADO
-              (lifecycle, stored) are two distinct axes — configuration
-              completeness never implies the agent is running/connected. */}
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Configuración ·</span>
-            <ConfigurationStatusBadge agent={agent} />
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Estado ·</span>
-            <select
-              value={agent.status}
-              onChange={(event) => onStatusChange(event.target.value as AiAgentStatus)}
-              className={`border border-os-border bg-os-surface px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide outline-none ${STATUS_TONE[agent.status]}`}
-            >
-              {AI_AGENT_STATUS_OPTIONS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
+              (lifecycle, stored) are two distinct axes for a real record —
+              see the label prefixes below. Demo records collapse to ONE
+              static "Planificado" tag instead: showing both a "Planificado"
+              label AND a live-looking Activo/Pausado select next to it was
+              self-contradictory (the select's own raw `status` value reads
+              as an observed runtime state, which a demo record never has).
+              Editability of `status` is preserved through "editar" → the
+              full edit form below, which still exposes it as a real field —
+              this is only the at-a-glance card control. */}
+          {isDemo ? (
+            <span className="border border-os-border bg-os-surface2 px-1.5 py-0.5 font-mono text-[8.5px] uppercase tracking-wide text-os-dim">
+              Planificado
+            </span>
+          ) : (
+            <>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Configuración ·</span>
+                <ConfigurationStatusBadge agent={agent} />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Estado ·</span>
+                <select
+                  value={agent.status}
+                  onChange={(event) => onStatusChange(event.target.value as AiAgentStatus)}
+                  className={`border border-os-border bg-os-surface px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide outline-none ${STATUS_TONE[agent.status]}`}
+                >
+                  {AI_AGENT_STATUS_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -218,7 +241,7 @@ function AgentCard({
       <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
         <BrandChip
           logo={agent.provider ? providerLogos[agent.provider] : null}
-          label={`${agent.provider ? getAiAgentProviderLabel(agent.provider) : 'Sin proveedor'}${agent.model ? ` · ${agent.model}` : ''}`}
+          label={`${isDemo ? 'Previsto: ' : ''}${agent.provider ? getAiAgentProviderLabel(agent.provider) : 'Sin proveedor'}${agent.model ? ` · ${agent.model}` : ''}`}
         />
         {agent.channel && <BrandChip logo={channelLogos[agent.channel]} label={getAiAgentChannelLabel(agent.channel)} />}
         {agent.useCase && (
@@ -301,6 +324,39 @@ function AgentCard({
   );
 }
 
+/** The single real agent card — server-derived operational evidence
+ * (lib/server/ops-status.ts via GET /api/ops/status). REKREATIVE OS
+ * supervises the Lead Qualification Agent through ai_analyzed LeadEvents; it
+ * never executes it (that happens inside Make + OpenAI). Deliberately never
+ * displays a model name — V1 doesn't observe/store one, so showing the old
+ * seeded "gpt-4o" here would misrepresent it as a real runtime fact. */
+function RealAgentCard({ agent }: { agent: OpsSnapshot['agent'] }) {
+  return (
+    <div className="flex flex-col gap-1.5 border border-os-border bg-os-surface p-3.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold leading-tight text-os-text">{agent.name}</div>
+          <div className="mt-0.5 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">
+            {agent.provider} · Ejecución: {agent.execution}
+          </div>
+        </div>
+        <Badge tone={OPS_STATUS_TONE[agent.status]}>{getOpsStatusLabel(agent.status)}</Badge>
+      </div>
+      <p className="text-[10.5px] leading-snug text-os-muted">{agent.detail}</p>
+      <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-os-border pt-2 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">
+        <span>
+          Última actividad: <span className="text-os-muted">{formatOpsRelativeTime(agent.lastActivityAt)}</span>
+        </span>
+        {agent.clients.length > 0 && (
+          <span className="text-os-muted">
+            {agent.clients.length} cliente{agent.clients.length === 1 ? '' : 's'} con actividad
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function AgentsAiBoard({
   providerLogos,
   channelLogos,
@@ -316,6 +372,22 @@ export function AgentsAiBoard({
   // localStorage; only client identity/selection moved.
   const { clients } = useClientsRegistry();
   const [agents, setAgents] = useState<AiAgent[]>([]);
+  const [opsSnapshot, setOpsSnapshot] = useState<OpsSnapshot | null>(null);
+  const [opsError, setOpsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchOpsSnapshot()
+      .then((snapshot) => {
+        if (!cancelled) setOpsSnapshot(snapshot);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setOpsError(error instanceof Error ? error.message : 'No se pudo cargar el estado operativo real.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Primary scope: REKREATIVE's own agents vs. client agents — conceptually
   // ABOVE client filtering, never a fake client. Defaults to REKREATIVE.
   // Local UI state only, same as every other filter here. Same pattern as
@@ -501,6 +573,31 @@ export function AgentsAiBoard({
         </div>
       </div>
 
+      {/* Agente real — server-derived operational evidence, entirely
+          separate from the localStorage agent roster below. REKREATIVE's
+          only currently-real AI capability: Lead Qualification, executed by
+          Make + OpenAI and supervised here via ai_analyzed LeadEvents. */}
+      <div className="mb-5">
+        <SectionHead label="Agente real" />
+        {opsError ? (
+          <div className="border border-os-err/40 bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{opsError}</div>
+        ) : !opsSnapshot ? (
+          <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+            Cargando estado operativo…
+          </div>
+        ) : (
+          <RealAgentCard agent={opsSnapshot.agent} />
+        )}
+      </div>
+
+      <div className="mb-3">
+        <SectionHead label="Catálogo — demo / planificado" />
+        <p className="mb-1 max-w-2xl text-[11px] text-os-muted">
+          Registros de configuración (localStorage), sin runtime propio. No requieren ni implican ejecución real — el agente real de REKREATIVE
+          está arriba.
+        </p>
+      </div>
+
       {/* Subtle clarification: configuration completeness ≠ operational
           health — this module has no runtime behind it in V1. */}
       <p className="mb-4 max-w-2xl font-mono text-[9.5px] leading-relaxed text-os-dim">
@@ -529,13 +626,17 @@ export function AgentsAiBoard({
         })}
       </div>
 
-      {/* KPI summary — recalculated from only the currently selected scope
-          (see scopedAgents → searchedAgents → visibleAgents → summary above). */}
-      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {/* Catalog summary — record/planning counts only, never runtime
+          telemetry: this board has no execution behind it (see "Catálogo —
+          demo / planificado" above and "Agente real" for the one exception). */}
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
         {[
-          { label: 'Activos', value: String(summary.active) },
-          { label: 'Borradores', value: String(summary.draft) },
-          { label: 'Pausados', value: String(summary.paused) },
+          { label: 'Registros', value: String(visibleAgents.length) },
+          // 'Planificados' means "this record is catalog/planning, not a
+          // live agent" — that's what dataSource==='demo' means, NOT the
+          // legacy lifecycle `status` field (a demo agent can be seeded as
+          // status='active' and still have zero runtime behind it).
+          { label: 'Planificados', value: String(visibleAgents.filter((agent) => agent.dataSource === 'demo').length) },
           { label: 'Configuración incompleta', value: String(summary.incompleteConfiguration) },
         ].map((tile) => (
           <div key={tile.label} className="border border-os-border bg-os-surface px-3 py-3">

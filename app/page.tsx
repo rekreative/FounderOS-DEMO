@@ -17,33 +17,10 @@ import {
 } from '@/lib/api/results';
 import { formatEUR } from '@/lib/results';
 import { getCampaigns, initializeMetaCampaignsStoreIfNeeded, type MetaCampaign } from '@/lib/meta-ads';
-import {
-  getAutomations,
-  initializeAutomationsStoreIfNeeded,
-  summarizeAutomations,
-  getAutomationHealth,
-  getClientNameForAutomation,
-  type Automation,
-} from '@/lib/automations';
-import {
-  getAiAgents,
-  initializeAiAgentsStoreIfNeeded,
-  getAiAgentConfigurationStatus,
-  getClientNameForAiAgent,
-  type AiAgent,
-} from '@/lib/agents-ai';
-import {
-  getClientIntegrationRequirements,
-  initializeClientIntegrationRequirementsStoreIfNeeded,
-  summarizeClientOnboarding,
-  type ClientIntegrationRequirement,
-} from '@/lib/client-integration-requirements';
-import {
-  getIntegrationConnections,
-  initializeIntegrationConnectionsStoreIfNeeded,
-  type IntegrationConnection,
-} from '@/lib/integration-connections';
+import { getAutomations, initializeAutomationsStoreIfNeeded, summarizeAutomations, type Automation } from '@/lib/automations';
 import { getContentItems, initializeContentStoreIfNeeded, isContentOverdue, type ContentItem } from '@/lib/content-items';
+import { getOpsSnapshot as fetchOpsSnapshot } from '@/lib/api/ops-status';
+import type { OpsSnapshot } from '@/lib/ops-status';
 
 // REKREATIVE OS internal command center — "what's happening right now" and
 // "what needs my attention". Clients, Leads, and every Results-derived
@@ -64,25 +41,6 @@ type AttentionItem = {
    * real-attention count (see realAttentionCount below). Real, PostgreSQL
    * items (high-priority/awaiting-contact leads) omit this. */
   demo?: boolean;
-};
-
-// Home-only presentation lookups — the automation names/errors in
-// lib/automations.ts's seed data predate the Spanish-first pass. Translated
-// here for DISPLAY only; the stored Automation/AutomationRun records are
-// never touched. Anything not seeded yet falls back to its original text
-// rather than disappearing.
-const AUTOMATION_NAME_ES: Record<string, string> = {
-  'Meta Lead → WhatsApp Welcome': 'Bienvenida por WhatsApp desde lead de Meta',
-  'Appointment Reminder — WhatsApp': 'Recordatorio de citas por WhatsApp',
-  'Instagram DM Nurture — ManyChat': 'Nutrición por DM de Instagram — ManyChat',
-  'Post-Conversion Review Request': 'Solicitud de reseña tras conversión',
-  'New Client Onboarding Notification': 'Notificación de alta de nuevo cliente',
-  'Weekly Performance Digest': 'Resumen semanal de rendimiento',
-};
-
-const AUTOMATION_ERROR_ES: Record<string, string> = {
-  'WhatsApp template send timed out': 'Tiempo de espera agotado al enviar la plantilla de WhatsApp',
-  'WhatsApp template not approved for this variant': 'Plantilla de WhatsApp no aprobada',
 };
 
 // Home-only presentation translation for the "Actividad reciente" feed —
@@ -204,9 +162,8 @@ export default function HomePage() {
   const [homeSnapshotError, setHomeSnapshotError] = useState<string | null>(null);
   const [campaigns, setCampaigns] = useState<MetaCampaign[]>([]);
   const [automations, setAutomations] = useState<Automation[]>([]);
-  const [agents, setAgents] = useState<AiAgent[]>([]);
-  const [connections, setConnections] = useState<IntegrationConnection[]>([]);
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
+  const [opsSnapshot, setOpsSnapshot] = useState<OpsSnapshot | null>(null);
   const [attentionExpanded, setAttentionExpanded] = useState(true);
 
   // Leads (total count) + the real operational snapshot: both PostgreSQL,
@@ -227,6 +184,17 @@ export default function HomePage() {
       .catch((error: unknown) => {
         if (!cancelled) setHomeSnapshotError(error instanceof Error ? error.message : 'No se pudo cargar la actividad operativa.');
       });
+    fetchOpsSnapshot()
+      .then((result) => {
+        if (!cancelled) setOpsSnapshot(result);
+      })
+      .catch(() => {
+        // Real attention silently degrades to "no real ops signal yet"
+        // rather than surfacing a fetch error banner — Home already shows
+        // the leads/results errors above; a second banner for this would be
+        // noise, and an empty real-attention list is itself honest (no
+        // fabricated alerts).
+      });
     return () => {
       cancelled = true;
     };
@@ -236,26 +204,12 @@ export default function HomePage() {
   useEffect(() => {
     initializeMetaCampaignsStoreIfNeeded();
     initializeAutomationsStoreIfNeeded();
-    initializeAiAgentsStoreIfNeeded();
-    initializeIntegrationConnectionsStoreIfNeeded();
-    initializeClientIntegrationRequirementsStoreIfNeeded();
     initializeContentStoreIfNeeded();
 
     setCampaigns(getCampaigns());
     setAutomations(getAutomations());
-    setAgents(getAiAgents());
-    setConnections(getIntegrationConnections());
     setContentItems(getContentItems());
   }, []);
-
-  // Derived from the canonical `clients` list — recomputes whenever it
-  // changes (e.g. once the registry's fetch resolves), unlike the old
-  // one-time-on-mount version of this map.
-  const requirementsByClient = useMemo(() => {
-    const map: Record<string, ClientIntegrationRequirement[]> = {};
-    for (const client of clients) map[client.id] = getClientIntegrationRequirements(client.id);
-    return map;
-  }, [clients]);
 
   const clientSnapshotByClientId = useMemo(() => {
     const map = new Map<string, ClientOperationalSnapshot>();
@@ -294,56 +248,21 @@ export default function HomePage() {
     [homeSnapshot, clients],
   );
 
-  const attentionAutomations: AttentionItem[] = useMemo(
+  // Real operational attention — genuine, server-observed configuration/
+  // health problems only (DATABASE_URL missing, PostgreSQL health check
+  // failing, a Make receiver key missing). See lib/server/ops-status.ts.
+  // Deliberately global (no clientId): these are REKREATIVE OS-side
+  // infrastructure issues, never "no recent activity" for any one client —
+  // absence of leads/WhatsApp/qualification traffic is neutral, not an
+  // attention item (see lib/server/ops-status.ts's evidenceLadderStatus).
+  const attentionReal: AttentionItem[] = useMemo(
     () =>
-      automations
-        .filter((a) => getAutomationHealth(a) === 'needs_attention')
-        .map((a) => {
-          const name = AUTOMATION_NAME_ES[a.name] ?? a.name;
-          const errorEs = a.lastError ? AUTOMATION_ERROR_ES[a.lastError] ?? a.lastError : null;
-          return {
-            id: `automation-${a.id}`,
-            clientId: a.clientId,
-            text: `${getClientNameForAutomation(a.clientId, clients)} · ${name} — requiere atención${errorEs ? ` · ${errorEs}` : ''}.`,
-            href: '/automations',
-            demo: true,
-          };
-        }),
-    [automations, clients],
-  );
-
-  const attentionIntegrations: AttentionItem[] = useMemo(() => {
-    const internalConnections = connections.filter((c) => c.scope === 'internal');
-    return clients
-      .map((client): AttentionItem | null => {
-        const requirements = requirementsByClient[client.id] ?? [];
-        const relevant = [...connections.filter((c) => c.clientId === client.id), ...internalConnections];
-        const summary = summarizeClientOnboarding(client.id, requirements, relevant);
-        const gaps = summary.requiredPending + summary.requiredIncomplete;
-        if (gaps === 0) return null;
-        return {
-          id: `integration-${client.id}`,
-          clientId: client.id,
-          text: `${client.name}: ${gaps} integración${gaps === 1 ? '' : 'es'} requerida${gaps === 1 ? '' : 's'} sin configurar`,
-          href: `/clients/${client.id}`,
-          demo: true,
-        };
-      })
-      .filter((item): item is AttentionItem => item != null);
-  }, [clients, connections, requirementsByClient]);
-
-  const attentionAgents: AttentionItem[] = useMemo(
-    () =>
-      agents
-        .filter((a) => getAiAgentConfigurationStatus(a) === 'incomplete')
-        .map((a) => ({
-          id: `agent-${a.id}`,
-          clientId: a.clientId,
-          text: `Agente IA "${a.name}" (${getClientNameForAiAgent(a.clientId, clients)}) tiene configuración incompleta`,
-          href: '/ai-agents',
-          demo: true,
-        })),
-    [agents, clients],
+      (opsSnapshot?.attention ?? []).map((item) => ({
+        id: `ops-${item.id}`,
+        text: item.text,
+        href: '/connections',
+      })),
+    [opsSnapshot],
   );
 
   const attentionContent: AttentionItem[] = useMemo(
@@ -362,27 +281,27 @@ export default function HomePage() {
   const attentionItems: AttentionItem[] = [
     ...attentionHighPriorityLeads,
     ...attentionAwaitingContact,
-    ...attentionAutomations,
-    ...attentionIntegrations,
-    ...attentionAgents,
+    ...attentionReal,
     ...attentionContent,
   ];
 
-  // The header count reflects REAL (PostgreSQL) attention items only —
-  // demo-sourced rows (tagged `demo: true` above) stay visible in the list
-  // but never inflate this number.
-  const realAttentionCount = attentionHighPriorityLeads.length + attentionAwaitingContact.length;
+  // The header count reflects REAL attention items only — PostgreSQL leads
+  // plus the real ops-evidence items above; demo-sourced rows (Content,
+  // tagged `demo: true`) stay visible in the list but never inflate this
+  // number.
+  const realAttentionCount = attentionHighPriorityLeads.length + attentionAwaitingContact.length + attentionReal.length;
 
   // "Estado operativo" — honestly derived, not a new metric: a client is
-  // flagged the moment one of its own leads/automations/integrations/agents
-  // is already surfaced above in Necesita atención. No severity invented here.
+  // flagged the moment one of its own leads is already surfaced above in
+  // Necesita atención. Real ops attention items are global infrastructure
+  // issues (no clientId), so they never flag an individual client row.
   const clientsNeedingAttention = useMemo(() => {
     const ids = new Set<string>();
-    for (const item of [...attentionHighPriorityLeads, ...attentionAwaitingContact, ...attentionAutomations, ...attentionIntegrations, ...attentionAgents]) {
+    for (const item of [...attentionHighPriorityLeads, ...attentionAwaitingContact]) {
       if (item.clientId) ids.add(item.clientId);
     }
     return ids;
-  }, [attentionHighPriorityLeads, attentionAwaitingContact, attentionAutomations, attentionIntegrations, attentionAgents]);
+  }, [attentionHighPriorityLeads, attentionAwaitingContact]);
 
   // ── Upcoming appointments / recent conversions / recent activity — real,
   // event-time (not acquisition-cohort) operational feeds. ──

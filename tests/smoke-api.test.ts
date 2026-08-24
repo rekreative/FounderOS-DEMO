@@ -81,7 +81,9 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
     // 200-path integration coverage against a real dev database in
     // tests/api-clients.test.ts, tests/api-leads.test.ts, and
     // tests/api-results.test.ts (all skip cleanly without DATABASE_URL,
-    // same as this file has zero DB dependency by design).
+    // same as this file has zero DB dependency by design). ops/status (Real
+    // V1 operational-evidence snapshot) is the same shape of route — its
+    // full 200-path coverage lives in tests/api-ops-status.test.ts.
     const IGNORE = new Set([
       'skills/[slug]',
       'clients',
@@ -91,6 +93,7 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
       'leads/[id]/events',
       'results',
       'results/home',
+      'ops/status',
     ]);
     const discovered = discoverGetRoutes(path.join(process.cwd(), 'app', 'api')).filter((r) => !IGNORE.has(r)).sort();
     const covered = ROUTES.map((r) => r.route).sort();

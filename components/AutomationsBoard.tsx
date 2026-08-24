@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
 import { useClientsRegistry } from '@/components/ClientsProvider';
+import { Badge, SectionHead } from '@/components/terminal';
+import { getOpsSnapshot as fetchOpsSnapshot } from '@/lib/api/ops-status';
+import { formatOpsRelativeTime, getOpsStatusLabel, OPS_STATUS_TONE, type OpsAutomationStatus, type OpsSnapshot } from '@/lib/ops-status';
 import {
   AUTOMATION_PLATFORM_OPTIONS,
   AUTOMATION_SCOPE_OPTIONS,
@@ -21,7 +24,6 @@ import {
   getTypeLabel,
   initializeAutomationsStoreIfNeeded,
   setAutomationStatus,
-  summarizeAutomations,
   updateAutomation,
   type Automation,
   type AutomationHealth,
@@ -322,6 +324,14 @@ function AutomationCard({
   const stats = getAutomationStats(automation.id);
   const runs = expanded ? getAutomationRuns(automation.id) : [];
   const primaryPlatform = getPrimaryPlatform(automation);
+  // Seeded demo records ship with fabricated run history baked in at seed
+  // time (see lib/automations.ts's seedDemoAutomationRuns) — nothing in the
+  // app ever calls appendAutomationRun() to update it, so it can never
+  // reflect anything real. Health/stats/run-history rendering is gated on
+  // this flag so those numbers never masquerade as observed telemetry.
+  // Manual records are exempt: their run history is honestly empty/zero
+  // (never fabricated), so showing it is truthful, not misleading.
+  const isDemo = automation.dataSource === 'demo';
 
   return (
     <div className="flex flex-col border border-os-border bg-os-surface p-3.5">
@@ -344,30 +354,45 @@ function AutomationCard({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {/* SALUD (run health, derived) and ESTADO (lifecycle, stored) are
-              two distinct axes — see the label prefixes below. Neither
-              value itself, nor how each is derived, changes here. */}
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Salud ·</span>
-            <HealthBadge health={health} />
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Estado ·</span>
-            <select
-              value={automation.status}
-              onChange={(event) => onStatusChange(event.target.value as AutomationStatus)}
-              className={`border border-os-border bg-os-surface px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide outline-none ${STATUS_TONE[automation.status]}`}
-            >
-              {AUTOMATION_STATUS_OPTIONS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
+              two distinct axes for a real record — see the label prefixes
+              below. Demo records collapse to ONE static "Planificado" tag
+              instead: showing both a "Planificado" label AND a live-looking
+              Activa/Pausada select next to it was self-contradictory (the
+              select's own raw `status` value reads as an observed runtime
+              state, which a demo record never has). Editability of `status`
+              is preserved through "editar" → the full edit form below, which
+              still exposes it as a real field — this is only the at-a-glance
+              card control. */}
+          {isDemo ? (
+            <span className="border border-os-border bg-os-surface2 px-1.5 py-0.5 font-mono text-[8.5px] uppercase tracking-wide text-os-dim">
+              Planificado
+            </span>
+          ) : (
+            <>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Salud ·</span>
+                <HealthBadge health={health} />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Estado ·</span>
+                <select
+                  value={automation.status}
+                  onChange={(event) => onStatusChange(event.target.value as AutomationStatus)}
+                  className={`border border-os-border bg-os-surface px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide outline-none ${STATUS_TONE[automation.status]}`}
+                >
+                  {AUTOMATION_STATUS_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      {health === 'needs_attention' && automation.lastError && (
+      {!isDemo && health === 'needs_attention' && automation.lastError && (
         <div
           className="mt-2 truncate border border-os-err/40 bg-os-err/10 px-2 py-1 font-mono text-[9.5px] text-os-err"
           title={translateAutomationError(automation.lastError) ?? undefined}
@@ -380,25 +405,34 @@ function AutomationCard({
         <PlatformTags platforms={automation.platforms} platformLogos={platformLogos} />
       </div>
 
-      {/* Compact operational summary */}
-      <div className="mt-3 grid grid-cols-4 gap-2 border-t border-os-border pt-2.5">
-        <div>
-          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Última ejecución</div>
-          <div className="mt-0.5 font-mono text-[10.5px] text-os-muted">{formatRelative(automation.lastRunAt)}</div>
+      {/* Compact operational summary — never rendered for demo records (see
+          isDemo above): those numbers are seeded once and never updated by
+          anything real, so showing them would misrepresent planning/catalog
+          data as observed execution telemetry. */}
+      {isDemo ? (
+        <div className="mt-3 border-t border-os-border pt-2.5">
+          <p className="font-mono text-[9.5px] text-os-dim">Registro de planificación — sin telemetría real observada.</p>
         </div>
-        <div>
-          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Ejecuciones</div>
-          <div className="mt-0.5 font-mono text-[10.5px] text-os-muted">{stats.totalRuns}</div>
+      ) : (
+        <div className="mt-3 grid grid-cols-4 gap-2 border-t border-os-border pt-2.5">
+          <div>
+            <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Última ejecución</div>
+            <div className="mt-0.5 font-mono text-[10.5px] text-os-muted">{formatRelative(automation.lastRunAt)}</div>
+          </div>
+          <div>
+            <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Ejecuciones</div>
+            <div className="mt-0.5 font-mono text-[10.5px] text-os-muted">{stats.totalRuns}</div>
+          </div>
+          <div>
+            <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Fallos</div>
+            <div className={`mt-0.5 font-mono text-[10.5px] ${stats.failedRuns > 0 ? 'text-os-err' : 'text-os-muted'}`}>{stats.failedRuns}</div>
+          </div>
+          <div>
+            <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Éxito</div>
+            <div className="mt-0.5 font-mono text-[10.5px] text-os-muted">{formatPercent(stats.successRate)}</div>
+          </div>
         </div>
-        <div>
-          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Fallos</div>
-          <div className={`mt-0.5 font-mono text-[10.5px] ${stats.failedRuns > 0 ? 'text-os-err' : 'text-os-muted'}`}>{stats.failedRuns}</div>
-        </div>
-        <div>
-          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Éxito</div>
-          <div className="mt-0.5 font-mono text-[10.5px] text-os-muted">{formatPercent(stats.successRate)}</div>
-        </div>
-      </div>
+      )}
 
       <div className="mt-3 flex items-center justify-between border-t border-os-border pt-2.5">
         <DataSourceTag dataSource={automation.dataSource} />
@@ -467,11 +501,20 @@ function AutomationCard({
           </div>
 
           <div>
-            <div className="mb-1.5 flex items-center justify-between gap-3">
-              <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Historial de ejecuciones recientes</span>
-              <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">{stats.totalRuns} ejecuciones</span>
-            </div>
-            <RunHistory runs={runs} />
+            {isDemo ? (
+              <>
+                <div className="mb-1.5 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Historial de ejecuciones</div>
+                <p className="text-[10.5px] text-os-dim">Sin historial real — este registro de catálogo no tiene runtime propio.</p>
+              </>
+            ) : (
+              <>
+                <div className="mb-1.5 flex items-center justify-between gap-3">
+                  <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Historial de ejecuciones recientes</span>
+                  <span className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">{stats.totalRuns} ejecuciones</span>
+                </div>
+                <RunHistory runs={runs} />
+              </>
+            )}
             {automation.description && (
               <>
                 <div className="mb-1.5 mt-3 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Descripción</div>
@@ -481,6 +524,38 @@ function AutomationCard({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** One card in "Flujos reales" — server-derived operational evidence
+ * (lib/server/ops-status.ts via GET /api/ops/status). Real V1 covers exactly
+ * 5 workflows (lead intake, cualificación, WhatsApp saliente/entrante, ciclo
+ * comercial); everything in the board below this section stays the
+ * localStorage catalog, clearly separated so real and demo/planned
+ * automations are never visually ambiguous. */
+function RealWorkflowCard({ workflow }: { workflow: OpsAutomationStatus }) {
+  return (
+    <div className="flex flex-col gap-1.5 border border-os-border bg-os-surface p-3.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[12.5px] font-semibold leading-tight text-os-text">{workflow.name}</div>
+          <div className="mt-0.5 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">{workflow.execution}</div>
+        </div>
+        <Badge tone={OPS_STATUS_TONE[workflow.status]}>{getOpsStatusLabel(workflow.status)}</Badge>
+      </div>
+      <p className="text-[10.5px] leading-snug text-os-muted">{workflow.purpose}</p>
+      <p className="text-[10px] leading-snug text-os-dim">{workflow.detail}</p>
+      <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-os-border pt-2 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">
+        <span>
+          Última actividad: <span className="text-os-muted">{formatOpsRelativeTime(workflow.lastActivityAt)}</span>
+        </span>
+        {workflow.clients.length > 0 && (
+          <span className="text-os-muted">
+            {workflow.clients.length} cliente{workflow.clients.length === 1 ? '' : 's'} con actividad
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -496,6 +571,22 @@ export function AutomationsBoard({
   // stay localStorage; only client identity/selection moved.
   const { clients } = useClientsRegistry();
   const [automations, setAutomations] = useState<Automation[]>([]);
+  const [opsSnapshot, setOpsSnapshot] = useState<OpsSnapshot | null>(null);
+  const [opsError, setOpsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchOpsSnapshot()
+      .then((snapshot) => {
+        if (!cancelled) setOpsSnapshot(snapshot);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setOpsError(error instanceof Error ? error.message : 'No se pudo cargar el estado operativo real.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Primary scope: REKREATIVE's own automations vs. client automations —
   // conceptually ABOVE client filtering, never a fake client. Defaults to
   // REKREATIVE. Local UI state only, same as every other filter here.
@@ -568,10 +659,6 @@ export function AutomationsBoard({
     [searchedAutomations, statusFilter, platformFilter],
   );
 
-  // KPI row recalculates from only the currently selected scope — same
-  // summarizeAutomations() call, just fed the scope-filtered set (see
-  // scopedAutomations above → searchedAutomations → visibleAutomations).
-  const summary = useMemo(() => summarizeAutomations(visibleAutomations), [visibleAutomations]);
   const showClientName = moduleScope === 'client';
 
   const openCreateForm = () => {
@@ -695,6 +782,34 @@ export function AutomationsBoard({
         </div>
       </div>
 
+      {/* Flujos reales — server-derived operational evidence, entirely
+          separate from the localStorage automation catalog below. This is
+          the canonical answer to "is this workflow actually running". */}
+      <div className="mb-5">
+        <SectionHead label="Flujos reales" count={opsSnapshot?.automations.length ?? 0} />
+        {opsError ? (
+          <div className="border border-os-err/40 bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{opsError}</div>
+        ) : !opsSnapshot ? (
+          <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+            Cargando estado operativo…
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+            {opsSnapshot.automations.map((workflow) => (
+              <RealWorkflowCard key={workflow.id} workflow={workflow} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mb-3">
+        <SectionHead label="Catálogo — demo / planificado" />
+        <p className="mb-1 max-w-2xl text-[11px] text-os-muted">
+          Registros de planificación y catálogo (localStorage), no ejecutan nada. El estado real de los flujos de REKREATIVE está arriba, en
+          &quot;Flujos reales&quot;.
+        </p>
+      </div>
+
       {/* Primary scope — REKREATIVE's own automations vs. client
           automations. Conceptually above every filter below, including the
           KPI row; REKREATIVE is never a client, so this never touches the
@@ -717,20 +832,22 @@ export function AutomationsBoard({
         })}
       </div>
 
-      {/* KPI summary — recalculated from only the currently selected scope
-          (see scopedAutomations → searchedAutomations → visibleAutomations
-          → summary above). */}
-      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+      {/* Catalog summary — record/planning counts only, never execution
+          telemetry: this board has no runtime behind it (see "Catálogo —
+          demo / planificado" above), so a success rate/failure/execution
+          count here would be fabricated, not observed. */}
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-2">
         {[
-          { label: 'Activas', value: String(summary.active) },
-          { label: 'Requiere atención', value: String(summary.needsAttention), tone: summary.needsAttention > 0 ? 'text-os-err' : undefined },
-          { label: 'Ejecuciones', value: String(summary.totalRuns) },
-          { label: 'Fallos', value: String(summary.totalFailures), tone: summary.totalFailures > 0 ? 'text-os-err' : undefined },
-          { label: 'Tasa de éxito', value: formatPercent(summary.successRate) },
+          { label: 'Registros', value: String(visibleAutomations.length) },
+          // 'Planificados' means "this record is catalog/planning, not a
+          // live workflow" — that's what dataSource==='demo' means, NOT the
+          // legacy lifecycle `status` field (a demo record can be seeded as
+          // status='active' and still have zero runtime behind it).
+          { label: 'Planificados', value: String(visibleAutomations.filter((automation) => automation.dataSource === 'demo').length) },
         ].map((tile) => (
           <div key={tile.label} className="border border-os-border bg-os-surface px-3 py-3">
             <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-os-dim">{tile.label}</div>
-            <div className={`mt-1.5 font-mono text-[18px] font-semibold ${tile.tone ?? 'text-os-text'}`}>{tile.value}</div>
+            <div className="mt-1.5 font-mono text-[18px] font-semibold text-os-text">{tile.value}</div>
           </div>
         ))}
       </div>

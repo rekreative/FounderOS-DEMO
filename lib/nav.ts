@@ -66,8 +66,13 @@ export const NAV_AGENTS: NavItem[] = [
 export const NAV_INTELLIGENCE: NavItem[] = [{ href: '/brain', label: 'G-Brain', icon: Brain }];
 
 export const NAV_SYSTEM: NavItem[] = [
-  // Keep less-frequent system views reachable but out of the primary operate list
-  { href: '/integrations', label: 'Connections', icon: Plug },
+  // Keep less-frequent system views reachable but out of the primary operate list.
+  // '/integrations' is FounderOS's legacy machine-bound connector board
+  // (lib/connectors/*) — unrelated to REKREATIVE's real lead-gen stack, and
+  // NOT the same thing as '/connections' (REKREATIVE_PRIMARY's "Integraciones",
+  // the canonical Real V1 board). Labeled explicitly as legacy so the two can
+  // never be confused for one another.
+  { href: '/integrations', label: 'Conectores (legacy)', icon: Plug },
   { href: '/roadmap', label: 'Roadmap', icon: Map },
   { href: '/reference', label: 'Reference Model', icon: LayoutGrid },
 ];

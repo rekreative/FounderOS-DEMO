@@ -42,6 +42,8 @@ import {
   type RequirementConnectionState,
 } from '@/lib/client-integration-requirements';
 import { Badge, SectionHead, type BadgeTone } from '@/components/terminal';
+import { getOpsSnapshot as fetchOpsSnapshot } from '@/lib/api/ops-status';
+import { formatOpsRelativeTime, getOpsStatusLabel, OPS_STATUS_TONE, type OpsConnectionStatus, type OpsSnapshot } from '@/lib/ops-status';
 
 const CONFIGURATION_FILTERS = [{ id: 'all', label: 'Todas' }, ...INTEGRATION_CONFIGURATION_STATUS_OPTIONS];
 const VERIFICATION_FILTERS = [{ id: 'all', label: 'Todas' }, ...INTEGRATION_VERIFICATION_STATUS_OPTIONS];
@@ -512,11 +514,49 @@ function ConnectionCard({
   );
 }
 
+/** One card in "Estado real de REKREATIVE" — server-derived operational
+ * evidence (lib/server/ops-status.ts via GET /api/ops/status), entirely
+ * separate from the localStorage IntegrationConnection records below.
+ * Never says "Conectada"/"Connected" — only the honest OpsStatus vocabulary
+ * (Operativo/Actividad observada/Configurado/Requiere atención/No
+ * configurado/No observable), same discipline as ConnectionCard above. */
+function RealConnectionCard({ connection }: { connection: OpsConnectionStatus }) {
+  return (
+    <div className="flex flex-col gap-1.5 border border-os-border bg-os-surface p-3.5">
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[12.5px] font-semibold leading-tight text-os-text">{connection.name}</span>
+        <Badge tone={OPS_STATUS_TONE[connection.status]}>{getOpsStatusLabel(connection.status)}</Badge>
+      </div>
+      <p className="text-[10.5px] leading-snug text-os-muted">{connection.detail}</p>
+      <div className="mt-1 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">
+        Última actividad: <span className="text-os-muted">{formatOpsRelativeTime(connection.lastActivityAt)}</span>
+      </div>
+    </div>
+  );
+}
+
 export function IntegrationConnectionsBoard({
   platformLogosLarge,
 }: {
   platformLogosLarge: Record<string, ReactNode>;
 }) {
+  const [opsSnapshot, setOpsSnapshot] = useState<OpsSnapshot | null>(null);
+  const [opsError, setOpsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchOpsSnapshot()
+      .then((snapshot) => {
+        if (!cancelled) setOpsSnapshot(snapshot);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setOpsError(error instanceof Error ? error.message : 'No se pudo cargar el estado operativo real.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Canonical PostgreSQL Client registry — Integration records themselves
   // stay localStorage; only client identity/selection moved.
   const { clients } = useClientsRegistry();
@@ -810,6 +850,43 @@ export function IntegrationConnectionsBoard({
             + Añadir conexión
           </button>
         </div>
+      </div>
+
+      {/* Estado real de REKREATIVE — server-derived operational evidence
+          (lib/server/ops-status.ts), entirely separate from the
+          localStorage IntegrationConnection records below. This is the
+          canonical answer to "is this actually working", not the manual/
+          demo records further down — see Real V1 milestone. */}
+      <div className="mb-5">
+        <SectionHead label="Estado real de REKREATIVE" count={opsSnapshot?.connections.length ?? 0} />
+        {opsError ? (
+          <div className="border border-os-err/40 bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{opsError}</div>
+        ) : !opsSnapshot ? (
+          <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+            Cargando estado operativo…
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            {opsSnapshot.connections.map((connection) => (
+              <RealConnectionCard key={connection.id} connection={connection} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Registros manuales / demo — everything from here down (KPI counters,
+          onboarding, catalog, connection cards) is the localStorage
+          IntegrationConnection store: manually-recorded claims or seeded
+          demo rows, never a live check. Visually separated from "Estado
+          real de REKREATIVE" above so the two are never mistaken for one
+          another — see Real V1 milestone. */}
+      <div className="mb-4 mt-6 border-t border-os-border pt-4">
+        <SectionHead label="Registros manuales / demo" />
+        <p className="mb-1 max-w-2xl text-[11px] text-os-muted">
+          Seguimiento manual de qué plataformas usa cada cliente — nunca deriva de una comprobación real. Las cifras y catálogos de esta sección
+          (Configuradas, Incompletas, No verificadas, Incidencias, Principales, Explorar por categoría) describen estos registros, no el estado
+          operativo real mostrado arriba.
+        </p>
       </div>
 
       {/* Primary scope — REKREATIVE's own shared infrastructure vs. client
