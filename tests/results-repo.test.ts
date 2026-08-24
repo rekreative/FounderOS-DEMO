@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { closePool, query } from '@/lib/server/db';
 import { createClient } from '@/lib/server/clients-repo';
 import { appendCommercialEvent, appendLeadEvent, createLead } from '@/lib/server/leads-repo';
+import { upsertMetaCampaignDailyMetrics } from '@/lib/server/meta-repo';
 import {
   getClientOperationalSnapshot,
   getHighPriorityLeads,
@@ -59,6 +60,7 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/results-repo (real Postgr
       await query('DELETE FROM leads WHERE id = ANY($1)', [leadIds]);
     }
     for (const id of createdClientIds.splice(0)) {
+      await query('DELETE FROM meta_campaign_daily_metrics WHERE client_id = $1', [id]);
       await query('DELETE FROM lead_events WHERE lead_id IN (SELECT id FROM leads WHERE client_id = $1)', [id]);
       await query('DELETE FROM leads WHERE client_id = $1', [id]);
       await query('DELETE FROM clients WHERE id = $1', [id]);
@@ -369,6 +371,73 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/results-repo (real Postgr
       expect(row?.leads).toBe(2);
       expect(row?.conversions).toBe(1);
       expect(row?.valueGenerated).toBe(650);
+    });
+  });
+
+  describe('getResults — Meta spend integration (Meta Ads Real V1)', () => {
+    it('with no meta_campaign_daily_metrics rows for the client: meta.spend/cac/roas/cplCrm all null — never a fabricated number', async () => {
+      const client = await makeClient();
+      await makeLead({ scope: 'client', clientId: client.id, name: 'No Meta Data Lead' });
+
+      const result = await getResults({ clientId: client.id, preset: 'all' });
+      expect(result.overall.meta).toEqual({
+        spend: null,
+        metaLeads: null,
+        impressions: null,
+        clicks: null,
+        ctr: null,
+        cac: null,
+        roas: null,
+        cplCrm: null,
+      });
+    });
+
+    it('with real spend in the period: computes CAC/ROAS/CPL CRM from the funnel + generated value, and keeps Meta leads distinct from CRM leads', async () => {
+      const client = await makeClient();
+      const lead = await makeLead({ scope: 'client', clientId: client.id, name: 'Converted Lead' });
+      await setLeadCreatedAt(lead.id, '2026-08-10T10:00:00.000Z');
+      await appendCommercialEvent({ leadId: lead.id, type: 'converted', source: 'manual', summary: 'x', conversionValue: 800 });
+
+      await upsertMetaCampaignDailyMetrics(client.id, null, [
+        { metaCampaignId: 'camp-1', campaignName: 'Aug Campaign', status: 'active', date: '2026-08-10', spend: 200, impressions: 5000, clicks: 100, leads: 12, reach: null },
+      ]);
+
+      const result = await getResults({ clientId: client.id, preset: 'custom', customStart: '2026-08-01', customEnd: '2026-08-20' });
+      expect(result.overall.funnel.leads).toBe(1); // CRM leads: exactly one ingested lead
+      expect(result.overall.meta.metaLeads).toBe(12); // Meta-reported leads: a completely different, unmixed number
+      expect(result.overall.meta.spend).toBe(200);
+      expect(result.overall.meta.cac).toBe(200); // spend / converted (1)
+      expect(result.overall.meta.roas).toBe(4); // valueGenerated(800) / spend(200)
+      expect(result.overall.meta.cplCrm).toBe(200); // spend / CRM leads (1)
+    });
+
+    it('a period outside the metric rows excludes that spend — period scoping is honored', async () => {
+      const client = await makeClient();
+      await upsertMetaCampaignDailyMetrics(client.id, null, [
+        { metaCampaignId: 'camp-1', campaignName: 'July Campaign', status: 'active', date: '2026-07-10', spend: 500, impressions: 1000, clicks: 10, leads: 1, reach: null },
+      ]);
+      const result = await getResults({ clientId: client.id, preset: 'custom', customStart: '2026-08-01', customEnd: '2026-08-20' });
+      expect(result.overall.meta.spend).toBeNull();
+    });
+
+    it('global view: per-client byClient rows carry their own meta spend, never blended across clients', async () => {
+      const clientA = await makeClient({ name: 'Meta Global A' });
+      const clientB = await makeClient({ name: 'Meta Global B' });
+      const leadA = await makeLead({ scope: 'client', clientId: clientA.id, name: 'A Lead' });
+      await setLeadCreatedAt(leadA.id, '2026-08-05T00:00:00.000Z');
+      const leadB = await makeLead({ scope: 'client', clientId: clientB.id, name: 'B Lead' });
+      await setLeadCreatedAt(leadB.id, '2026-08-05T00:00:00.000Z');
+
+      await upsertMetaCampaignDailyMetrics(clientA.id, null, [
+        { metaCampaignId: 'camp-a', campaignName: 'A Camp', status: 'active', date: '2026-08-05', spend: 100, impressions: 1000, clicks: 10, leads: 2, reach: null },
+      ]);
+      // clientB deliberately has no meta rows — must stay honestly null, not inherit A's spend.
+
+      const result = await getResults({ preset: 'custom', customStart: '2026-08-01', customEnd: '2026-08-20' });
+      const rowA = result.byClient.find((row) => row.clientId === clientA.id);
+      const rowB = result.byClient.find((row) => row.clientId === clientB.id);
+      expect(rowA?.meta.spend).toBe(100);
+      expect(rowB?.meta.spend).toBeNull();
     });
   });
 });

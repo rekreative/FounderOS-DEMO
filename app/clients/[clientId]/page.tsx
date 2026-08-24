@@ -11,7 +11,7 @@ import { deleteClient, getClientById, updateClient } from '@/lib/api/clients';
 import { getClientOpsSnapshot as fetchClientOpsSnapshot } from '@/lib/api/ops-status';
 import { countObservedAutomations, type OpsClientSnapshot } from '@/lib/ops-status';
 import { getLeads, type Lead } from '@/lib/api/leads';
-import { getCampaigns, initializeMetaCampaignsStoreIfNeeded, type MetaCampaign } from '@/lib/meta-ads';
+import { countActiveMetaCampaigns, getMetaAdsCampaigns, type MetaAdsCampaignsResponse } from '@/lib/api/meta-ads';
 import { getAutomations, initializeAutomationsStoreIfNeeded, summarizeAutomations, type Automation } from '@/lib/automations';
 import { getAiAgents, initializeAiAgentsStoreIfNeeded, summarizeAiAgents, type AiAgent } from '@/lib/agents-ai';
 import { getIntegrationConnections, initializeIntegrationConnectionsStoreIfNeeded, type IntegrationConnection } from '@/lib/integration-connections';
@@ -90,7 +90,13 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
   // Client-scoped module data — all reused from each module's own global
   // store, filtered by clientId. No client-specific storage is created here.
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [campaigns, setCampaigns] = useState<MetaCampaign[]>([]);
+  // Meta Ads Real V1 — ONE real fetch (GET /api/meta-ads/campaigns), shared
+  // by both the Overview summary card (metaAdsCounts, derived below) and
+  // the Meta Ads tab (ClientMetaAdsPanel, which renders this same response
+  // as a prop instead of fetching its own copy) — never the demo/localStorage
+  // MetaCampaign store, and never two competing queries for the same data.
+  const [metaAdsData, setMetaAdsData] = useState<MetaAdsCampaignsResponse | null>(null);
+  const [metaAdsError, setMetaAdsError] = useState<string | null>(null);
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [agents, setAgents] = useState<AiAgent[]>([]);
   const [allConnections, setAllConnections] = useState<IntegrationConnection[]>([]);
@@ -126,8 +132,17 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
         setLoading(false);
       });
 
+    setMetaAdsData(null);
+    setMetaAdsError(null);
+    getMetaAdsCampaigns({ clientId, preset: 'all' })
+      .then((response) => {
+        if (!cancelled) setMetaAdsData(response);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setMetaAdsError(err instanceof Error ? err.message : 'No se pudo cargar Meta Ads.');
+      });
+
     // Everything else stays localStorage in this pass — unchanged, synchronous.
-    initializeMetaCampaignsStoreIfNeeded();
     initializeAutomationsStoreIfNeeded();
     initializeAiAgentsStoreIfNeeded();
     initializeIntegrationConnectionsStoreIfNeeded();
@@ -136,7 +151,6 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     initializeContentStoreIfNeeded();
     initializeKnowledgeStoreIfNeeded();
 
-    setCampaigns(getCampaigns(clientId));
     setAutomations(getAutomations(clientId));
     setAgents(getAiAgents(clientId));
     setAllConnections(getIntegrationConnections());
@@ -181,10 +195,11 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     [leads],
   );
 
-  const metaAdsCounts = useMemo(
-    () => ({ total: campaigns.length, active: campaigns.filter((c) => c.status === 'active').length }),
-    [campaigns],
-  );
+  // Derived from the SAME real fetch ClientMetaAdsPanel renders below —
+  // never a second query, never the demo/localStorage MetaCampaign store.
+  // countActiveMetaCampaigns is case-insensitive on `status` (Meta's real
+  // API returns 'ACTIVE' uppercase) — see lib/api/meta-ads.ts.
+  const metaAdsCounts = useMemo(() => countActiveMetaCampaigns(metaAdsData?.campaigns ?? []), [metaAdsData]);
 
   const automationsSummary = useMemo(() => summarizeAutomations(automations), [automations]);
   const agentsSummary = useMemo(() => summarizeAiAgents(agents), [agents]);
@@ -269,7 +284,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
 
   const hasRelatedRecords =
     leads.length > 0 ||
-    campaigns.length > 0 ||
+    metaAdsCounts.total > 0 ||
     automations.length > 0 ||
     agents.length > 0 ||
     requirements.length > 0 ||
@@ -363,7 +378,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
           />
         )}
 
-        {activeTab === 'meta-ads' && <ClientMetaAdsPanel campaigns={campaigns} />}
+        {activeTab === 'meta-ads' && <ClientMetaAdsPanel data={metaAdsData} error={metaAdsError} />}
 
         {activeTab === 'leads' && <ClientLeadsPanel leads={leads} />}
 

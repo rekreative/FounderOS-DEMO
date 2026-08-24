@@ -1,4 +1,5 @@
 import { query } from './db';
+import { getLatestSyncRun, listClientMetaAccounts, type MetaSyncRun } from './meta-repo';
 import {
   type OpsAgentStatus,
   type OpsAttentionItem,
@@ -133,10 +134,78 @@ function evidenceLadderStatus(hasEvidence: boolean, configured: boolean): OpsSta
 }
 
 /** Same ladder for signals REKREATIVE OS has no config surface for at all
- * (Meta/OpenAI/WhatsApp Cloud — Make/the provider owns the account, not
- * this OS) — configured is never a valid state, only observed-or-unknown. */
+ * (OpenAI/WhatsApp Cloud — Make/the provider owns the account, not this OS)
+ * — configured is never a valid state, only observed-or-unknown. */
 function externalEvidenceStatus(hasEvidence: boolean): OpsStatus {
   return hasEvidence ? 'activity_observed' : 'unknown';
+}
+
+/**
+ * Meta Ads Real V1 — unlike the other external providers above, REKREATIVE
+ * OS NOW owns a real config surface for Meta Ads (client_meta_accounts +
+ * INGEST_META_API_KEY), so this connection uses the SAME
+ * configured/activity_observed ladder as Make/the automations, not
+ * externalEvidenceStatus. It is also the one connection where REKREATIVE OS
+ * has genuine FAILURE evidence (an explicit meta_sync_runs row with
+ * status='error'), not just evidence-or-silence — so needs_attention is
+ * reachable here, but ONLY from that explicit signal, never from mere
+ * inactivity (an absent/quiet sync history falls through to
+ * configured/not_configured like everything else).
+ */
+function deriveMetaAdsConnectionStatus(
+  hasMapping: boolean,
+  ingestMetaConfigured: boolean,
+  latestRun: MetaSyncRun | null,
+): { status: OpsStatus; detail: string; lastActivityAt: string | null } {
+  if (latestRun?.status === 'error') {
+    return {
+      status: 'needs_attention',
+      detail: latestRun.errorMessage
+        ? `La última sincronización de Meta Ads falló: ${latestRun.errorMessage}`
+        : 'La última sincronización de Meta Ads falló.',
+      lastActivityAt: latestRun.finishedAt ?? latestRun.startedAt,
+    };
+  }
+  if (latestRun && (latestRun.status === 'success' || latestRun.status === 'partial')) {
+    return {
+      status: 'activity_observed',
+      detail: 'Sincronización real de Meta Ads observada (client_meta_accounts + meta_sync_runs).',
+      lastActivityAt: latestRun.finishedAt ?? latestRun.startedAt,
+    };
+  }
+
+  const configured = ingestMetaConfigured || hasMapping;
+  if (configured) {
+    return {
+      status: 'configured',
+      detail: hasMapping
+        ? 'Cuenta de Meta Ads mapeada; sin sincronización observada todavía.'
+        : 'Endpoint de ingesta de métricas de Meta Ads (INGEST_META_API_KEY) configurado; sin cuenta mapeada todavía.',
+      lastActivityAt: null,
+    };
+  }
+  return {
+    status: 'not_configured',
+    detail: 'Sin cuenta de Meta Ads mapeada ni endpoint de ingesta de métricas configurado.',
+    lastActivityAt: null,
+  };
+}
+
+/** Isolated the same way lib/connectors/index.ts's allConnectorStatuses
+ *  isolates each connector's own failure — a missing migration or transient
+ *  query error here must never take down the whole ops-status snapshot,
+ *  only degrade this one connection to an honest 'unknown'. */
+async function getMetaAdsConnectionStatus(
+  ingestMetaConfigured: boolean,
+): Promise<{ status: OpsStatus; detail: string; lastActivityAt: string | null }> {
+  try {
+    const [accounts, latestRun] = await Promise.all([listClientMetaAccounts(), getLatestSyncRun()]);
+    const hasMapping = accounts.some((account) => account.active);
+    return deriveMetaAdsConnectionStatus(hasMapping, ingestMetaConfigured, latestRun);
+  } catch (error) {
+    console.error('[ops-status] Meta Ads connection evidence lookup failed:', error);
+    return { status: 'unknown', detail: 'No se pudo comprobar el estado de sincronización de Meta Ads.', lastActivityAt: null };
+  }
 }
 
 /**
@@ -327,7 +396,7 @@ function unavailableSnapshot(
       detail: 'No se puede comprobar la actividad real: PostgreSQL no está disponible.',
       lastActivityAt: null,
     },
-    { id: 'meta_ads', name: 'Meta Lead Ads', status: 'unknown', detail: 'No observable sin conexión a PostgreSQL.', lastActivityAt: null },
+    { id: 'meta_ads', name: 'Meta Ads', status: 'unknown', detail: 'No observable sin conexión a PostgreSQL.', lastActivityAt: null },
     { id: 'openai', name: 'OpenAI (vía Make)', status: 'unknown', detail: 'No observable sin conexión a PostgreSQL.', lastActivityAt: null },
     { id: 'whatsapp', name: 'WhatsApp Business Cloud', status: 'unknown', detail: 'No observable sin conexión a PostgreSQL.', lastActivityAt: null },
     {
@@ -396,18 +465,20 @@ export async function getOpsSnapshot(): Promise<OpsSnapshot> {
     return unavailableSnapshot(postgres, ingestConfigured, makeEventsConfigured, attention);
   }
 
-  const [metaIntake, qualification, whatsappOut, whatsappIn, makeAny, commercialMake] = await Promise.all([
+  const ingestMetaConfigured = Boolean(process.env.INGEST_META_API_KEY);
+
+  const [metaIntake, qualification, whatsappOut, whatsappIn, makeAny, commercialMake, metaAdsConnection] = await Promise.all([
     getLatestEvidence({ eventTypes: ALL_LEAD_EVENT_TYPES_FOR_META, ingestionSourceIlike: '%meta%' }),
     getLatestEvidence({ eventTypes: AI_ANALYZED }),
     getLatestEvidence({ eventTypes: WHATSAPP_SENT }),
     getLatestEvidence({ eventTypes: WHATSAPP_REPLIED }),
     getLatestEvidence({ source: 'make' }),
     getLatestEvidence({ eventTypes: COMMERCIAL_TYPES, source: 'make' }),
+    getMetaAdsConnectionStatus(ingestMetaConfigured),
   ]);
 
   const makeConfigured = ingestConfigured || makeEventsConfigured;
   const makeStatus = evidenceLadderStatus(makeAny.lastActivityAt !== null, makeConfigured);
-  const metaStatus = externalEvidenceStatus(metaIntake.lastActivityAt !== null);
   const openaiStatus = externalEvidenceStatus(qualification.lastActivityAt !== null);
   const whatsappLastActivityAt = [whatsappOut.lastActivityAt, whatsappIn.lastActivityAt]
     .filter((v): v is string => v !== null)
@@ -431,13 +502,10 @@ export async function getOpsSnapshot(): Promise<OpsSnapshot> {
     },
     {
       id: 'meta_ads',
-      name: 'Meta Lead Ads',
-      status: metaStatus,
-      detail:
-        metaStatus === 'activity_observed'
-          ? 'Entrada de leads observada — un lead de Meta llegó correctamente a REKREATIVE OS.'
-          : 'Sin evidencia de leads de Meta todavía. No implica un problema de cuenta: REKREATIVE OS no verifica la cuenta de Meta directamente.',
-      lastActivityAt: metaIntake.lastActivityAt,
+      name: 'Meta Ads',
+      status: metaAdsConnection.status,
+      detail: metaAdsConnection.detail,
+      lastActivityAt: metaAdsConnection.lastActivityAt,
     },
     {
       id: 'openai',

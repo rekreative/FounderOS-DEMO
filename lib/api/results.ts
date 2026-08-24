@@ -13,6 +13,22 @@ import { apiFetch } from './http';
 
 export type ResultsPeriodPreset = 'all' | 'this_month' | 'last_month' | 'last_30_days' | 'custom';
 
+/** Meta Ads Real V1 — real ad-spend-derived KPIs alongside the CRM funnel.
+ *  `metaLeads` is Meta's own Insights lead count, a DIFFERENT number from
+ *  `funnel.leads` (CRM leads actually ingested) — never merged. Every field
+ *  is null whenever no Meta mapping/data exists for the scope+period; the
+ *  UI's "Sin datos de Meta" tiles render exactly that null state. */
+export type ResultsAdMetrics = {
+  spend: number | null;
+  metaLeads: number | null;
+  impressions: number | null;
+  clicks: number | null;
+  ctr: number | null;
+  cac: number | null;
+  roas: number | null;
+  cplCrm: number | null;
+};
+
 export type ResultsComputation = {
   clientId: string | null;
   funnel: LeadFunnelCounts;
@@ -25,6 +41,7 @@ export type ResultsComputation = {
   };
   value: { total: number | null; average: number | null; count: number };
   trend: { granularity: TrendGranularity; points: TrendPoint[] };
+  meta: ResultsAdMetrics;
 };
 
 export type ResultsResponse = {

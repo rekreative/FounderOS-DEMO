@@ -324,7 +324,92 @@ export const IngestLeadBodySchema = z
     campaign: z.string().trim().min(1).nullable().optional(),
     adCreative: z.string().trim().min(1).nullable().optional(),
     form: z.string().trim().min(1).nullable().optional(),
+    // Meta Ads Real V1 — additive, optional structured attribution
+    // identifiers alongside the free-text campaign/adCreative/form above.
+    // Meta's Lead Ads webhook (and Make's Lead Ads trigger module) surfaces
+    // these on every lead at no extra cost; they're never required, so
+    // every existing Make delivery that omits them keeps working unchanged.
+    metaCampaignId: z.string().trim().min(1).nullable().optional(),
+    metaAdsetId: z.string().trim().min(1).nullable().optional(),
+    metaAdId: z.string().trim().min(1).nullable().optional(),
+    metaFormId: z.string().trim().min(1).nullable().optional(),
     qualificationAnswers: z.record(z.string()).nullable().optional(),
     aiAnalysis: ingestLeadAiAnalysisSchema.nullable().optional(),
+  })
+  .strict();
+
+// ── Meta Ads Real V1 ───────────────────────────────────────────────────────
+// client_meta_accounts (canonical clientId <-> Meta ad account mapping),
+// meta_sync_runs, and meta_campaign_daily_metrics — see
+// lib/server/migrations/0004_meta_ads_real_v1.sql.
+
+export const CreateClientMetaAccountBodySchema = z
+  .object({
+    clientId: z.string().trim().min(1),
+    metaAdAccountId: z.string().trim().min(1),
+    metaPageId: z.string().trim().min(1).nullable().optional(),
+    metaFormIds: z.array(z.string().trim().min(1)).nullable().optional(),
+    label: z.string().trim().min(1).nullable().optional(),
+    active: z.boolean().optional(),
+  })
+  .strict();
+
+// clientId and metaAdAccountId define the mapping's identity — never
+// re-pointed by an update; only the account's own metadata and active flag
+// change here. To re-map a client to a different ad account, deactivate the
+// old row and create a new one (preserves history instead of overwriting it).
+export const UpdateClientMetaAccountBodySchema = z
+  .object({
+    metaPageId: z.string().trim().min(1).nullable(),
+    metaFormIds: z.array(z.string().trim().min(1)).nullable(),
+    label: z.string().trim().min(1).nullable(),
+    active: z.boolean(),
+  })
+  .strict()
+  .partial();
+
+export const ListClientMetaAccountsQuerySchema = z
+  .object({
+    clientId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
+const dailyMetricRowSchema = z
+  .object({
+    metaCampaignId: z.string().trim().min(1),
+    campaignName: z.string().trim().min(1),
+    status: z.string().trim().min(1),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD'),
+    spend: z.number().finite().nonnegative(),
+    impressions: z.number().finite().nonnegative().int(),
+    clicks: z.number().finite().nonnegative().int(),
+    leads: z.number().finite().nonnegative().int(),
+    reach: z.number().finite().nonnegative().int().nullable().optional(),
+  })
+  .strict();
+
+/**
+ * POST /api/ingest/meta-metrics request shape (central Make sync). Payload
+ * identifies the client indirectly via metaAdAccountId — resolved
+ * server-side against client_meta_accounts — so Make never needs to know
+ * REKREATIVE OS's internal clientId, only the Meta account id it's already
+ * pulling insights for. `rows` is one daily campaign snapshot per element;
+ * a single POST typically carries a trailing window (e.g. the last 7-14
+ * days) so Meta's own late attribution corrections land as UPSERTs, not
+ * missed updates.
+ */
+export const IngestMetaMetricsBodySchema = z
+  .object({
+    metaAdAccountId: z.string().trim().min(1),
+    rows: z.array(dailyMetricRowSchema).min(1),
+  })
+  .strict();
+
+export const MetaAdsCampaignsQuerySchema = z
+  .object({
+    clientId: z.string().trim().min(1).optional(),
+    preset: ResultsPeriodPresetSchema.optional(),
+    start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'start must be YYYY-MM-DD').optional(),
+    end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'end must be YYYY-MM-DD').optional(),
   })
   .strict();

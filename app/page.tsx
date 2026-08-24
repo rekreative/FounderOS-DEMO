@@ -16,19 +16,19 @@ import {
   type ResultsHomeResponse,
 } from '@/lib/api/results';
 import { formatEUR } from '@/lib/results';
-import { getCampaigns, initializeMetaCampaignsStoreIfNeeded, type MetaCampaign } from '@/lib/meta-ads';
+import { getMetaAdsCampaigns } from '@/lib/api/meta-ads';
 import { getAutomations, initializeAutomationsStoreIfNeeded, summarizeAutomations, type Automation } from '@/lib/automations';
 import { getContentItems, initializeContentStoreIfNeeded, isContentOverdue, type ContentItem } from '@/lib/content-items';
 import { getOpsSnapshot as fetchOpsSnapshot } from '@/lib/api/ops-status';
 import type { OpsSnapshot } from '@/lib/ops-status';
 
 // REKREATIVE OS internal command center — "what's happening right now" and
-// "what needs my attention". Clients, Leads, and every Results-derived
-// number (high-priority/awaiting-contact leads, upcoming appointments,
-// recent conversions/activity, value generated, per-client snapshot) are
-// real PostgreSQL (lib/server/results-repo.ts via GET /api/results/home).
-// Campaigns/Automations/AI Agents/Integrations/Content stay the existing
-// localStorage demo stores — unchanged this pass, now explicitly marked
+// "what needs my attention". Clients, Leads, every Results-derived number
+// (high-priority/awaiting-contact leads, upcoming appointments, recent
+// conversions/activity, value generated, per-client snapshot), and — since
+// Meta Ads Real V1 — the "Campañas activas" tile (GET /api/meta-ads/campaigns)
+// are real PostgreSQL. Automations/AI Agents/Integrations/Content stay the
+// existing localStorage demo stores — unchanged this pass, explicitly marked
 // DEMO on their tiles so real and demo data are never visually ambiguous.
 
 type AttentionItem = {
@@ -160,7 +160,9 @@ export default function HomePage() {
   const [leadsError, setLeadsError] = useState<string | null>(null);
   const [homeSnapshot, setHomeSnapshot] = useState<ResultsHomeResponse | null>(null);
   const [homeSnapshotError, setHomeSnapshotError] = useState<string | null>(null);
-  const [campaigns, setCampaigns] = useState<MetaCampaign[]>([]);
+  // Meta Ads Real V1 — real PostgreSQL counts, not the demo/localStorage
+  // MetaCampaign store this tile used to read.
+  const [metaAdsCampaignCounts, setMetaAdsCampaignCounts] = useState({ active: 0, total: 0 });
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [opsSnapshot, setOpsSnapshot] = useState<OpsSnapshot | null>(null);
@@ -200,13 +202,29 @@ export default function HomePage() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    getMetaAdsCampaigns({ preset: 'all' })
+      .then((response) => {
+        if (cancelled) return;
+        setMetaAdsCampaignCounts({
+          active: response.campaigns.filter((campaign) => campaign.status === 'active').length,
+          total: response.campaigns.length,
+        });
+      })
+      .catch(() => {
+        // Honest degrade — the tile simply shows 0/0 rather than throwing.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Everything else stays localStorage in this pass — unchanged, synchronous.
   useEffect(() => {
-    initializeMetaCampaignsStoreIfNeeded();
     initializeAutomationsStoreIfNeeded();
     initializeContentStoreIfNeeded();
 
-    setCampaigns(getCampaigns());
     setAutomations(getAutomations());
     setContentItems(getContentItems());
   }, []);
@@ -219,7 +237,6 @@ export default function HomePage() {
 
   // ── Executive summary — honest counts only, no invented periods/rates ──
   const activeClients = clients.filter((c) => c.status === 'active').length;
-  const activeCampaigns = campaigns.filter((c) => c.status === 'active').length;
   const automationsSummary = useMemo(() => summarizeAutomations(automations), [automations]);
   const valueGeneratedRecently = homeSnapshot?.valueGenerated ?? null;
 
@@ -348,7 +365,12 @@ export default function HomePage() {
       <section className="mb-[22px] grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         <StatTile href="/clients" label="Clientes activos" value={activeClients} unit={`/ ${clients.length} total`} />
         <StatTile href="/leads" label="Leads CRM" value={leads.length} unit="total" />
-        <StatTile href="/meta-ads" label="Campañas activas" value={activeCampaigns} unit={`/ ${campaigns.length} total`} demo />
+        <StatTile
+          href="/meta-ads"
+          label="Campañas activas"
+          value={metaAdsCampaignCounts.active}
+          unit={`/ ${metaAdsCampaignCounts.total} total`}
+        />
         <StatTile href="/automations" label="Automatizaciones" value={automationsSummary.needsAttention} unit="requieren atención" demo />
         <StatTile
           href="/results"

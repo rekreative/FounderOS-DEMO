@@ -59,8 +59,10 @@ const emptyRevenueDraft = (): RevenueDraft => ({ amount: '', occurredAt: new Dat
 /** Real CRM funnel/rates/value (lib/server/results-repo.ts via GET
  * /api/results?clientId=...) plus a SEPARATE manual revenue log
  * (RevenueRecord, localStorage — lib/results.ts) that is never summed into
- * "Valor generado". Meta Ads spend/leads have no live source yet and are
- * always shown as unavailable, never from the demo MetaCampaign store. */
+ * "Valor generado". Meta Ads spend/leads/CAC/ROAS/CPL come from the same
+ * response's `meta` field (Meta Ads Real V1) — real once this client has an
+ * active client_meta_accounts mapping with synced data for the period,
+ * honestly unavailable otherwise, never from the demo MetaCampaign store. */
 export function ClientResultsDashboard({ clientId }: { clientId: string }) {
   // Arriving from the Resumen/Results-preview "Ver dashboard completo" link
   // (?period=all) must always land on the same all-time view those previews
@@ -321,12 +323,12 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
       <div className="mb-6">
         <ResultsKpiStrip
           values={{
-            adSpend: null,
+            adSpend: results?.meta.spend ?? null,
             crmLeads: results?.funnel.leads ?? 0,
             converted: results?.funnel.converted ?? 0,
             valueGenerated: results?.value.total ?? null,
-            roas: null,
-            cac: null,
+            roas: results?.meta.roas ?? null,
+            cac: results?.meta.cac ?? null,
           }}
         />
       </div>
@@ -350,13 +352,29 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
               label="Valor medio por conversión"
               value={results?.value.average == null ? '—' : formatEUR(results.value.average)}
             />
-            <EfficiencyTile label="CPL CRM" value="Sin datos de Meta" />
+            <EfficiencyTile
+              label="CPL CRM"
+              value={results?.meta.cplCrm == null ? 'Sin datos de Meta' : formatEUR(results.meta.cplCrm)}
+            />
           </div>
         </div>
 
         <div className="border border-os-border bg-os-surface p-5">
           <SectionHead label="Adquisición" />
-          <p className="font-mono text-[10.5px] text-os-dim">{META_ADS_UNAVAILABLE_NOTE}</p>
+          {results?.meta.spend == null ? (
+            <p className="font-mono text-[10.5px] text-os-dim">{META_ADS_UNAVAILABLE_NOTE}</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2.5">
+              {/* "Leads (Meta)" — Meta's own Insights-reported lead count,
+                  deliberately labeled distinctly from "Leads CRM" in the KPI
+                  strip above: these are two different numbers that must
+                  never be conflated (Attribution Honesty, Meta Ads Real V1). */}
+              <EfficiencyTile label="Leads (Meta)" value={results.meta.metaLeads == null ? '—' : results.meta.metaLeads.toLocaleString('es-ES')} />
+              <EfficiencyTile label="Impresiones" value={results.meta.impressions == null ? '—' : results.meta.impressions.toLocaleString('es-ES')} />
+              <EfficiencyTile label="Clics" value={results.meta.clicks == null ? '—' : results.meta.clicks.toLocaleString('es-ES')} />
+              <EfficiencyTile label="CTR" value={formatRate(results.meta.ctr)} />
+            </div>
+          )}
         </div>
       </div>
 

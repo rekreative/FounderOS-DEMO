@@ -5,6 +5,9 @@ import {
   buildFunnelStages,
   buildLeadFunnel,
   closeRate,
+  computeAdCAC,
+  computeAdCPL,
+  computeAdROAS,
   groupLeadsByPeriod,
   qualificationRate,
   sumConvertedValue,
@@ -15,6 +18,7 @@ import {
   type TrendPoint,
 } from '@/lib/results-domain';
 import { query } from './db';
+import { getMetaSpendSummary, getMetaSpendSummaryByClient, type MetaSpendSummary } from './meta-repo';
 import {
   listLeadEventsForLeadIds,
   listLeads,
@@ -65,6 +69,30 @@ async function loadCohort(options: {
   return { leads, eventsByLead };
 }
 
+/**
+ * Meta Ads Real V1 — real ad-spend-derived KPIs, threaded alongside the CRM
+ * funnel. `metaLeads` is Meta's own Insights lead count — a DIFFERENT
+ * number from `funnel.leads` (CRM leads actually ingested into REKREATIVE
+ * OS) and never silently merged with it (Attribution Honesty, see
+ * lib/server/meta-repo.ts). Every field is null (never a fabricated
+ * number) whenever no client_meta_accounts mapping/data exists for the
+ * scope+period — the UI's existing "Sin datos de Meta" tiles render exactly
+ * that null state unchanged.
+ */
+export type ResultsAdMetrics = {
+  spend: number | null;
+  metaLeads: number | null;
+  impressions: number | null;
+  clicks: number | null;
+  ctr: number | null;
+  /** Real Meta spend / converted CRM leads. */
+  cac: number | null;
+  /** Valor generado / real Meta spend. */
+  roas: number | null;
+  /** Real Meta spend / CRM leads — "CPL CRM" in the UI. */
+  cplCrm: number | null;
+};
+
 export type ResultsComputation = {
   clientId: string | null;
   funnel: LeadFunnelCounts;
@@ -77,13 +105,33 @@ export type ResultsComputation = {
   };
   value: ConvertedValueSummary;
   trend: { granularity: TrendGranularity; points: TrendPoint[] };
+  meta: ResultsAdMetrics;
 };
+
+function buildAdMetrics(
+  metaSummary: MetaSpendSummary | null,
+  funnel: LeadFunnelCounts,
+  value: ConvertedValueSummary,
+): ResultsAdMetrics {
+  const spend = metaSummary?.spend ?? null;
+  return {
+    spend,
+    metaLeads: metaSummary?.leads ?? null,
+    impressions: metaSummary?.impressions ?? null,
+    clicks: metaSummary?.clicks ?? null,
+    ctr: metaSummary?.ctr ?? null,
+    cac: computeAdCAC(spend, funnel.converted),
+    roas: computeAdROAS(value.total, spend),
+    cplCrm: computeAdCPL(spend, funnel.leads),
+  };
+}
 
 function computeCohortResult(
   clientId: string | null,
   cohortLeads: ServerLead[],
   eventsByLead: Map<string, LeadEvent[]>,
   period: ResolvedResultsPeriod,
+  metaSummary: MetaSpendSummary | null,
 ): ResultsComputation {
   // Reconstructs the flat event list buildLeadFunnel/sumConvertedValue
   // expect — cheap (already in memory, no new query) and keeps those
@@ -100,7 +148,8 @@ function computeCohortResult(
   const value = sumConvertedValue(cohortLeads, events);
   const granularity = resolveResultsTrendGranularity(period.preset, { start: period.start, end: period.end });
   const trend = { granularity, points: groupLeadsByPeriod(cohortLeads, granularity) };
-  return { clientId, funnel, stages, rates, value, trend };
+  const meta = buildAdMetrics(metaSummary, funnel, value);
+  return { clientId, funnel, stages, rates, value, trend, meta };
 }
 
 export type ResultsQueryOptions = {
@@ -127,6 +176,14 @@ export type ResultsResult = {
  * after it is still counted as converted in this cohort; a lead created
  * outside the period never enters it, regardless of when it later converts.
  */
+/**
+ * Meta metrics are dated by campaign-day (a plain DATE column, not
+ * TIMESTAMPTZ) — the meta spend window reuses period.start/period.end
+ * directly (both already inclusive Madrid calendar-date strings) rather
+ * than the cohort's queryStart/queryEndExclusive UTC instants, avoiding any
+ * timezone-shift risk comparing a plain date against an instant. Still one
+ * period-resolution source of truth (resolveResultsPeriod) for both.
+ */
 export async function getResults(options: ResultsQueryOptions): Promise<ResultsResult> {
   const period = resolveResultsPeriod(
     options.preset,
@@ -134,10 +191,15 @@ export async function getResults(options: ResultsQueryOptions): Promise<ResultsR
   );
   const createdFrom = period.queryStart ?? undefined;
   const createdTo = period.queryEndExclusive ?? undefined;
+  const metaDateFrom = period.start ?? undefined;
+  const metaDateTo = period.end ?? undefined;
 
   if (options.clientId) {
-    const { leads, eventsByLead } = await loadCohort({ clientId: options.clientId, createdFrom, createdTo });
-    const computation = computeCohortResult(options.clientId, leads, eventsByLead, period);
+    const [{ leads, eventsByLead }, metaSummary] = await Promise.all([
+      loadCohort({ clientId: options.clientId, createdFrom, createdTo }),
+      getMetaSpendSummary({ clientId: options.clientId, dateFrom: metaDateFrom, dateTo: metaDateTo }),
+    ]);
+    const computation = computeCohortResult(options.clientId, leads, eventsByLead, period, metaSummary);
     return { period, overall: computation, byClient: [computation] };
   }
 
@@ -145,7 +207,11 @@ export async function getResults(options: ResultsQueryOptions): Promise<ResultsR
   // clientId null) never belong to a client cohort, same exclusion the
   // client-side computeClientResults already applied via `lead.clientId ===
   // clientId`; fetching only scope 'client' here is the SQL-side equivalent.
-  const { leads, eventsByLead } = await loadCohort({ scope: 'client', createdFrom, createdTo });
+  const [{ leads, eventsByLead }, overallMetaSummary, metaByClient] = await Promise.all([
+    loadCohort({ scope: 'client', createdFrom, createdTo }),
+    getMetaSpendSummary({ dateFrom: metaDateFrom, dateTo: metaDateTo }),
+    getMetaSpendSummaryByClient({ dateFrom: metaDateFrom, dateTo: metaDateTo }),
+  ]);
 
   const leadsByClient = new Map<string, ServerLead[]>();
   for (const lead of leads) {
@@ -156,9 +222,9 @@ export async function getResults(options: ResultsQueryOptions): Promise<ResultsR
   }
 
   const byClient = [...leadsByClient.entries()].map(([clientId, clientLeads]) =>
-    computeCohortResult(clientId, clientLeads, eventsByLead, period),
+    computeCohortResult(clientId, clientLeads, eventsByLead, period, metaByClient.get(clientId) ?? null),
   );
-  const overall = computeCohortResult(null, leads, eventsByLead, period);
+  const overall = computeCohortResult(null, leads, eventsByLead, period, overallMetaSummary);
   return { period, overall, byClient };
 }
 

@@ -22,11 +22,13 @@ import { BarListChart, FunnelBars, ResultsKpiStrip } from '@/components/ResultsC
  * Every number on this page is real PostgreSQL (lib/server/results-repo.ts
  * via GET /api/results) — an acquisition-cohort funnel + "Valor generado"
  * (SUM Lead.conversionValue over converted leads), scoped by the selected
- * period and, per client, by clientId. Ad spend/ROAS/CAC have no live
- * source yet (Meta Ads) and are never computed here — see the KPI strip's
- * "Sin datos de Meta" tiles. RevenueRecord (the manual revenue log) isn't
- * shown on this page at all in V1 — it stays fully visible/editable on each
- * client's own /clients/[clientId]/results dashboard. */
+ * period and, per client, by clientId. Ad spend/ROAS/CAC (Meta Ads Real V1)
+ * come from the same response's `meta` field — real once a client has an
+ * active client_meta_accounts mapping with synced data for the period,
+ * honestly null (rendered as the KPI strip's "Sin datos de Meta" tiles)
+ * otherwise. RevenueRecord (the manual revenue log) isn't shown on this page
+ * at all in V1 — it stays fully visible/editable on each client's own
+ * /clients/[clientId]/results dashboard. */
 export function ResultsBoard() {
   // Canonical PostgreSQL registry — same source /clients and /leads read.
   const { clients, error: clientsError } = useClientsRegistry();
@@ -173,12 +175,12 @@ export function ResultsBoard() {
       <div className="mb-6">
         <ResultsKpiStrip
           values={{
-            adSpend: null,
+            adSpend: overall?.meta.spend ?? null,
             crmLeads: overall?.funnel.leads ?? 0,
             converted: overall?.funnel.converted ?? 0,
             valueGenerated: overall?.value.total ?? null,
-            roas: null,
-            cac: null,
+            roas: overall?.meta.roas ?? null,
+            cac: overall?.meta.cac ?? null,
           }}
         />
       </div>

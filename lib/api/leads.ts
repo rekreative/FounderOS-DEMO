@@ -27,6 +27,13 @@ export type Lead = LeadBase & {
   ingestionSource: string | null;
   externalLeadId: string | null;
   deliveryId: string | null;
+  /** Meta Ads Real V1 — optional structured attribution identifiers,
+   *  populated only when the ingesting source (e.g. Meta Lead Ads via Make)
+   *  supplied them. Always null for manual/API-created leads. */
+  metaCampaignId: string | null;
+  metaAdsetId: string | null;
+  metaAdId: string | null;
+  metaFormId: string | null;
 };
 
 export type CreateLeadInput = {

@@ -27,6 +27,14 @@ export type ServerLead = LeadBase & {
   ingestionSource: string | null;
   externalLeadId: string | null;
   deliveryId: string | null;
+  /** Meta Ads Real V1 — additive, optional structured attribution
+   *  identifiers alongside the free-text campaign/adCreative/form on
+   *  LeadBase. Always null for manual/API-created leads and for any lead
+   *  ingested before this field existed or whose source didn't supply it. */
+  metaCampaignId: string | null;
+  metaAdsetId: string | null;
+  metaAdId: string | null;
+  metaFormId: string | null;
 };
 
 export class LeadValidationError extends Error {
@@ -128,6 +136,10 @@ export type LeadRow = {
   ingestion_source: string | null;
   external_lead_id: string | null;
   ingest_delivery_id: string | null;
+  meta_campaign_id: string | null;
+  meta_adset_id: string | null;
+  meta_ad_id: string | null;
+  meta_form_id: string | null;
   created_at: Date;
   last_activity_at: Date;
 };
@@ -177,6 +189,10 @@ export function rowToLead(row: LeadRow): ServerLead {
     ingestionSource: row.ingestion_source,
     externalLeadId: row.external_lead_id,
     deliveryId: row.ingest_delivery_id,
+    metaCampaignId: row.meta_campaign_id,
+    metaAdsetId: row.meta_adset_id,
+    metaAdId: row.meta_ad_id,
+    metaFormId: row.meta_form_id,
   };
 }
 
@@ -604,6 +620,11 @@ export type IngestLeadInput = CreateLeadInput & {
   /** e.g. 'meta'. Paired with externalLeadId as idempotency key 2. */
   ingestionSource: string;
   externalLeadId?: string | null;
+  /** Meta Ads Real V1 — optional, ingestion-only structured attribution. */
+  metaCampaignId?: string | null;
+  metaAdsetId?: string | null;
+  metaAdId?: string | null;
+  metaFormId?: string | null;
 };
 
 export type IngestLeadResult = {
@@ -649,8 +670,9 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
            ai_intent, ai_priority, ai_summary, ai_qualification, ai_analyzed_at,
            qualification_answers, appointment_date, conversion_value,
            ingestion_source, external_lead_id, ingest_delivery_id,
+           meta_campaign_id, meta_adset_id, meta_ad_id, meta_form_id,
            created_at, last_activity_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
          ON CONFLICT (ingest_delivery_id) WHERE ingest_delivery_id IS NOT NULL DO NOTHING
          RETURNING *`,
         [
@@ -677,6 +699,10 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
           input.ingestionSource,
           input.externalLeadId ?? null,
           input.deliveryId,
+          nullableTrim(input.metaCampaignId),
+          nullableTrim(input.metaAdsetId),
+          nullableTrim(input.metaAdId),
+          nullableTrim(input.metaFormId),
           now,
           now,
         ],

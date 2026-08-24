@@ -1,6 +1,53 @@
 import { describe, it, expect } from 'vitest';
-import { sumConvertedValue } from '@/lib/results-domain';
+import { computeAdCAC, computeAdCPL, computeAdROAS, sumConvertedValue } from '@/lib/results-domain';
 import type { Lead, LeadEvent } from '@/lib/leads';
+
+// Meta Ads Real V1 — the promoted, centralized ad-spend-based CAC/ROAS/CPL
+// formulas. Distinct names from lib/results.ts's own
+// computeCACPublicitario/computeROAS/computeCPLCrm (which stay in place,
+// still exercised by tests/results.test.ts, unused by the real UI) so
+// neither call site can accidentally import the wrong signature.
+describe('computeAdCAC', () => {
+  it('is spend / converted leads', () => {
+    expect(computeAdCAC(1000, 10)).toBe(100);
+  });
+  it('is null when spend is unavailable', () => {
+    expect(computeAdCAC(null, 10)).toBeNull();
+  });
+  it('is null when there are zero conversions — never a division by zero', () => {
+    expect(computeAdCAC(1000, 0)).toBeNull();
+  });
+});
+
+describe('computeAdROAS', () => {
+  it('is generated value / spend', () => {
+    expect(computeAdROAS(4000, 1000)).toBe(4);
+  });
+  it('is null when spend is unavailable', () => {
+    expect(computeAdROAS(4000, null)).toBeNull();
+  });
+  it('is null when spend is zero', () => {
+    expect(computeAdROAS(4000, 0)).toBeNull();
+  });
+  it('is null when generated value is null (no converted-lead value recorded yet) — never treated as zero', () => {
+    expect(computeAdROAS(null, 1000)).toBeNull();
+  });
+  it('is null when generated value is zero', () => {
+    expect(computeAdROAS(0, 1000)).toBeNull();
+  });
+});
+
+describe('computeAdCPL', () => {
+  it('is spend / CRM leads', () => {
+    expect(computeAdCPL(500, 20)).toBe(25);
+  });
+  it('is null when spend is unavailable', () => {
+    expect(computeAdCPL(null, 20)).toBeNull();
+  });
+  it('is null when there are zero CRM leads', () => {
+    expect(computeAdCPL(500, 0)).toBeNull();
+  });
+});
 
 // Pure-function unit tests for the new (Results V1) conversion-value
 // aggregation — separate from tests/results.test.ts, which already covers

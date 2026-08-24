@@ -2,6 +2,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { closePool, query } from '@/lib/server/db';
 import { createClient } from '@/lib/server/clients-repo';
 import { appendCommercialEvent, appendWhatsAppEvent, createLead, ingestLeadTransactional } from '@/lib/server/leads-repo';
+import { createClientMetaAccount, recordSyncRun } from '@/lib/server/meta-repo';
 import { getClientOpsSnapshot, getOpsSnapshot } from '@/lib/server/ops-status';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
@@ -36,6 +37,9 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/ops-status (real PostgreS
       await query('DELETE FROM leads WHERE id = ANY($1)', [leadIds]);
     }
     for (const id of createdClientIds.splice(0)) {
+      await query('DELETE FROM meta_campaign_daily_metrics WHERE client_id = $1', [id]);
+      await query('DELETE FROM meta_sync_runs WHERE client_id = $1', [id]);
+      await query('DELETE FROM client_meta_accounts WHERE client_id = $1', [id]);
       await query('DELETE FROM lead_events WHERE lead_id IN (SELECT id FROM leads WHERE client_id = $1)', [id]);
       await query('DELETE FROM leads WHERE client_id = $1', [id]);
       await query('DELETE FROM clients WHERE id = $1', [id]);
@@ -101,8 +105,62 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/ops-status (real PostgreS
     expect(leadIntake.lastActivityAt).not.toBeNull();
     expect(leadIntake.clients.some((c) => c.clientId === client.id)).toBe(true);
 
+    // Meta Ads Real V1: the meta_ads CONNECTION status is now derived from
+    // real client_meta_accounts/meta_sync_runs evidence, not lead-ingestion
+    // evidence — a Meta-sourced lead alone must never move it (Attribution
+    // Honesty: lead intake and ad-spend sync are different signals).
+    const metaConnection = snapshot.connections.find((c) => c.id === 'meta_ads')!;
+    expect(metaConnection.status).not.toBe('needs_attention');
+  });
+
+  it('meta_ads connection: a real successful sync run is activity_observed evidence', async () => {
+    const client = await makeClient();
+    await createClientMetaAccount({ clientId: client.id, metaAdAccountId: `act_${Date.now()}` });
+    // Far-future startedAt guarantees this is the globally most-recent run
+    // regardless of other fixtures/leftover rows in the shared dev database.
+    await recordSyncRun({
+      clientId: client.id,
+      startedAt: new Date('2099-01-01T00:00:00.000Z'),
+      finishedAt: new Date('2099-01-01T00:00:05.000Z'),
+      status: 'success',
+      rowsUpserted: 3,
+      errorMessage: null,
+    });
+
+    const snapshot = await getOpsSnapshot();
     const metaConnection = snapshot.connections.find((c) => c.id === 'meta_ads')!;
     expect(metaConnection.status).toBe('activity_observed');
+    expect(metaConnection.lastActivityAt).not.toBeNull();
+  });
+
+  it('meta_ads connection: a real failed sync run is needs_attention — genuine failure evidence, not inactivity', async () => {
+    const client = await makeClient();
+    await createClientMetaAccount({ clientId: client.id, metaAdAccountId: `act_${Date.now()}` });
+    await recordSyncRun({
+      clientId: client.id,
+      startedAt: new Date('2099-01-02T00:00:00.000Z'),
+      finishedAt: new Date('2099-01-02T00:00:05.000Z'),
+      status: 'error',
+      rowsUpserted: 0,
+      errorMessage: 'Meta API rate limited',
+    });
+
+    const snapshot = await getOpsSnapshot();
+    const metaConnection = snapshot.connections.find((c) => c.id === 'meta_ads')!;
+    expect(metaConnection.status).toBe('needs_attention');
+  });
+
+  it('meta_ads connection: a mapping with no sync run yet is configured, never needs_attention', async () => {
+    const client = await makeClient();
+    await createClientMetaAccount({ clientId: client.id, metaAdAccountId: `act_${Date.now()}` });
+
+    const snapshot = await getOpsSnapshot();
+    const metaConnection = snapshot.connections.find((c) => c.id === 'meta_ads')!;
+    // Other fixtures in this shared dev DB run may already have produced
+    // activity_observed/needs_attention evidence more recently than this
+    // mapping-only fixture — only assert the one honesty rule this test
+    // exists to guard: no mapping-only state may ever read as a failure.
+    expect(metaConnection.status).not.toBe('needs_attention');
   });
 
   it('a manually-created lead (no ingestionSource=meta) is never attributed as Meta evidence', async () => {

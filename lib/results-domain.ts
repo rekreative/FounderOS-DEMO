@@ -214,6 +214,42 @@ export function sumConvertedValue(cohortLeads: Lead[], allEvents: LeadEvent[]): 
   return { total, average: total / values.length, count: values.length };
 }
 
+// ===== Ad-spend-based KPIs (Meta Ads Real V1 — never persisted) =====
+// Centralized here so lib/server/results-repo.ts's global and per-client
+// computations both call ONE implementation — never duplicated between the
+// two. Distinct names from lib/results.ts's own computeCACPublicitario/
+// computeROAS/computeCPLCrm (which take the OLD demo-era
+// RevenueRecord/MetaCampaign-shaped inputs and stay in place, unused by the
+// real UI) so neither call site can accidentally reach for the wrong
+// signature.
+
+/** Real Meta spend / converted CRM leads. Null when spend is unavailable
+ *  (no Meta mapping/data yet) or there are zero conversions — never a
+ *  division by zero, never a fabricated number. */
+export function computeAdCAC(spend: number | null, convertedLeads: number): number | null {
+  if (spend == null || convertedLeads <= 0) return null;
+  return spend / convertedLeads;
+}
+
+/** Generated value ("Valor generado" — Lead.conversionValue summed over
+ *  converted leads, NEVER collected revenue) / real Meta spend. Null when
+ *  spend is unavailable or zero, or when there is no generated value yet
+ *  (null or zero) — a zero is treated the same as "not yet earned," never a
+ *  confirmed zero return. */
+export function computeAdROAS(valueGenerated: number | null, spend: number | null): number | null {
+  if (spend == null || spend <= 0 || valueGenerated == null || valueGenerated <= 0) return null;
+  return valueGenerated / spend;
+}
+
+/** Real Meta spend / CRM leads (the funnel's own lead count) — distinct
+ *  from Meta's own campaign-level CPL (spend / Meta-attributed leads); this
+ *  is "CPL CRM" in the UI. Null when spend is unavailable or there are zero
+ *  CRM leads. */
+export function computeAdCPL(spend: number | null, crmLeads: number): number | null {
+  if (spend == null || crmLeads <= 0) return null;
+  return spend / crmLeads;
+}
+
 // ===== Trend grouping (time-bucketed charts) =====
 
 export type TrendGranularity = 'day' | 'week' | 'month';

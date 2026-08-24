@@ -244,6 +244,32 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('POST /api/ingest/leads (real Postgre
       });
     });
 
+    it('stores Meta attribution identifiers when supplied (Meta Ads Real V1, additive)', async () => {
+      const { json } = await postAndTrack(
+        baseBody({
+          name: 'Meta Attribution Check',
+          metaCampaignId: 'camp-123',
+          metaAdsetId: 'adset-456',
+          metaAdId: 'ad-789',
+          metaFormId: 'form-321',
+        }),
+      );
+      const row = await query('SELECT meta_campaign_id, meta_adset_id, meta_ad_id, meta_form_id FROM leads WHERE id = $1', [json.leadId]);
+      expect(row.rows[0]).toEqual({
+        meta_campaign_id: 'camp-123',
+        meta_adset_id: 'adset-456',
+        meta_ad_id: 'ad-789',
+        meta_form_id: 'form-321',
+      });
+    });
+
+    it('backward compatibility: a payload with no Meta attribution fields still ingests, with all four columns null', async () => {
+      const { res, json } = await postAndTrack(baseBody({ name: 'No Meta Attribution — Legacy Payload' }));
+      expect(res.status).toBe(201);
+      const row = await query('SELECT meta_campaign_id, meta_adset_id, meta_ad_id, meta_form_id FROM leads WHERE id = $1', [json.leadId]);
+      expect(row.rows[0]).toEqual({ meta_campaign_id: null, meta_adset_id: null, meta_ad_id: null, meta_form_id: null });
+    });
+
     it('stores aiAnalysis fields correctly', async () => {
       const { json } = await postAndTrack(
         baseBody({

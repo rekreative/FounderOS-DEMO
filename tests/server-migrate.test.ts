@@ -8,7 +8,12 @@ import { resolveTestDatabaseUrl } from './helpers/pg-test-env';
 describe('migration file discovery', () => {
   it('finds every migration file and returns them in deterministic filename order', () => {
     const files = listMigrationFiles();
-    expect(files).toEqual(['0001_init.sql', '0002_lead_events_whatsapp.sql', '0003_leads_created_at_index.sql']);
+    expect(files).toEqual([
+      '0001_init.sql',
+      '0002_lead_events_whatsapp.sql',
+      '0003_leads_created_at_index.sql',
+      '0004_meta_ads_real_v1.sql',
+    ]);
   });
 });
 
@@ -117,6 +122,51 @@ describe('0003_leads_created_at_index.sql contains the Results Real + Home Real 
   });
 });
 
+describe('0004_meta_ads_real_v1.sql contains the Meta Ads Real V1 additions', () => {
+  const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, '0004_meta_ads_real_v1.sql'), 'utf8');
+
+  it('creates the three Meta Ads tables in FK-safe order', () => {
+    const accountsIdx = sql.indexOf('CREATE TABLE IF NOT EXISTS client_meta_accounts');
+    const syncRunsIdx = sql.indexOf('CREATE TABLE IF NOT EXISTS meta_sync_runs');
+    const metricsIdx = sql.indexOf('CREATE TABLE IF NOT EXISTS meta_campaign_daily_metrics');
+    expect(accountsIdx).toBeGreaterThan(-1);
+    expect(syncRunsIdx).toBeGreaterThan(accountsIdx);
+    expect(metricsIdx).toBeGreaterThan(syncRunsIdx);
+  });
+
+  it('references clients with ON DELETE RESTRICT, never CASCADE', () => {
+    expect(sql).toMatch(/client_id TEXT NOT NULL REFERENCES clients\(id\) ON DELETE RESTRICT/);
+    expect(sql).not.toMatch(/ON DELETE CASCADE/);
+  });
+
+  it('enforces the idempotent UPSERT key on meta_campaign_daily_metrics', () => {
+    expect(sql).toMatch(/UNIQUE \(client_id, meta_campaign_id, date\)/);
+  });
+
+  it('enforces at most one ACTIVE mapping per Meta ad account id', () => {
+    expect(sql).toMatch(
+      /CREATE UNIQUE INDEX IF NOT EXISTS idx_client_meta_accounts_active_account_unique\s+ON client_meta_accounts \(meta_ad_account_id\)\s+WHERE active = true/,
+    );
+  });
+
+  it('constrains meta_sync_runs.status to success/partial/error', () => {
+    expect(sql).toMatch(/status TEXT NOT NULL CHECK \(status IN \('success', 'partial', 'error'\)\)/);
+  });
+
+  it('adds the four Meta attribution columns to leads, additively and nullable', () => {
+    expect(sql).toMatch(/ALTER TABLE leads ADD COLUMN IF NOT EXISTS meta_campaign_id TEXT NULL/);
+    expect(sql).toMatch(/ALTER TABLE leads ADD COLUMN IF NOT EXISTS meta_adset_id TEXT NULL/);
+    expect(sql).toMatch(/ALTER TABLE leads ADD COLUMN IF NOT EXISTS meta_ad_id TEXT NULL/);
+    expect(sql).toMatch(/ALTER TABLE leads ADD COLUMN IF NOT EXISTS meta_form_id TEXT NULL/);
+  });
+
+  it('does NOT create adset/ad/creative-level tables in V1', () => {
+    expect(sql).not.toMatch(/CREATE TABLE[^;]*meta_adset/is);
+    expect(sql).not.toMatch(/CREATE TABLE[^;]*meta_ad_daily/is);
+    expect(sql).not.toMatch(/CREATE TABLE[^;]*creative/is);
+  });
+});
+
 // Real-database integration coverage. Skips cleanly — never with a confusing
 // failure — when no DATABASE_URL is configured. Applying migrations here is
 // safe to run repeatedly: schema_migrations tracks what already ran, and
@@ -134,7 +184,17 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('migrations applied against a real Po
         `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
       );
       const tableNames = tables.rows.map((r) => r.table_name);
-      expect(tableNames).toEqual(expect.arrayContaining(['clients', 'leads', 'lead_events', 'schema_migrations']));
+      expect(tableNames).toEqual(
+        expect.arrayContaining([
+          'clients',
+          'leads',
+          'lead_events',
+          'schema_migrations',
+          'client_meta_accounts',
+          'meta_sync_runs',
+          'meta_campaign_daily_metrics',
+        ]),
+      );
 
       const indexes = await client.query<{ indexname: string }>(
         `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'leads'`,
@@ -144,8 +204,17 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('migrations applied against a real Po
         expect.arrayContaining(['leads_ingest_delivery_id_unique', 'leads_external_identity_unique']),
       );
 
+      const leadColumns = await client.query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'leads'`,
+      );
+      const leadColumnNames = leadColumns.rows.map((r) => r.column_name);
+      expect(leadColumnNames).toEqual(
+        expect.arrayContaining(['meta_campaign_id', 'meta_adset_id', 'meta_ad_id', 'meta_form_id']),
+      );
+
       const applied = await client.query<{ id: string }>('SELECT id FROM schema_migrations');
       expect(applied.rows.map((r) => r.id)).toContain('0001_init.sql');
+      expect(applied.rows.map((r) => r.id)).toContain('0004_meta_ads_real_v1.sql');
     } finally {
       await client.end();
     }
