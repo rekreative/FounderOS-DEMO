@@ -8,6 +8,8 @@ import { useRouter } from 'next/navigation';
 // label lookup, no storage) still come from lib/clients.ts.
 import { Client, getClientNotes, getClientStatusLabel, updateClientNotes } from '@/lib/clients';
 import { deleteClient, getClientById, updateClient } from '@/lib/api/clients';
+import { getClientOpsSnapshot as fetchClientOpsSnapshot } from '@/lib/api/ops-status';
+import { countObservedAutomations, type OpsClientSnapshot } from '@/lib/ops-status';
 import { getLeads, type Lead } from '@/lib/api/leads';
 import { getCampaigns, initializeMetaCampaignsStoreIfNeeded, type MetaCampaign } from '@/lib/meta-ads';
 import { getAutomations, initializeAutomationsStoreIfNeeded, summarizeAutomations, type Automation } from '@/lib/automations';
@@ -97,6 +99,13 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [knowledgeEntries, setKnowledgeEntries] = useState<KnowledgeEntry[]>([]);
 
+  // Real per-client operational evidence (Client Truth Alignment V1) — ONE
+  // fetch per client, shared by the Automations tab, the AI Agents tab, and
+  // the Overview summary tiles, so all three read the exact same snapshot
+  // and can never disagree with each other.
+  const [clientOpsSnapshot, setClientOpsSnapshot] = useState<OpsClientSnapshot | null>(null);
+  const [clientOpsError, setClientOpsError] = useState<string | null>(null);
+
   useEffect(() => {
     // Client identity + Leads: canonical PostgreSQL, async, cancellation-guarded.
     let cancelled = false;
@@ -140,6 +149,29 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
       cancelled = true;
     };
   }, [clientId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setClientOpsSnapshot(null);
+    setClientOpsError(null);
+
+    fetchClientOpsSnapshot(clientId)
+      .then((snapshot) => {
+        if (!cancelled) setClientOpsSnapshot(snapshot);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setClientOpsError(error instanceof Error ? error.message : 'No se pudo cargar el estado operativo real.');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  const opsAutomationsObserved = useMemo(
+    () => (clientOpsSnapshot ? countObservedAutomations(clientOpsSnapshot.automations) : null),
+    [clientOpsSnapshot],
+  );
 
   const leadCounts = useMemo(
     () => ({
@@ -321,6 +353,9 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
             metaAdsCounts={metaAdsCounts}
             automationsSummary={automationsSummary}
             agentsSummary={agentsSummary}
+            opsAutomationsObserved={opsAutomationsObserved}
+            opsAutomationsTotal={clientOpsSnapshot?.automations.length ?? 5}
+            opsAgentStatus={clientOpsSnapshot?.agent.status ?? null}
             onboardingSummary={onboardingSummary}
             contentSummary={contentSummary}
             attributedRevenueAllTime={attributedRevenueAllTime}
@@ -332,9 +367,17 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
 
         {activeTab === 'leads' && <ClientLeadsPanel leads={leads} />}
 
-        {activeTab === 'automations' && <ClientAutomationsPanel automations={automations} />}
+        {activeTab === 'automations' && (
+          <ClientAutomationsPanel
+            automations={automations}
+            opsAutomations={clientOpsSnapshot?.automations ?? null}
+            opsError={clientOpsError}
+          />
+        )}
 
-        {activeTab === 'agents' && <ClientAgentsPanel agents={agents} />}
+        {activeTab === 'agents' && (
+          <ClientAgentsPanel agents={agents} opsAgent={clientOpsSnapshot?.agent ?? null} opsError={clientOpsError} />
+        )}
 
         {activeTab === 'integrations' && (
           <ClientIntegrationsPanel clientId={clientId} requirements={requirements} allConnections={allConnections} />

@@ -91,6 +91,30 @@ export type OpsSnapshot = {
   attention: OpsAttentionItem[];
 };
 
+/**
+ * Client Truth Alignment V1 — the same 5 workflows / 1 agent as OpsSnapshot,
+ * scoped to one PostgreSQL clients.id (lib/server/ops-status.ts's
+ * getClientOpsSnapshot). `clients` is dropped — meaningless once evidence is
+ * already scoped to a single client — so these are structurally `Omit<...,
+ * 'clients'>` rather than a hand-duplicated shape, guaranteeing they can
+ * never drift from OpsAutomationStatus/OpsAgentStatus.
+ */
+export type OpsClientAutomationStatus = Omit<OpsAutomationStatus, 'clients'>;
+export type OpsClientAgentStatus = Omit<OpsAgentStatus, 'clients'>;
+
+export type OpsClientSnapshot = {
+  automations: OpsClientAutomationStatus[];
+  agent: OpsClientAgentStatus;
+};
+
+/** Client Overview truth-alignment helper — the ONLY input this can ever
+ * take is real per-client evidence (OpsClientAutomationStatus[]), so
+ * lib/automations.ts's localStorage run telemetry has no way to reach the
+ * Overview's operational summary, by construction. */
+export function countObservedAutomations(automations: OpsClientAutomationStatus[]): number {
+  return automations.filter((automation) => automation.status === 'activity_observed').length;
+}
+
 export function formatOpsRelativeTime(value: string | null): string {
   if (!value) return 'Sin actividad observada';
   const date = new Date(value);

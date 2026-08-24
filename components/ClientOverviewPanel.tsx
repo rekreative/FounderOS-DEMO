@@ -7,6 +7,7 @@ import type { AutomationsSummary } from '@/lib/automations';
 import type { AiAgentsSummary } from '@/lib/agents-ai';
 import type { ClientOnboardingSummary } from '@/lib/client-integration-requirements';
 import type { ContentItemsSummary } from '@/lib/content-items';
+import { getOpsStatusLabel, type OpsStatus } from '@/lib/ops-status';
 
 // Resumen tab — a compact operational snapshot, deliberately built ONLY from
 // counts/summaries that already exist elsewhere (summarizeAutomations,
@@ -14,6 +15,14 @@ import type { ContentItemsSummary } from '@/lib/content-items';
 // component never derives a new rate/metric itself — it is purely
 // presentational, receiving pre-computed summaries as props so the same
 // business logic isn't duplicated between this tab and its full module.
+//
+// Client Truth Alignment V1: Automatizaciones/Agentes IA cards now lead with
+// real per-client operational truth (opsAutomationsObserved/opsAgentStatus,
+// derived from OpsClientSnapshot by the page via
+// lib/ops-status.ts's countObservedAutomations — legacy Automation[]/
+// AiAgent[] run telemetry has no path into those two numbers). The
+// pre-existing localStorage summaries stay as a clearly-labeled
+// "Planificación" line underneath, never presented as observed activity.
 
 export type ClientLeadCounts = { total: number; open: number };
 export type ClientMetaAdsCounts = { total: number; active: number };
@@ -61,6 +70,9 @@ export function ClientOverviewPanel({
   metaAdsCounts,
   automationsSummary,
   agentsSummary,
+  opsAutomationsObserved,
+  opsAutomationsTotal,
+  opsAgentStatus,
   onboardingSummary,
   contentSummary,
   attributedRevenueAllTime,
@@ -69,8 +81,13 @@ export function ClientOverviewPanel({
   client: Client;
   leadCounts: ClientLeadCounts;
   metaAdsCounts: ClientMetaAdsCounts;
+  /** Legacy localStorage planning counts — never operational truth on their own. */
   automationsSummary: AutomationsSummary;
   agentsSummary: AiAgentsSummary;
+  /** Real per-client evidence (OpsClientSnapshot-derived). Null while loading. */
+  opsAutomationsObserved: number | null;
+  opsAutomationsTotal: number;
+  opsAgentStatus: OpsStatus | null;
   onboardingSummary: ClientOnboardingSummary;
   contentSummary: ContentItemsSummary;
   attributedRevenueAllTime: number;
@@ -115,13 +132,16 @@ export function ClientOverviewPanel({
           </SummaryCard>
 
           <SummaryCard title="Automatizaciones" onOpen={() => onOpenTab('automations')}>
-            <Stat label="Activas" value={String(automationsSummary.active)} />
-            <Stat label="Requieren atención" value={String(automationsSummary.needsAttention)} />
+            <Stat
+              label="Con actividad observada"
+              value={opsAutomationsObserved == null ? '—' : `${opsAutomationsObserved}/${opsAutomationsTotal}`}
+            />
+            <Stat label="Planificación" value={`${automationsSummary.active} planificadas`} />
           </SummaryCard>
 
           <SummaryCard title="Agentes IA" onOpen={() => onOpenTab('agents')}>
-            <Stat label="Activos" value={String(agentsSummary.active)} />
-            <Stat label="Configuración incompleta" value={String(agentsSummary.incompleteConfiguration)} />
+            <Stat label="Cualificación de leads" value={opsAgentStatus == null ? '—' : getOpsStatusLabel(opsAgentStatus)} />
+            <Stat label="Planificación" value={`${agentsSummary.active} planificados`} />
           </SummaryCard>
 
           <SummaryCard title="Integraciones" onOpen={() => onOpenTab('integrations')}>

@@ -94,6 +94,7 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
       'results',
       'results/home',
       'ops/status',
+      'ops/status/client/[clientId]',
     ]);
     const discovered = discoverGetRoutes(path.join(process.cwd(), 'app', 'api')).filter((r) => !IGNORE.has(r)).sort();
     const covered = ROUTES.map((r) => r.route).sort();

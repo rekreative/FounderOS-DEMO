@@ -2,7 +2,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { closePool, query } from '@/lib/server/db';
 import { createClient } from '@/lib/server/clients-repo';
 import { appendCommercialEvent, appendWhatsAppEvent, createLead, ingestLeadTransactional } from '@/lib/server/leads-repo';
-import { getOpsSnapshot } from '@/lib/server/ops-status';
+import { getClientOpsSnapshot, getOpsSnapshot } from '@/lib/server/ops-status';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
 // Integration tests against the operator's real local dev PostgreSQL —
@@ -232,6 +232,218 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/ops-status (real PostgreS
   it('Google Sheets always reports unknown — never a fabricated operational/configured state', async () => {
     const snapshot = await getOpsSnapshot();
     expect(snapshot.connections.find((c) => c.id === 'google_sheets')?.status).toBe('unknown');
+  });
+
+  it('regression: global getOpsSnapshot automations/agent keep their per-client "clients" evidence list (unchanged shape)', async () => {
+    const snapshot = await getOpsSnapshot();
+    for (const automation of snapshot.automations) {
+      expect(Array.isArray(automation.clients)).toBe(true);
+    }
+    expect(Array.isArray(snapshot.agent.clients)).toBe(true);
+  });
+});
+
+describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/ops-status — getClientOpsSnapshot (real PostgreSQL)', () => {
+  const createdClientIds: string[] = [];
+  const createdLeadIds: string[] = [];
+
+  async function makeClient(overrides: Partial<Parameters<typeof createClient>[0]> = {}) {
+    const client = await createClient({
+      name: 'Client Ops Snapshot Test Client',
+      sector: 'Testing',
+      status: 'prospect',
+      service: 'Client ops snapshot fixture',
+      metaBudgetMonthly: 0,
+      startDate: '2026-01-01',
+      owner: 'test-suite',
+      ...overrides,
+    });
+    createdClientIds.push(client.id);
+    return client;
+  }
+
+  afterEach(async () => {
+    const leadIds = createdLeadIds.splice(0);
+    if (leadIds.length > 0) {
+      await query('DELETE FROM lead_events WHERE lead_id = ANY($1)', [leadIds]);
+      await query('DELETE FROM leads WHERE id = ANY($1)', [leadIds]);
+    }
+    for (const id of createdClientIds.splice(0)) {
+      await query('DELETE FROM lead_events WHERE lead_id IN (SELECT id FROM leads WHERE client_id = $1)', [id]);
+      await query('DELETE FROM leads WHERE client_id = $1', [id]);
+      await query('DELETE FROM clients WHERE id = $1', [id]);
+    }
+  });
+
+  afterAll(async () => {
+    await closePool();
+  });
+
+  it('returns the 5 canonical workflows and the agent, scoped to this client only, without a "clients" evidence list', async () => {
+    const client = await makeClient();
+    const snapshot = await getClientOpsSnapshot(client.id);
+
+    expect(snapshot.automations.map((a) => a.id).sort()).toEqual(
+      ['commercial_lifecycle', 'lead_intake', 'lead_qualification', 'whatsapp_inbound', 'whatsapp_outbound'].sort(),
+    );
+    expect(snapshot.agent.id).toBe('lead_qualification_agent');
+    for (const automation of snapshot.automations) {
+      expect('clients' in automation).toBe(false);
+    }
+    expect('clients' in snapshot.agent).toBe(false);
+  });
+
+  it('[A] per-client isolation: evidence for client A never leaks into client B\'s snapshot', async () => {
+    const clientA = await makeClient();
+    const clientB = await makeClient();
+
+    const resultA = await ingestLeadTransactional({
+      scope: 'client',
+      clientId: clientA.id,
+      name: 'Client A Lead',
+      deliveryId: `delivery-${Date.now()}-a`,
+      ingestionSource: 'meta',
+      externalLeadId: `meta-a-${Date.now()}`,
+      aiAnalysis: { summary: 'Qualified', intent: 'hot', priority: 'high', qualification: null, analyzedAt: null },
+    });
+    createdLeadIds.push(resultA.lead.id);
+
+    const { lead: leadB } = await createLead({ scope: 'client', clientId: clientB.id, name: 'Client B Lead, no evidence' });
+    createdLeadIds.push(leadB.id);
+
+    const snapshotA = await getClientOpsSnapshot(clientA.id);
+    const snapshotB = await getClientOpsSnapshot(clientB.id);
+
+    const leadIntakeA = snapshotA.automations.find((a) => a.id === 'lead_intake')!;
+    const leadIntakeB = snapshotB.automations.find((a) => a.id === 'lead_intake')!;
+    expect(leadIntakeA.status).toBe('activity_observed');
+    expect(leadIntakeB.status).not.toBe('activity_observed');
+
+    const qualA = snapshotA.automations.find((a) => a.id === 'lead_qualification')!;
+    const qualB = snapshotB.automations.find((a) => a.id === 'lead_qualification')!;
+    expect(qualA.status).toBe('activity_observed');
+    expect(qualB.status).not.toBe('activity_observed');
+
+    expect(snapshotA.agent.status).toBe('activity_observed');
+    expect(snapshotB.agent.status).not.toBe('activity_observed');
+  });
+
+  it('[B] finds a client\'s own evidence even when 6+ other clients have more recent activity (defeats the global top-6 limit)', async () => {
+    const quietClient = await makeClient();
+    const quietResult = await ingestLeadTransactional({
+      scope: 'client',
+      clientId: quietClient.id,
+      name: 'Quiet Client Lead',
+      deliveryId: `delivery-${Date.now()}-quiet`,
+      ingestionSource: 'meta',
+      externalLeadId: `meta-quiet-${Date.now()}`,
+    });
+    createdLeadIds.push(quietResult.lead.id);
+
+    // 6 other clients with strictly newer Meta lead-intake evidence — enough
+    // to push the quiet client out of getOpsSnapshot's global top-6 for this
+    // signal, which is exactly the bug per-client filtering must not repeat.
+    for (let i = 0; i < 6; i++) {
+      const noisyClient = await makeClient();
+      const noisyResult = await ingestLeadTransactional({
+        scope: 'client',
+        clientId: noisyClient.id,
+        name: `Noisy Client Lead ${i}`,
+        deliveryId: `delivery-${Date.now()}-noisy-${i}`,
+        ingestionSource: 'meta',
+        externalLeadId: `meta-noisy-${i}-${Date.now()}`,
+      });
+      createdLeadIds.push(noisyResult.lead.id);
+    }
+
+    const snapshot = await getClientOpsSnapshot(quietClient.id);
+    const leadIntake = snapshot.automations.find((a) => a.id === 'lead_intake')!;
+    expect(leadIntake.status).toBe('activity_observed');
+    expect(leadIntake.lastActivityAt).not.toBeNull();
+  });
+
+  it('[C] a client with zero evidence is configured/not_configured, never needs_attention', async () => {
+    const client = await makeClient();
+    const snapshot = await getClientOpsSnapshot(client.id);
+    for (const automation of snapshot.automations) {
+      expect(automation.status).not.toBe('needs_attention');
+      expect(['configured', 'not_configured']).toContain(automation.status);
+    }
+    expect(snapshot.agent.status).not.toBe('needs_attention');
+    expect(['configured', 'not_configured']).toContain(snapshot.agent.status);
+  });
+
+  it('[D] commercial lifecycle: source=manual never produces activity_observed for this client, source=make does', async () => {
+    const client = await makeClient();
+    const { lead } = await createLead({ scope: 'client', clientId: client.id, name: 'Commercial Lifecycle Client Lead' });
+    createdLeadIds.push(lead.id);
+
+    await appendCommercialEvent({
+      leadId: lead.id,
+      type: 'converted',
+      source: 'manual',
+      summary: 'Converted manually by an operator',
+    });
+
+    let snapshot = await getClientOpsSnapshot(client.id);
+    let commercial = snapshot.automations.find((a) => a.id === 'commercial_lifecycle')!;
+    expect(commercial.status).not.toBe('activity_observed');
+
+    await appendCommercialEvent({
+      leadId: lead.id,
+      type: 'appointment_booked',
+      source: 'make',
+      summary: 'Booked by Make',
+      appointmentDate: '2026-09-01T10:00:00.000Z',
+      externalEventId: `commercial-client-make-${Date.now()}`,
+    });
+
+    snapshot = await getClientOpsSnapshot(client.id);
+    commercial = snapshot.automations.find((a) => a.id === 'commercial_lifecycle')!;
+    expect(commercial.status).toBe('activity_observed');
+  });
+
+  it('[E] the client agent snapshot never includes a model field or a model name', async () => {
+    const client = await makeClient();
+    const result = await ingestLeadTransactional({
+      scope: 'client',
+      clientId: client.id,
+      name: 'Agent Evidence Lead',
+      deliveryId: `delivery-${Date.now()}-agent`,
+      ingestionSource: 'meta',
+      externalLeadId: `meta-agent-${Date.now()}`,
+      aiAnalysis: { summary: 'Qualified lead', intent: 'hot', priority: 'high', qualification: null, analyzedAt: null },
+    });
+    createdLeadIds.push(result.lead.id);
+
+    const snapshot = await getClientOpsSnapshot(client.id);
+    expect(snapshot.agent.status).toBe('activity_observed');
+    expect('model' in snapshot.agent).toBe(false);
+    expect(JSON.stringify(snapshot.agent)).not.toMatch(/gpt-4o|claude-sonnet/i);
+  });
+
+  it('[F] never returns DATABASE_URL, API keys, or any other secret value', async () => {
+    const client = await makeClient();
+    const snapshot = await getClientOpsSnapshot(client.id);
+    const serialized = JSON.stringify(snapshot);
+
+    expect(serialized).not.toContain(TEST_DATABASE_URL);
+    expect(serialized).not.toMatch(/postgres(ql)?:\/\//i);
+    if (process.env.INGEST_API_KEY) expect(serialized).not.toContain(process.env.INGEST_API_KEY);
+    if (process.env.MAKE_EVENTS_API_KEY) expect(serialized).not.toContain(process.env.MAKE_EVENTS_API_KEY);
+
+    const SECRET_KEY_PATTERN = /(api[_-]?key|token|secret|password|credential)$/i;
+    const assertNoSecretKeys = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        value.forEach(assertNoSecretKeys);
+      } else if (value && typeof value === 'object') {
+        for (const [key, nested] of Object.entries(value)) {
+          expect(SECRET_KEY_PATTERN.test(key)).toBe(false);
+          assertNoSecretKeys(nested);
+        }
+      }
+    };
+    assertNoSecretKeys(snapshot);
   });
 });
 

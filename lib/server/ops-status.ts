@@ -2,7 +2,11 @@ import { query } from './db';
 import {
   type OpsAgentStatus,
   type OpsAttentionItem,
+  type OpsAutomationId,
   type OpsAutomationStatus,
+  type OpsClientAgentStatus,
+  type OpsClientAutomationStatus,
+  type OpsClientSnapshot,
   type OpsConnectionStatus,
   type OpsEvidenceClient,
   type OpsSnapshot,
@@ -49,15 +53,28 @@ type EvidenceQuery = {
   eventTypes?: string[];
   source?: string;
   ingestionSourceIlike?: string;
+  /**
+   * Client Truth Alignment V1: scopes the query to one PostgreSQL
+   * clients.id. When set, the `LIMIT 6` below is dropped — GROUP BY
+   * client_id already collapses to at most one row once client_id is
+   * pinned by an equality filter, so the limit is moot, and more
+   * importantly this is the fix for the global evidence query's blind
+   * spot: getOpsSnapshot()'s unscoped queries only ever see the 6
+   * most-recently-active clients per signal, so a specific client's real
+   * evidence could silently fail to surface if 6+ other clients were more
+   * recently active. A clientId-scoped query can never hit that limit.
+   */
+  clientId?: string;
 };
 
 type Evidence = { lastActivityAt: string | null; clients: OpsEvidenceClient[] };
 
 /**
- * ONE bounded query per evidence signal (GROUP BY client_id, LIMIT 6) — never
- * N+1 per client. Real PostgreSQL clients only (LEFT JOIN clients), never
- * lib/clients.ts's localStorage roster. A lead with no client (scope
- * 'internal') contributes to lastActivityAt but never to the `clients` list.
+ * ONE bounded query per evidence signal (GROUP BY client_id, LIMIT 6 when
+ * unscoped) — never N+1 per client. Real PostgreSQL clients only (LEFT JOIN
+ * clients), never lib/clients.ts's localStorage roster. A lead with no
+ * client (scope 'internal') contributes to lastActivityAt but never to the
+ * `clients` list.
  */
 async function getLatestEvidence(opts: EvidenceQuery): Promise<Evidence> {
   const conditions: string[] = [];
@@ -75,8 +92,13 @@ async function getLatestEvidence(opts: EvidenceQuery): Promise<Evidence> {
     params.push(opts.ingestionSourceIlike);
     conditions.push(`l.ingestion_source ILIKE $${params.length}`);
   }
+  if (opts.clientId) {
+    params.push(opts.clientId);
+    conditions.push(`l.client_id = $${params.length}`);
+  }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limitClause = opts.clientId ? '' : 'LIMIT 6';
   const result = await query<EvidenceRow>(
     `SELECT l.client_id, c.name AS client_name, MAX(e.occurred_at) AS last_activity
      FROM lead_events e
@@ -85,7 +107,7 @@ async function getLatestEvidence(opts: EvidenceQuery): Promise<Evidence> {
      ${where}
      GROUP BY l.client_id, c.name
      ORDER BY last_activity DESC
-     LIMIT 6`,
+     ${limitClause}`,
     params,
   );
 
@@ -115,6 +137,129 @@ function evidenceLadderStatus(hasEvidence: boolean, configured: boolean): OpsSta
  * this OS) — configured is never a valid state, only observed-or-unknown. */
 function externalEvidenceStatus(hasEvidence: boolean): OpsStatus {
   return hasEvidence ? 'activity_observed' : 'unknown';
+}
+
+/**
+ * Single source of truth for the 5 canonical workflows' static copy
+ * (name/purpose/execution) and per-quiet-state detail text. Both
+ * getOpsSnapshot() (global) and getClientOpsSnapshot() (Client Truth
+ * Alignment V1, per-clients.id) build their OpsAutomationStatus /
+ * OpsClientAutomationStatus rows from this ONE list + deriveAutomationStatus
+ * below, so the two views can never drift on what a workflow is called or
+ * what its status means.
+ */
+type AutomationDefinition = {
+  id: OpsAutomationId;
+  name: string;
+  purpose: string;
+  execution: string;
+  /** Which REKREATIVE-OS-side key gates the configured/not_configured floor. */
+  configuredBy: 'ingest' | 'makeEvents';
+  activeDetail: string;
+  configuredQuietDetail: string;
+  notConfiguredDetail: string;
+};
+
+const AUTOMATION_DEFINITIONS: AutomationDefinition[] = [
+  {
+    id: 'lead_intake',
+    name: 'Captación de leads (Meta → Make)',
+    purpose: 'Recibe leads de Meta Lead Ads a través de Make y los registra en el CRM.',
+    execution: 'Make',
+    configuredBy: 'ingest',
+    activeDetail: 'Actividad real observada.',
+    configuredQuietDetail: 'Endpoint de ingesta configurado; sin leads de Meta observados todavía.',
+    notConfiguredDetail: 'Endpoint de ingesta (INGEST_API_KEY) no configurado.',
+  },
+  {
+    id: 'lead_qualification',
+    name: 'Cualificación de leads',
+    purpose: 'OpenAI cualifica el lead dentro del escenario de Make antes de registrarlo.',
+    execution: 'Make + OpenAI',
+    configuredBy: 'ingest',
+    activeDetail: 'Actividad real observada.',
+    configuredQuietDetail: 'Endpoint de ingesta configurado; sin cualificaciones observadas todavía.',
+    notConfiguredDetail: 'Endpoint de ingesta (INGEST_API_KEY) no configurado.',
+  },
+  {
+    id: 'whatsapp_outbound',
+    name: 'WhatsApp saliente',
+    purpose: 'Envío de plantillas de WhatsApp Business Cloud vía Make.',
+    execution: 'Make',
+    configuredBy: 'makeEvents',
+    activeDetail: 'Actividad real observada.',
+    configuredQuietDetail: 'Endpoint de eventos configurado; sin envíos observados todavía.',
+    notConfiguredDetail: 'Endpoint de eventos (MAKE_EVENTS_API_KEY) no configurado.',
+  },
+  {
+    id: 'whatsapp_inbound',
+    name: 'WhatsApp entrante',
+    purpose: 'Respuestas de WhatsApp Business Cloud relayadas por Make.',
+    execution: 'Make',
+    configuredBy: 'makeEvents',
+    activeDetail: 'Actividad real observada.',
+    configuredQuietDetail: 'Endpoint de eventos configurado; sin respuestas observadas todavía.',
+    notConfiguredDetail: 'Endpoint de eventos (MAKE_EVENTS_API_KEY) no configurado.',
+  },
+  {
+    id: 'commercial_lifecycle',
+    name: 'Ciclo de vida comercial',
+    purpose: 'Citas, conversiones y descalificaciones reportadas por Make (nunca acciones manuales).',
+    execution: 'Make',
+    configuredBy: 'makeEvents',
+    activeDetail: 'Actividad real observada (solo eventos originados por Make).',
+    configuredQuietDetail: 'Endpoint de eventos configurado; sin eventos comerciales de Make observados todavía.',
+    notConfiguredDetail: 'Endpoint de eventos (MAKE_EVENTS_API_KEY) no configurado.',
+  },
+];
+
+function isAutomationConfigured(def: AutomationDefinition, ingestConfigured: boolean, makeEventsConfigured: boolean): boolean {
+  return def.configuredBy === 'ingest' ? ingestConfigured : makeEventsConfigured;
+}
+
+/** Builds everything but `clients` — getOpsSnapshot() attaches evidence.clients
+ * on top (global), getClientOpsSnapshot() returns this as-is (already
+ * client-scoped, so a per-row client list would be redundant). */
+function deriveAutomationStatus(
+  def: AutomationDefinition,
+  evidence: { lastActivityAt: string | null },
+  configured: boolean,
+): Omit<OpsAutomationStatus, 'clients'> {
+  const hasEvidence = evidence.lastActivityAt !== null;
+  return {
+    id: def.id,
+    name: def.name,
+    purpose: def.purpose,
+    execution: def.execution,
+    status: evidenceLadderStatus(hasEvidence, configured),
+    detail: hasEvidence ? def.activeDetail : configured ? def.configuredQuietDetail : def.notConfiguredDetail,
+    lastActivityAt: evidence.lastActivityAt,
+  };
+}
+
+/** Same single-source-of-truth discipline as AUTOMATION_DEFINITIONS, for the
+ * one Lead Qualification Agent. */
+const AGENT_DEFINITION = {
+  id: 'lead_qualification_agent' as const,
+  name: 'Agente de Cualificación de Leads',
+  provider: 'OpenAI',
+  execution: 'Make + OpenAI',
+  activeDetail: 'Actividad real observada — REKREATIVE OS supervisa este agente a través de eventos ai_analyzed, no lo ejecuta.',
+  configuredQuietDetail: 'Endpoint de ingesta configurado; sin cualificaciones observadas todavía.',
+  notConfiguredDetail: 'Endpoint de ingesta (INGEST_API_KEY) no configurado.',
+};
+
+function deriveAgentStatus(evidence: { lastActivityAt: string | null }, ingestConfigured: boolean): Omit<OpsAgentStatus, 'clients'> {
+  const hasEvidence = evidence.lastActivityAt !== null;
+  return {
+    id: AGENT_DEFINITION.id,
+    name: AGENT_DEFINITION.name,
+    provider: AGENT_DEFINITION.provider,
+    execution: AGENT_DEFINITION.execution,
+    status: evidenceLadderStatus(hasEvidence, ingestConfigured),
+    detail: hasEvidence ? AGENT_DEFINITION.activeDetail : ingestConfigured ? AGENT_DEFINITION.configuredQuietDetail : AGENT_DEFINITION.notConfiguredDetail,
+    lastActivityAt: evidence.lastActivityAt,
+  };
 }
 
 async function getPostgresHealth(databaseUrlConfigured: boolean): Promise<{ configured: boolean; status: OpsStatus; detail: string }> {
@@ -323,99 +468,87 @@ export async function getOpsSnapshot(): Promise<OpsSnapshot> {
     },
   ];
 
-  const automations: OpsAutomationStatus[] = [
-    {
-      id: 'lead_intake',
-      name: 'Captación de leads (Meta → Make)',
-      purpose: 'Recibe leads de Meta Lead Ads a través de Make y los registra en el CRM.',
-      execution: 'Make',
-      status: evidenceLadderStatus(metaIntake.lastActivityAt !== null, ingestConfigured),
-      detail:
-        metaIntake.lastActivityAt !== null
-          ? 'Actividad real observada.'
-          : ingestConfigured
-            ? 'Endpoint de ingesta configurado; sin leads de Meta observados todavía.'
-            : 'Endpoint de ingesta (INGEST_API_KEY) no configurado.',
-      lastActivityAt: metaIntake.lastActivityAt,
-      clients: metaIntake.clients,
-    },
-    {
-      id: 'lead_qualification',
-      name: 'Cualificación de leads',
-      purpose: 'OpenAI cualifica el lead dentro del escenario de Make antes de registrarlo.',
-      execution: 'Make + OpenAI',
-      status: evidenceLadderStatus(qualification.lastActivityAt !== null, ingestConfigured),
-      detail:
-        qualification.lastActivityAt !== null
-          ? 'Actividad real observada.'
-          : ingestConfigured
-            ? 'Endpoint de ingesta configurado; sin cualificaciones observadas todavía.'
-            : 'Endpoint de ingesta (INGEST_API_KEY) no configurado.',
-      lastActivityAt: qualification.lastActivityAt,
-      clients: qualification.clients,
-    },
-    {
-      id: 'whatsapp_outbound',
-      name: 'WhatsApp saliente',
-      purpose: 'Envío de plantillas de WhatsApp Business Cloud vía Make.',
-      execution: 'Make',
-      status: evidenceLadderStatus(whatsappOut.lastActivityAt !== null, makeEventsConfigured),
-      detail:
-        whatsappOut.lastActivityAt !== null
-          ? 'Actividad real observada.'
-          : makeEventsConfigured
-            ? 'Endpoint de eventos configurado; sin envíos observados todavía.'
-            : 'Endpoint de eventos (MAKE_EVENTS_API_KEY) no configurado.',
-      lastActivityAt: whatsappOut.lastActivityAt,
-      clients: whatsappOut.clients,
-    },
-    {
-      id: 'whatsapp_inbound',
-      name: 'WhatsApp entrante',
-      purpose: 'Respuestas de WhatsApp Business Cloud relayadas por Make.',
-      execution: 'Make',
-      status: evidenceLadderStatus(whatsappIn.lastActivityAt !== null, makeEventsConfigured),
-      detail:
-        whatsappIn.lastActivityAt !== null
-          ? 'Actividad real observada.'
-          : makeEventsConfigured
-            ? 'Endpoint de eventos configurado; sin respuestas observadas todavía.'
-            : 'Endpoint de eventos (MAKE_EVENTS_API_KEY) no configurado.',
-      lastActivityAt: whatsappIn.lastActivityAt,
-      clients: whatsappIn.clients,
-    },
-    {
-      id: 'commercial_lifecycle',
-      name: 'Ciclo de vida comercial',
-      purpose: 'Citas, conversiones y descalificaciones reportadas por Make (nunca acciones manuales).',
-      execution: 'Make',
-      status: evidenceLadderStatus(commercialMake.lastActivityAt !== null, makeEventsConfigured),
-      detail:
-        commercialMake.lastActivityAt !== null
-          ? 'Actividad real observada (solo eventos originados por Make).'
-          : makeEventsConfigured
-            ? 'Endpoint de eventos configurado; sin eventos comerciales de Make observados todavía.'
-            : 'Endpoint de eventos (MAKE_EVENTS_API_KEY) no configurado.',
-      lastActivityAt: commercialMake.lastActivityAt,
-      clients: commercialMake.clients,
-    },
-  ];
-
-  const agent: OpsAgentStatus = {
-    id: 'lead_qualification_agent',
-    name: 'Agente de Cualificación de Leads',
-    provider: 'OpenAI',
-    execution: 'Make + OpenAI',
-    status: evidenceLadderStatus(qualification.lastActivityAt !== null, ingestConfigured),
-    detail:
-      qualification.lastActivityAt !== null
-        ? 'Actividad real observada — REKREATIVE OS supervisa este agente a través de eventos ai_analyzed, no lo ejecuta.'
-        : ingestConfigured
-          ? 'Endpoint de ingesta configurado; sin cualificaciones observadas todavía.'
-          : 'Endpoint de ingesta (INGEST_API_KEY) no configurado.',
-    lastActivityAt: qualification.lastActivityAt,
-    clients: qualification.clients,
+  const evidenceById: Record<OpsAutomationId, Evidence> = {
+    lead_intake: metaIntake,
+    lead_qualification: qualification,
+    whatsapp_outbound: whatsappOut,
+    whatsapp_inbound: whatsappIn,
+    commercial_lifecycle: commercialMake,
   };
 
+  const automations: OpsAutomationStatus[] = AUTOMATION_DEFINITIONS.map((def) => {
+    const evidence = evidenceById[def.id];
+    const configured = isAutomationConfigured(def, ingestConfigured, makeEventsConfigured);
+    return { ...deriveAutomationStatus(def, evidence, configured), clients: evidence.clients };
+  });
+
+  const agent: OpsAgentStatus = { ...deriveAgentStatus(qualification, ingestConfigured), clients: qualification.clients };
+
   return { postgres, connections, automations, agent, attention };
+}
+
+/**
+ * Client Truth Alignment V1 — the same 5 workflows + 1 agent as
+ * getOpsSnapshot(), scoped to one PostgreSQL clients.id instead of the
+ * global top-6-most-recently-active evidence. Reuses AUTOMATION_DEFINITIONS/
+ * AGENT_DEFINITION and deriveAutomationStatus/deriveAgentStatus — the exact
+ * same status ladder and status/detail text as the global snapshot — so the
+ * two views can never disagree on what a status means, only on which
+ * client's evidence backs it. No `clients` field: evidence is already
+ * scoped to one client, so a per-row client list is redundant here.
+ */
+export async function getClientOpsSnapshot(clientId: string): Promise<OpsClientSnapshot> {
+  const databaseUrlConfigured = Boolean(process.env.DATABASE_URL);
+  const ingestConfigured = Boolean(process.env.INGEST_API_KEY);
+  const makeEventsConfigured = Boolean(process.env.MAKE_EVENTS_API_KEY);
+
+  const postgres = await getPostgresHealth(databaseUrlConfigured);
+
+  if (postgres.status !== 'operational') {
+    const automations: OpsClientAutomationStatus[] = AUTOMATION_DEFINITIONS.map((def) => ({
+      id: def.id,
+      name: def.name,
+      purpose: def.purpose,
+      execution: def.execution,
+      status: isAutomationConfigured(def, ingestConfigured, makeEventsConfigured) ? 'configured' : 'not_configured',
+      detail: 'No se puede comprobar la actividad real: PostgreSQL no está disponible.',
+      lastActivityAt: null,
+    }));
+
+    const agent: OpsClientAgentStatus = {
+      id: AGENT_DEFINITION.id,
+      name: AGENT_DEFINITION.name,
+      provider: AGENT_DEFINITION.provider,
+      execution: AGENT_DEFINITION.execution,
+      status: ingestConfigured ? 'configured' : 'not_configured',
+      detail: 'No se puede comprobar la actividad real: PostgreSQL no está disponible.',
+      lastActivityAt: null,
+    };
+
+    return { automations, agent };
+  }
+
+  const [metaIntake, qualification, whatsappOut, whatsappIn, commercialMake] = await Promise.all([
+    getLatestEvidence({ eventTypes: ALL_LEAD_EVENT_TYPES_FOR_META, ingestionSourceIlike: '%meta%', clientId }),
+    getLatestEvidence({ eventTypes: AI_ANALYZED, clientId }),
+    getLatestEvidence({ eventTypes: WHATSAPP_SENT, clientId }),
+    getLatestEvidence({ eventTypes: WHATSAPP_REPLIED, clientId }),
+    getLatestEvidence({ eventTypes: COMMERCIAL_TYPES, source: 'make', clientId }),
+  ]);
+
+  const evidenceById: Record<OpsAutomationId, Evidence> = {
+    lead_intake: metaIntake,
+    lead_qualification: qualification,
+    whatsapp_outbound: whatsappOut,
+    whatsapp_inbound: whatsappIn,
+    commercial_lifecycle: commercialMake,
+  };
+
+  const automations: OpsClientAutomationStatus[] = AUTOMATION_DEFINITIONS.map((def) =>
+    deriveAutomationStatus(def, evidenceById[def.id], isAutomationConfigured(def, ingestConfigured, makeEventsConfigured)),
+  );
+
+  const agent: OpsClientAgentStatus = deriveAgentStatus(qualification, ingestConfigured);
+
+  return { automations, agent };
 }
