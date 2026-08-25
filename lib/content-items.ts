@@ -7,6 +7,18 @@ import { getClients } from '@/lib/clients';
 // Same localStorage/scope-invariant architecture as
 // lib/integration-connections.ts's IntegrationConnection: clientId is the
 // only link to client identity, never a duplicated name/sector/service.
+//
+// Client existence is NOT verified against lib/clients.ts here (Content
+// Truth V1) — that store is an obsolete localStorage mirror that stopped
+// receiving writes once Clients cut over to PostgreSQL (lib/api/clients.ts),
+// so it only ever "knows" the 3 original seed clients. Verifying against it
+// silently broke content creation for every real client created since.
+// Client existence for a client-scoped write is instead established
+// structurally (a non-empty clientId) plus contextually — ClientContentPanel
+// only ever renders inside a client workspace the caller already loaded from
+// the real PostgreSQL client route. getClients() stays imported only for the
+// legacy getClientNameForContentItem() display helper below, which has no
+// active operational caller (see its own comment).
 
 export const CONTENT_SCOPE_OPTIONS = [
   { id: 'client', label: 'Cliente' },
@@ -540,15 +552,12 @@ export function getContentItemById(id: string): ContentItem | null {
 
 // ===== WRITE =====
 
+/** Structural check only — a client-scoped item must carry a non-empty
+ * clientId. Does NOT verify the id against any client registry; see the
+ * module comment above for why. */
 function assertScopeInvariant(scope: ContentScope, clientId: string | null): void {
-  if (scope === 'client') {
-    if (!clientId) {
-      throw new Error('A client-scoped content item requires a clientId');
-    }
-    const clientExists = getClients().some((client) => client.id === clientId);
-    if (!clientExists) {
-      throw new Error('Cannot create content item for a missing client id');
-    }
+  if (scope === 'client' && !clientId) {
+    throw new Error('A client-scoped content item requires a clientId');
   }
 }
 
@@ -666,6 +675,13 @@ export function summarizeContentItems(items: ContentItem[]): ContentItemsSummary
 
 // ===== LABELS =====
 
+/** Legacy display helper — no active operational caller (Content Truth V1
+ * audit confirmed this). ClientContentPanel already knows the client's real
+ * (PostgreSQL) name from its parent page and never calls this; ContentBoard
+ * is internal-only and never resolves a client name at all. Left in place,
+ * still backed by the obsolete lib/clients.ts mirror, only because nothing
+ * live depends on it — do not wire this into new UI without first pointing
+ * it at lib/api/clients.ts instead. */
 export function getClientNameForContentItem(clientId: string | null): string {
   if (!clientId) return 'Interno · REKREATIVE';
   const client = getClients().find((item) => item.id === clientId);

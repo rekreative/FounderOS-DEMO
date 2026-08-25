@@ -80,17 +80,21 @@ describe('server-side (no window) behavior', () => {
     expect(getContentItems()).toEqual([]);
   });
 
-  it('createContentItem rejects a client id that cannot be found (client list is empty without window)', () => {
-    expect(() =>
-      createContentItem({
-        scope: 'client',
-        clientId: 'client-does-not-exist',
-        title: 'Test piece',
-        format: 'reel',
-        platform: 'instagram',
-        owner: 'Test Owner',
-      }),
-    ).toThrow('Cannot create content item for a missing client id');
+  it('createContentItem succeeds for any non-empty clientId without a window — no client-registry lookup', () => {
+    // Content Truth V1: client existence is no longer verified against any
+    // client registry (that registry was the obsolete lib/clients.ts
+    // localStorage mirror, which silently broke writes for real PostgreSQL
+    // clients created after the Clients cutover). Only a non-empty clientId
+    // is required — see assertScopeInvariant in lib/content-items.ts.
+    const created = createContentItem({
+      scope: 'client',
+      clientId: 'client-does-not-exist',
+      title: 'Test piece',
+      format: 'reel',
+      platform: 'instagram',
+      owner: 'Test Owner',
+    });
+    expect(created.clientId).toBe('client-does-not-exist');
   });
 
   it('createContentItem with scope internal succeeds without a window (no client lookup needed)', () => {
@@ -290,17 +294,25 @@ describe('CRUD + scope invariant (browser-like storage)', () => {
     ).toThrow('A client-scoped content item requires a clientId');
   });
 
-  it('createContentItem rejects scope client with a clientId that does not exist', () => {
-    expect(() =>
-      createContentItem({
-        scope: 'client',
-        clientId: 'client-does-not-exist',
-        title: 'Bad client',
-        format: 'reel',
-        platform: 'instagram',
-        owner: 'Test Owner',
-      }),
-    ).toThrow('Cannot create content item for a missing client id');
+  it('createContentItem succeeds for a real (non-seed) PostgreSQL-style clientId — the write-bug regression test', () => {
+    // Mirrors a real client created through lib/api/clients.ts /
+    // lib/server/clients-repo.ts's generateClientId() scheme
+    // (`client-<base36 timestamp>-<n>`), which never appears in the
+    // localStorage seed list (client-acme/client-northwind/client-lumen).
+    // Before Content Truth V1 this threw "Cannot create content item for a
+    // missing client id" for every real client.
+    const realClientId = `client-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`;
+    const created = createContentItem({
+      scope: 'client',
+      clientId: realClientId,
+      title: 'Real client piece',
+      format: 'reel',
+      platform: 'instagram',
+      owner: 'Test Owner',
+    });
+    expect(created.clientId).toBe(realClientId);
+    expect(created.dataSource).toBe('manual');
+    expect(getContentItemById(created.id)).not.toBeNull();
   });
 
   it('createContentItem forces clientId to null for scope internal even if one is passed', () => {
@@ -425,5 +437,88 @@ describe('CRUD + scope invariant (browser-like storage)', () => {
     expect(getClientNameForContentItem(null)).toBe('Interno · REKREATIVE');
     expect(getClientNameForContentItem('client-acme')).toBe('Acme Co');
     expect(getClientNameForContentItem('client-does-not-exist')).toBe('Cliente desconocido');
+  });
+});
+
+// Content Truth V1 — manual-only-by-default contract. ContentBoard,
+// ClientContentPanel, and the client Overview tile all apply the same
+// `item.dataSource === 'manual'` filter (a "Mostrar demo" toggle re-includes
+// demo rows in the two board components; the Overview tile never does).
+// That filtering lives in the components, not in lib/content-items.ts — this
+// suite proves the underlying data contract those components depend on:
+// summarizeContentItems computes honestly over whatever set it's given, so a
+// manual-only filter upstream is sufficient to keep demo rows out of every
+// KPI, and toggling it back in is sufficient to bring them back.
+describe('manual-only-by-default contract (dataSource filtering upstream of summarizeContentItems)', () => {
+  beforeEach(() => {
+    installBrowserLikeStorage();
+    initializeClientsStoreIfNeeded();
+    initializeContentStoreIfNeeded();
+  });
+
+  afterEach(() => {
+    uninstallBrowserLikeStorage();
+  });
+
+  it('F/G: default (manual-only) filtering excludes every seeded demo row from the operational set and its KPI summary', () => {
+    createContentItem({
+      scope: 'internal',
+      title: 'Manually planned piece',
+      format: 'reel',
+      platform: 'instagram',
+      owner: 'Equipo REKREATIVE',
+    });
+
+    const allItems = getContentItems();
+    expect(allItems.some((item) => item.dataSource === 'demo')).toBe(true); // seed data present
+
+    const manualOnly = allItems.filter((item) => item.dataSource === 'manual');
+    expect(manualOnly.length).toBe(1);
+    expect(manualOnly.every((item) => item.dataSource === 'manual')).toBe(true);
+
+    const summary = summarizeContentItems(manualOnly);
+    expect(summary.total).toBe(1);
+    // The 18-row seed set covers every status at least once (see the seed
+    // suite above) — if any demo row leaked in, active/ready/published would
+    // all be > 0 too, not just the one manual "idea" piece created here.
+    expect(summary.active).toBe(1);
+    expect(summary.ready).toBe(0);
+    expect(summary.published).toBe(0);
+  });
+
+  it('H: enabling demo visibility (no filter) includes demo rows in the KPI summary again', () => {
+    const allItems = getContentItems();
+    const summaryWithDemo = summarizeContentItems(allItems);
+    // Matches the seed suite above: every status appears at least once
+    // across the demo set, so both active and published are non-zero as
+    // soon as demo rows are back in view.
+    expect(summaryWithDemo.published).toBeGreaterThan(0);
+    expect(summaryWithDemo.total).toBeGreaterThan(1);
+  });
+
+  it('I: a client Overview-style manual-only summary excludes that client\'s demo content and reflects only its manual pieces', () => {
+    createContentItem({
+      scope: 'client',
+      clientId: 'client-acme',
+      title: 'Real manual piece for Acme',
+      format: 'carousel',
+      platform: 'instagram',
+      status: 'ready',
+      owner: 'Test Owner',
+    });
+
+    const acmeItems = getContentItems('client-acme');
+    expect(acmeItems.some((item) => item.dataSource === 'demo')).toBe(true); // Acme has seeded demo content too
+
+    const manualOnlyOverviewSummary = summarizeContentItems(
+      acmeItems.filter((item) => item.dataSource === 'manual'),
+    );
+    expect(manualOnlyOverviewSummary.total).toBe(1);
+    expect(manualOnlyOverviewSummary.ready).toBe(1);
+
+    // Sanity check: the mixed (pre-Truth-V1-fix) summary would have shown
+    // more active/ready pieces than actually exist as real manual work.
+    const mixedSummary = summarizeContentItems(acmeItems);
+    expect(mixedSummary.total).toBeGreaterThan(manualOnlyOverviewSummary.total);
   });
 });

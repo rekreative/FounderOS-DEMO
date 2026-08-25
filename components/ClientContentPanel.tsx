@@ -166,22 +166,34 @@ export function ClientContentPanel({
   const [formatFilter, setFormatFilter] = useState<'all' | ContentFormat>('all');
   const [platformFilter, setPlatformFilter] = useState<'all' | ContentPlatform>('all');
   const [ownerFilter, setOwnerFilter] = useState<'all' | string>('all');
+  // Content Truth V1: operational default is manual-only, same convention as
+  // the global board (components/ContentBoard.tsx) — off on every load.
+  const [showDemo, setShowDemo] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftContentItem>(emptyDraft());
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const owners = useMemo(() => Array.from(new Set(items.map((item) => item.owner).filter(Boolean))).sort(), [items]);
+  const visibleItems = useMemo(
+    () => items.filter((item) => showDemo || item.dataSource === 'manual'),
+    [items, showDemo],
+  );
+
+  const owners = useMemo(
+    () => Array.from(new Set(visibleItems.map((item) => item.owner).filter(Boolean))).sort(),
+    [visibleItems],
+  );
 
   const filteredItems = useMemo(
     () =>
-      items.filter((item) => {
+      visibleItems.filter((item) => {
         if (formatFilter !== 'all' && item.format !== formatFilter) return false;
         if (platformFilter !== 'all' && item.platform !== platformFilter) return false;
         if (ownerFilter !== 'all' && item.owner !== ownerFilter) return false;
         return true;
       }),
-    [items, formatFilter, platformFilter, ownerFilter],
+    [visibleItems, formatFilter, platformFilter, ownerFilter],
   );
 
   // KPI strip is an overview of the (filtered) client set, independent of
@@ -198,11 +210,13 @@ export function ClientContentPanel({
   const openCreateForm = () => {
     setDraft(emptyDraft());
     setEditingId(null);
+    setSaveError(null);
     setShowForm(true);
   };
 
   const openEditForm = (item: ContentItem) => {
     setEditingId(item.id);
+    setSaveError(null);
     setDraft({
       title: item.title,
       format: item.format,
@@ -222,6 +236,7 @@ export function ClientContentPanel({
   const closeForm = () => {
     setShowForm(false);
     setEditingId(null);
+    setSaveError(null);
     setDraft(emptyDraft());
   };
 
@@ -248,10 +263,15 @@ export function ClientContentPanel({
       plannedPublishDate: draft.plannedPublishDate || null,
     };
 
-    if (editingId) {
-      updateContentItem(editingId, payload);
-    } else {
-      createContentItem({ ...payload, dataSource: 'manual' });
+    try {
+      if (editingId) {
+        updateContentItem(editingId, payload);
+      } else {
+        createContentItem({ ...payload, dataSource: 'manual' });
+      }
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'No se pudo guardar la pieza de contenido.');
+      return;
     }
 
     onContentChanged();
@@ -287,6 +307,12 @@ export function ClientContentPanel({
         </div>
       </div>
 
+      {showDemo && (
+        <div className="mb-2 font-mono text-[9px] uppercase tracking-[0.18em] text-os-warn">
+          Incluye datos de demostración — no todo lo de abajo es producción real
+        </div>
+      )}
+
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {[
           { label: 'Activas', value: String(summary.active) },
@@ -309,6 +335,10 @@ export function ClientContentPanel({
         <>
           {/* Compact filters — client is already fixed by this workspace, so no client selector */}
           <div className="mb-3 flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1.5 border border-os-border px-2 py-1 font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">
+              <input type="checkbox" checked={showDemo} onChange={(event) => setShowDemo(event.target.checked)} />
+              Mostrar demo
+            </label>
             <div className="flex items-center gap-2">
               <label className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Formato</label>
               <select
@@ -528,6 +558,10 @@ export function ClientContentPanel({
                 />
               </label>
             </div>
+
+            {saveError && (
+              <div className="mt-4 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{saveError}</div>
+            )}
 
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={closeForm} className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim">

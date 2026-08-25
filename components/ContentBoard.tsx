@@ -170,6 +170,10 @@ export function ContentBoard() {
   const [formatFilter, setFormatFilter] = useState<'all' | ContentFormat>('all');
   const [platformFilter, setPlatformFilter] = useState<'all' | ContentPlatform>('all');
   const [ownerFilter, setOwnerFilter] = useState<'all' | string>('all');
+  // Content Truth V1: operational default is manual-only — seed/demo rows
+  // stay in the store (never deleted) but are excluded from every list and
+  // KPI below unless explicitly opted into. Off by default on every load.
+  const [showDemo, setShowDemo] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -180,7 +184,10 @@ export function ContentBoard() {
     setItems(getContentItems());
   }, []);
 
-  const internalItems = useMemo(() => items.filter((item) => item.scope === 'internal'), [items]);
+  const internalItems = useMemo(
+    () => items.filter((item) => item.scope === 'internal' && (showDemo || item.dataSource === 'manual')),
+    [items, showDemo],
+  );
 
   const owners = useMemo(
     () => Array.from(new Set(internalItems.map((item) => item.owner).filter(Boolean))).sort(),
@@ -300,6 +307,11 @@ export function ContentBoard() {
       </div>
 
       {/* KPI summary */}
+      {showDemo && (
+        <div className="mb-2 font-mono text-[9px] uppercase tracking-[0.18em] text-os-warn">
+          Incluye datos de demostración — no todo lo de abajo es producción real
+        </div>
+      )}
       <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {[
           { label: 'En producción', value: String(summary.active) },
@@ -316,6 +328,10 @@ export function ContentBoard() {
 
       {/* Filters — internal-only surface, so no client selector */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-1.5 border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">
+          <input type="checkbox" checked={showDemo} onChange={(event) => setShowDemo(event.target.checked)} />
+          Mostrar demo
+        </label>
         <div className="flex items-center gap-2">
           <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Formato</label>
           <select

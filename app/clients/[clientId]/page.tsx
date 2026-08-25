@@ -203,7 +203,16 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
 
   const automationsSummary = useMemo(() => summarizeAutomations(automations), [automations]);
   const agentsSummary = useMemo(() => summarizeAiAgents(agents), [agents]);
-  const contentSummary = useMemo(() => summarizeContentItems(contentItems), [contentItems]);
+  // Content Truth V1: the Overview tile is operational truth, not a demo
+  // preview — demo/seed content items must never make a real client look
+  // like it has active production work. Manual-only, unlike the Content tab
+  // itself (ClientContentPanel), which offers its own "Mostrar demo" toggle
+  // over the full contentItems set passed below.
+  const manualContentItems = useMemo(
+    () => contentItems.filter((item) => item.dataSource === 'manual'),
+    [contentItems],
+  );
+  const contentSummary = useMemo(() => summarizeContentItems(manualContentItems), [manualContentItems]);
 
   const relevantConnectionsForOnboarding = useMemo(
     () => allConnections.filter((c) => c.clientId === clientId || c.scope === 'internal'),
