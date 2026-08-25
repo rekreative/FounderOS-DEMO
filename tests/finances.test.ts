@@ -2,12 +2,16 @@ import { describe, expect, test } from 'vitest';
 import {
   incomeAccounts,
   totalIncome,
+  observedIncome,
   totalExpenses,
   expensesByCategory,
   net,
   monthStartUnix,
   sumChargeIncome,
   SAMPLE_EXPENSES,
+  currentMonthKey,
+  monthlyExpenseTotal,
+  netForMonth,
 } from '@/lib/finances';
 
 describe('incomeAccounts', () => {
@@ -133,5 +137,104 @@ describe('Stripe month-to-date helpers', () => {
       { amount: 100, currency: 'usd', paid: true, status: 'pending' },
     ]);
     expect(result).toEqual({ amountCents: 7000, currency: 'usd', count: 2 });
+  });
+
+  test('currentMonthKey returns the calendar month in UTC, not the latest-data month', () => {
+    expect(currentMonthKey(new Date('2026-08-24T10:00:00Z'))).toBe('2026-08');
+    expect(currentMonthKey(new Date('2026-01-01T00:00:00Z'))).toBe('2026-01');
+    expect(currentMonthKey(new Date('2026-12-31T23:59:59Z'))).toBe('2026-12');
+  });
+});
+
+describe('monthlyExpenseTotal — current-month operational expense KPI', () => {
+  test('[H/A] sums real imported rows for the period passed in', () => {
+    expect(
+      monthlyExpenseTotal([
+        { category: 'Software', total: 100 },
+        { category: 'Advertising', total: 250 },
+      ]),
+    ).toBe(350);
+  });
+
+  test('[C] no rows for the period → null, never a fabricated 0', () => {
+    expect(monthlyExpenseTotal([])).toBeNull();
+  });
+
+  test('[D] SAMPLE_EXPENSES can never enter this calculation — it only ever sees the rows it is given', () => {
+    // monthlyExpenseTotal has no reference to SAMPLE_EXPENSES at all; passing
+    // an empty period (the real shape of "current month, nothing imported
+    // yet") proves there is no hidden fallback to the demo set.
+    expect(monthlyExpenseTotal([])).not.toBe(totalExpenses(SAMPLE_EXPENSES));
+    expect(monthlyExpenseTotal([])).toBeNull();
+  });
+});
+
+describe('observedIncome — income-source availability', () => {
+  test('[A] zero live income processors → income unavailable (null), never a fabricated 0 €', () => {
+    const accounts = incomeAccounts({ connected: false, mtdUsd: null });
+    expect(accounts.filter((a) => a.live)).toHaveLength(0);
+    expect(observedIncome(accounts)).toBeNull();
+  });
+
+  test('[B] live Stripe with zero MTD charges → income = 0, a valid available value', () => {
+    const accounts = incomeAccounts({ connected: true, mtdUsd: 0 });
+    expect(accounts.find((a) => a.id === 'stripe')!.live).toBe(true);
+    expect(observedIncome(accounts)).toBe(0);
+  });
+
+  test('[C] live Stripe with positive MTD → income = that real value', () => {
+    const accounts = incomeAccounts({ connected: true, mtdUsd: 500 });
+    expect(observedIncome(accounts)).toBe(500);
+  });
+
+  test('[G] config-only PayPal/Wise (credentials present, no integration) never count as live income', () => {
+    // Configured but not live — the exact "key set ≠ real pull" shape from
+    // incomeAccounts' own contract (see the describe block above).
+    const accounts = incomeAccounts({ connected: false, mtdUsd: null }, { paypal: true, 'wise-1': true });
+    expect(accounts.find((a) => a.id === 'paypal')!.configured).toBe(true);
+    expect(accounts.find((a) => a.id === 'paypal')!.live).toBe(false);
+    expect(accounts.find((a) => a.id === 'wise-1')!.configured).toBe(true);
+    expect(accounts.find((a) => a.id === 'wise-1')!.live).toBe(false);
+    // No live processor at all → still unavailable, regardless of config state.
+    expect(observedIncome(accounts)).toBeNull();
+  });
+
+  test('a live processor plus other merely-configured ones only counts the live one', () => {
+    const accounts = incomeAccounts({ connected: true, mtdUsd: 500 }, { paypal: true });
+    expect(observedIncome(accounts)).toBe(500);
+  });
+});
+
+describe('netForMonth — current-month operational net KPI', () => {
+  test('[F] income and expenses are combined only when both are real for the same period', () => {
+    expect(netForMonth(1000, 400)).toBe(600);
+    expect(netForMonth(400, 1000)).toBe(-600);
+  });
+
+  test('[D] income unavailable (no live processor) + expenses available → net unavailable', () => {
+    expect(netForMonth(null, 400)).toBeNull();
+  });
+
+  test('[E] income available + expenses unavailable (nothing imported) → net unavailable', () => {
+    expect(netForMonth(1000, null)).toBeNull();
+    expect(netForMonth(0, null)).toBeNull();
+  });
+
+  test('both unavailable → net unavailable', () => {
+    expect(netForMonth(null, null)).toBeNull();
+  });
+
+  test('zero processor income is a real, honest figure — not a reason to withhold net', () => {
+    expect(netForMonth(0, 400)).toBe(-400);
+  });
+});
+
+describe('totalIncome — processor/bank-statement boundary', () => {
+  test('[G] sums only processor accounts — has no parameter for bank-statement income, so it cannot be added in', () => {
+    const accounts = incomeAccounts({ connected: true, mtdUsd: 5000 });
+    // totalIncome's signature is (accounts: IncomeAccount[]) — there is no
+    // second "bank income" argument for it to fold in, by construction.
+    expect(totalIncome.length).toBe(1);
+    expect(totalIncome(accounts)).toBe(5000);
   });
 });

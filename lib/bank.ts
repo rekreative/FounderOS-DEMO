@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import fs from 'node:fs';
 import path from 'node:path';
 import type { BankSummary } from '@/lib/bank-statements';
 
@@ -17,6 +18,9 @@ export type BankStore = {
 };
 
 export function openBankStore(file: string = DEFAULT_PATH): BankStore {
+  // Same proven pattern as lib/data.ts's getDb() — see lib/ledger.ts's
+  // openLedger() for why this is required on a fresh clone/worktree.
+  if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new Database(file);
   db.pragma('journal_mode = WAL');
   db.exec(`CREATE TABLE IF NOT EXISTS bank_summaries (

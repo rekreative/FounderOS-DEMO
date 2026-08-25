@@ -62,11 +62,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'not a recognizable bank statement summary' }, { status: 400 });
   }
 
-  const store = openBankStore();
+  // openBankStore()/upsert() can throw for reasons outside the caller's
+  // control (e.g. a fresh environment's data/ dir — see lib/bank.ts). Never
+  // let that surface as an empty/non-JSON 500 — StatementUploader always
+  // calls response.json(), so every path here must return a real JSON body.
   try {
-    store.upsert(summary);
-  } finally {
-    store.close();
+    const store = openBankStore();
+    try {
+      store.upsert(summary);
+    } finally {
+      store.close();
+    }
+    return NextResponse.json({ summary });
+  } catch {
+    return NextResponse.json({ error: 'No se pudo procesar el extracto' }, { status: 500 });
   }
-  return NextResponse.json({ summary });
 }

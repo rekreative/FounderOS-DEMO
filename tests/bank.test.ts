@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { openBankStore, type BankStore } from '@/lib/bank';
 import type { BankSummary } from '@/lib/bank-statements';
 
@@ -31,5 +34,38 @@ describe('bank store', () => {
     expect(store.all()).toHaveLength(1);
     expect(store.all()[0].creditsCents).toBe(2130040);
     expect(store.all()[0].netCents).toBe(2130040 - 1785015);
+  });
+
+  describe('openBankStore — first-run directory initialization', () => {
+    it('[B] creates a missing parent directory and opens the DB successfully', () => {
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), 'bank-init-'));
+      const file = path.join(base, 'nested', 'sub', 'bank.db'); // nested/sub does not exist yet
+      expect(fs.existsSync(path.dirname(file))).toBe(false);
+      try {
+        store = openBankStore(file);
+        expect(fs.existsSync(file)).toBe(true);
+        store.upsert(s('7001', 'General Operations', '2026-04', 2130040, 1785015));
+        expect(store.all()).toHaveLength(1);
+        store.close(); // release the file handle before rmSync (Windows locks it otherwise)
+      } finally {
+        fs.rmSync(base, { recursive: true, force: true });
+      }
+    });
+
+    it('[C] re-opening against an already-existing directory is safe and idempotent (data persists)', () => {
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), 'bank-init-'));
+      const file = path.join(base, 'already-there', 'bank.db');
+      try {
+        store = openBankStore(file); // first open — creates the directory
+        store.upsert(s('7001', 'General Operations', '2026-04', 2130040, 1785015));
+        store.close();
+
+        store = openBankStore(file); // second open — directory already exists
+        expect(store.all()).toHaveLength(1); // same data, nothing lost or duplicated
+        store.close(); // release the file handle before rmSync (Windows locks it otherwise)
+      } finally {
+        fs.rmSync(base, { recursive: true, force: true });
+      }
+    });
   });
 });

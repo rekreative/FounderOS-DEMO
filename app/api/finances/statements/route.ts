@@ -35,11 +35,19 @@ export async function POST(req: Request) {
   }
 
   const rows: LedgerRow[] = parsed.map((r) => ({ ...r, category: categorize(r) }));
-  const ledger = openLedger();
+  // openLedger()/insertRows()/monthly() can throw for reasons outside the
+  // caller's control (e.g. a fresh environment's data/ dir — see lib/ledger.ts).
+  // Never let that surface as an empty/non-JSON 500 — StatementUploader always
+  // calls response.json(), so every path here must return a real JSON body.
   try {
-    const inserted = ledger.insertRows(rows);
-    return NextResponse.json({ inserted, parsed: parsed.length, byCategory: ledger.monthly() });
-  } finally {
-    ledger.close();
+    const ledger = openLedger();
+    try {
+      const inserted = ledger.insertRows(rows);
+      return NextResponse.json({ inserted, parsed: parsed.length, byCategory: ledger.monthly() });
+    } finally {
+      ledger.close();
+    }
+  } catch {
+    return NextResponse.json({ error: 'No se pudo procesar el extracto' }, { status: 500 });
   }
 }

@@ -1,14 +1,7 @@
 import Link from 'next/link';
 import { ArrowDownLeft, ArrowUpRight, Scale, Landmark, Send } from 'lucide-react';
 import { configuredProcessors, monthToDateIncome, stripeSnapshot, wiseOutgoing } from '@/lib/connectors/payments';
-import {
-  incomeAccounts,
-  totalIncome,
-  totalExpenses,
-  expensesByCategory,
-  net,
-  SAMPLE_EXPENSES,
-} from '@/lib/finances';
+import { incomeAccounts, observedIncome, currentMonthKey, monthlyExpenseTotal, netForMonth } from '@/lib/finances';
 import { openLedger } from '@/lib/ledger';
 import { openBankStore } from '@/lib/bank';
 import { businessSeries } from '@/lib/bank-statements';
@@ -73,21 +66,50 @@ export default async function FinancesPage() {
   const accounts = incomeAccounts({ connected: stripeLive, mtdUsd }, configuredMap);
   // Outgoing Wise transfers — null (no Wise key) hides the section entirely.
   const wiseOut = await wiseOutgoing(process.env).catch(() => null);
-  const incomeMtd = totalIncome(accounts);
-  // Expenses from the uploaded statement ledger when present; seeded SAMPLE
-  // otherwise (honest "demo" vs "importado" label below).
+  // "No observed income source" ≠ "observed income = 0" — null unless at
+  // least one processor is actually live (config-only PayPal/Wise never
+  // count). Once one is live, 0 is a valid real MTD figure, same as any
+  // positive total.
+  const incomeMtd = observedIncome(accounts);
+
+  // Current-month expenses — ONLY real imported ledger rows for THIS calendar
+  // month (resolved server-side, never from whatever month the ledger's
+  // latestMonth() happens to be, and never a fallback to demo data). No rows
+  // for this month → expenses stays null, rendered as an honest "—", never a
+  // faked/demo number standing in for it.
+  const currentMonth = currentMonthKey(new Date());
   let ledgerSpend: { category: string; total: number }[] = [];
-  let ledgerMonth: string | null = null;
   try {
     const ledger = openLedger();
-    ledgerSpend = ledger.monthly();
-    ledgerMonth = ledger.latestMonth();
+    ledgerSpend = ledger.monthlyFor(currentMonth);
     ledger.close();
   } catch {
     ledgerSpend = [];
   }
   const expensesLive = ledgerSpend.length > 0;
-  // Per-business income from uploaded bank statements (e.g. per account/business).
+  const expenses = monthlyExpenseTotal(ledgerSpend);
+  // Net only exists when BOTH operands are real for the same calendar month —
+  // never against a fabricated 0 stand-in for a missing income source or a
+  // missing expense import, and never a SAMPLE_EXPENSES stand-in.
+  const netMonthly = netForMonth(incomeMtd, expenses);
+  const netUnavailableReason =
+    incomeMtd == null && expenses == null
+      ? 'ingresos y gastos no disponibles'
+      : incomeMtd == null
+        ? 'sin ingresos conectados'
+        : 'gastos no importados';
+  // "2026-06" → "jun 2026" for the current period's label, shown whether or
+  // not anything was imported for it.
+  const monthLabel = new Date(`${currentMonth}-01T00:00:00Z`).toLocaleDateString('es-ES', {
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+
+  // Per-business income from uploaded bank statements — a SEPARATE imported
+  // source. Deliberately never folded into incomeMtd/netMonthly above: a
+  // processor payout can later also land as a bank deposit, so combining both
+  // would risk double-counting the same money as income twice.
   let bankSeries: ReturnType<typeof businessSeries> = [];
   try {
     const bank = openBankStore();
@@ -96,16 +118,10 @@ export default async function FinancesPage() {
   } catch {
     bankSeries = [];
   }
-  // "2026-06" → "Jun 2026" for an honest period label on the uploaded figures.
-  const monthLabel = ledgerMonth
-    ? new Date(`${ledgerMonth}-01T00:00:00Z`).toLocaleDateString('es-ES', { month: 'short', year: 'numeric', timeZone: 'UTC' })
-    : null;
-  const byCategory = expensesLive ? ledgerSpend : expensesByCategory(SAMPLE_EXPENSES);
-  const expenses = expensesLive ? ledgerSpend.reduce((s, c) => s + c.total, 0) : totalExpenses(SAMPLE_EXPENSES);
-  const netMonthly = net(incomeMtd, expenses);
+
   const liveCount = accounts.filter((a) => a.live).length;
   const maxAccount = Math.max(...accounts.map((a) => a.income ?? 0), 1);
-  const maxCategory = Math.max(...byCategory.map((c) => c.total), 1);
+  const maxCategory = Math.max(...ledgerSpend.map((c) => c.total), 1);
 
   return (
     <div>
@@ -113,23 +129,29 @@ export default async function FinancesPage() {
         eyebrow="REKREATIVE FINANZAS"
         title="Finanzas"
         right={
-          <Badge tone={netMonthly >= 0 ? 'ok' : 'err'}>
-            {netMonthly >= 0 ? '+' : '−'}
-            {eur(Math.abs(netMonthly))} neto/mes
-          </Badge>
+          netMonthly != null ? (
+            <Badge tone={netMonthly >= 0 ? 'ok' : 'err'}>
+              {netMonthly >= 0 ? '+' : '−'}
+              {eur(Math.abs(netMonthly))} neto/mes
+            </Badge>
+          ) : (
+            <Badge ghost>neto/mes — {netUnavailableReason}</Badge>
+          )
         }
       />
       <p className="-mt-4 mb-5 max-w-xl text-[12px] text-os-muted">Visión financiera interna de REKREATIVE.</p>
 
       {/* Scope note — Finances is REKREATIVE-level processor income, distinct
           from Resultados' per-client attributed revenue. The two are never
-          meant to reconcile: different granularity, different question. */}
+          meant to reconcile: different granularity, different question. Also
+          spells out the processor/bank-statement split (see the "Ingresos ·
+          por negocio" section below) so neither reads as included in the other. */}
       <div className="mb-5 border border-dashed border-os-border bg-os-surface2 px-3 py-2 font-mono text-[10px] text-os-dim">
         Ingresos por procesador a nivel de REKREATIVE (todos los clientes). Para ingresos atribuidos por cliente, consulta{' '}
         <Link href="/results" className="text-os-muted underline decoration-dotted hover:text-os-accent">
           Resultados
         </Link>
-        .
+        . Los extractos bancarios importados se muestran aparte y no se suman aquí, para no contar el mismo ingreso dos veces.
       </div>
 
       {/* Summary tiles — slim single-line rows so the page opens condensed */}
@@ -140,11 +162,13 @@ export default async function FinancesPage() {
             <ArrowDownLeft className="h-3 w-3 text-os-ok" strokeWidth={1.8} />
           </div>
           <div className="flex items-baseline justify-between gap-2">
-            <span className="font-mono text-[16px] font-semibold leading-none tracking-[-0.02em] text-os-ok">
-              {eur(incomeMtd)}
+            <span
+              className={`font-mono text-[16px] font-semibold leading-none tracking-[-0.02em] ${incomeMtd != null ? 'text-os-ok' : 'text-os-dim'}`}
+            >
+              {incomeMtd != null ? eur(incomeMtd) : '—'}
             </span>
             <span className="min-w-0 truncate font-mono text-[9.5px] uppercase tracking-[0.1em] text-os-dim">
-              {liveCount}/{accounts.length} conectados
+              {incomeMtd != null ? `procesadores · ${liveCount}/${accounts.length} conectados` : 'sin fuentes de ingreso conectadas'}
             </span>
           </div>
         </div>
@@ -155,11 +179,15 @@ export default async function FinancesPage() {
             <ArrowUpRight className="h-3 w-3 text-os-err" strokeWidth={1.8} />
           </div>
           <div className="flex items-baseline justify-between gap-2">
-            <span className="font-mono text-[16px] font-semibold leading-none tracking-[-0.02em]">{eur(expenses)}</span>
+            <span
+              className={`font-mono text-[16px] font-semibold leading-none tracking-[-0.02em] ${expensesLive ? '' : 'text-os-dim'}`}
+            >
+              {expenses != null ? eur(expenses) : '—'}
+            </span>
             <span
               className={`min-w-0 truncate font-mono text-[9.5px] uppercase tracking-[0.1em] ${expensesLive ? 'text-os-ok' : 'text-os-warn'}`}
             >
-              {expensesLive ? `importado · ${monthLabel}` : 'demo'}
+              {expensesLive ? `importado · ${monthLabel}` : `sin importar · ${monthLabel}`}
             </span>
           </div>
         </div>
@@ -170,13 +198,19 @@ export default async function FinancesPage() {
             <Scale className="h-3 w-3 text-os-accent" strokeWidth={1.8} />
           </div>
           <div className="flex items-baseline justify-between gap-2">
-            <span
-              className={`font-mono text-[16px] font-semibold leading-none tracking-[-0.02em] ${netMonthly >= 0 ? 'text-os-ok' : 'text-os-err'}`}
-            >
-              {netMonthly >= 0 ? '' : '−'}
-              {eur(Math.abs(netMonthly))}
+            {netMonthly != null ? (
+              <span
+                className={`font-mono text-[16px] font-semibold leading-none tracking-[-0.02em] ${netMonthly >= 0 ? 'text-os-ok' : 'text-os-err'}`}
+              >
+                {netMonthly >= 0 ? '' : '−'}
+                {eur(Math.abs(netMonthly))}
+              </span>
+            ) : (
+              <span className="font-mono text-[16px] font-semibold leading-none tracking-[-0.02em] text-os-dim">—</span>
+            )}
+            <span className="min-w-0 truncate font-mono text-[9.5px] uppercase tracking-[0.1em] text-os-dim">
+              {netMonthly != null ? 'ingresos − gastos' : netUnavailableReason}
             </span>
-            <span className="min-w-0 truncate font-mono text-[9.5px] uppercase tracking-[0.1em] text-os-dim">ingresos − gastos</span>
           </div>
         </div>
 
@@ -201,6 +235,9 @@ export default async function FinancesPage() {
       {bankSeries.length > 0 && (
         <section className="mb-5">
           <SectionHead label="Ingresos · por negocio" count="depósitos bancarios" />
+          <p className="-mt-1 mb-3 font-mono text-[10px] text-os-dim">
+            Extractos bancarios importados · no incluido en Ingresos · mes ni en Neto · mes (evita contar el mismo ingreso dos veces).
+          </p>
           <div className="grid gap-3.5 lg:grid-cols-2">
             {bankSeries.map((s) => (
               <BusinessIncomeChart key={s.business} series={s} />
@@ -209,42 +246,55 @@ export default async function FinancesPage() {
         </section>
       )}
 
-      {/* Monthly expenses by category */}
+      {/* Monthly expenses by category — real imported ledger rows for the
+          current month only. No SAMPLE_EXPENSES fallback: an empty month
+          renders an honest empty state, never demo numbers standing in for
+          operational truth. */}
       <section className="mb-5">
         <SectionHead
           label="Gastos mensuales · por categoría"
-          count={expensesLive && monthLabel ? `${eur(expenses)} · ${monthLabel}` : `${eur(expenses)} demo`}
+          count={expensesLive ? `${eur(expenses ?? 0)} · ${monthLabel}` : `sin importar · ${monthLabel}`}
         />
-        <div className="grid items-stretch gap-3.5 lg:grid-cols-[1.15fr_1fr_0.85fr]">
-          {/* where the money goes — share per category */}
-          <SharePie
-            items={byCategory.map((c) => ({ key: c.category, label: c.category, value: Math.round(c.total * 100) }))}
-            total={Math.round(expenses * 100)}
-            centerLabel={expensesLive && monthLabel ? monthLabel : 'por mes'}
-            format={(cents) => eur(cents / 100)}
-            donutPx={190}
-            ariaLabel="Gastos mensuales por categoría"
-          />
+        {expensesLive ? (
+          <div className="grid items-stretch gap-3.5 lg:grid-cols-[1.15fr_1fr_0.85fr]">
+            {/* where the money goes — share per category */}
+            <SharePie
+              items={ledgerSpend.map((c) => ({ key: c.category, label: c.category, value: Math.round(c.total * 100) }))}
+              total={Math.round((expenses ?? 0) * 100)}
+              centerLabel={monthLabel}
+              format={(cents) => eur(cents / 100)}
+              donutPx={190}
+              ariaLabel="Gastos mensuales por categoría"
+            />
 
-          <div className="rounded-lg-t border border-os-border bg-os-surface p-4">
-            <div className="flex flex-col gap-2.5">
-              {byCategory.map((c) => (
-                <div key={c.category}>
-                  <div className="mb-1 flex items-baseline justify-between gap-2 font-mono text-[11px]">
-                    <span className="text-os-muted">{c.category}</span>
-                    <span className="text-os-text">{eur(c.total)}</span>
+            <div className="rounded-lg-t border border-os-border bg-os-surface p-4">
+              <div className="flex flex-col gap-2.5">
+                {ledgerSpend.map((c) => (
+                  <div key={c.category}>
+                    <div className="mb-1 flex items-baseline justify-between gap-2 font-mono text-[11px]">
+                      <span className="text-os-muted">{c.category}</span>
+                      <span className="text-os-text">{eur(c.total)}</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-sm-t bg-os-surface2">
+                      <div className="h-full bg-os-accent opacity-60" style={{ width: `${(c.total / maxCategory) * 100}%` }} />
+                    </div>
                   </div>
-                  <div className="h-1.5 overflow-hidden rounded-sm-t bg-os-surface2">
-                    <div className="h-full bg-os-accent opacity-60" style={{ width: `${(c.total / maxCategory) * 100}%` }} />
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
 
-          {/* Statement ingestion — upload a CSV to replace the sample figures */}
-          <StatementUploader />
-        </div>
+            {/* Statement ingestion — upload a CSV to add more current-month spend */}
+            <StatementUploader />
+          </div>
+        ) : (
+          <div className="grid items-stretch gap-3.5 lg:grid-cols-[1.6fr_0.85fr]">
+            <div className="flex items-center rounded-lg-t border border-dashed border-os-border bg-os-surface2 px-4 py-6 font-mono text-[11px] text-os-dim">
+              Sin gastos importados para {monthLabel}. Sube un extracto de este mes para ver el desglose real.
+            </div>
+            {/* Statement ingestion — upload a CSV to populate this month */}
+            <StatementUploader />
+          </div>
+        )}
       </section>
 
       <section className="mb-5">
@@ -262,7 +312,7 @@ export default async function FinancesPage() {
                     <span className="dot ok pulse mr-1 inline-block" /> conectado
                   </Badge>
                 ) : a.configured ? (
-                  <Badge tone="warn">clave configurada</Badge>
+                  <Badge tone="warn">clave configurada · sin integración</Badge>
                 ) : (
                   <Badge ghost>conectar →</Badge>
                 )}
@@ -271,8 +321,11 @@ export default async function FinancesPage() {
                 <span className="font-mono text-[18px] font-semibold tracking-[-0.02em]">
                   {a.income != null ? eur(a.income) : '—'}
                 </span>
+                {/* "clave configurada" alone never implies live data — this
+                    processor has no working pull yet, so income stays a
+                    permanent "—" until real integration code exists. */}
                 <span className="font-mono text-[9.5px] text-os-dim">
-                  {a.live ? 'este mes' : a.configured ? 'sincronización pendiente' : 'sin conectar'}
+                  {a.live ? 'este mes' : a.configured ? 'sin datos en vivo' : 'sin conectar'}
                 </span>
               </div>
               <div className="mt-2 h-1 overflow-hidden rounded-sm-t bg-os-surface2">

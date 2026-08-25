@@ -88,6 +88,20 @@ export function totalIncome(accounts: IncomeAccount[]): number {
   return accounts.reduce((sum, a) => sum + (a.income ?? 0), 0);
 }
 
+/**
+ * Current-month income actually OBSERVED from connected processors — null
+ * when no account is `live` (a config-only PayPal/Wise slot never counts,
+ * only a processor that is genuinely pulling real data does). "No observed
+ * income source" and "observed income = 0" are different facts: this
+ * function returns null for the former, and a real 0 only once at least one
+ * processor is live but reports nothing this month.
+ */
+export function observedIncome(accounts: IncomeAccount[]): number | null {
+  const live = accounts.filter((a) => a.live);
+  if (live.length === 0) return null;
+  return live.reduce((sum, a) => sum + (a.income ?? 0), 0);
+}
+
 // ── Expenses: seeded sample until statement ingestion lands (Phase 2) ────────
 
 export type ExpenseItem = { id: string; label: string; category: string; monthly: number };
@@ -135,11 +149,47 @@ export function net(income: number, expenses: number): number {
   return income - expenses;
 }
 
+/**
+ * Current-month expense total from real imported ledger rows only — null
+ * when nothing was imported for the period (an empty ledger for this month
+ * is a distinct state from "zero spend", and must never be papered over with
+ * 0 or with SAMPLE_EXPENSES). Callers pass an explicit-period query result
+ * (e.g. Ledger.monthlyFor(currentMonthKey(...))), never monthly()'s
+ * latest-month-present result — see lib/ledger.ts.
+ */
+export function monthlyExpenseTotal(rows: { category: string; total: number }[]): number | null {
+  if (rows.length === 0) return null;
+  return rows.reduce((sum, r) => sum + r.total, 0);
+}
+
+/**
+ * Net for the month — computable only when BOTH sides are real current-month
+ * figures: observed processor income (see observedIncome — null when no
+ * processor is live, not merely 0) and imported expenses (see
+ * monthlyExpenseTotal — null when nothing was imported for the period).
+ * Either side missing → net is unavailable, never computed against a
+ * fabricated 0 stand-in for the missing side.
+ */
+export function netForMonth(income: number | null, expenses: number | null): number | null {
+  if (income == null || expenses == null) return null;
+  return net(income, expenses);
+}
+
 // ── Stripe month-to-date helpers (pure; the connector feeds in raw charges) ──
 
 /** Unix seconds for the first instant of `now`'s calendar month (UTC). */
 export function monthStartUnix(now: Date): number {
   return Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000);
+}
+
+/**
+ * 'YYYY-MM' for `now`'s calendar month (UTC) — the explicit period operational
+ * Finance KPIs (Gastos/Neto · mes) must use. Deliberately never derived from
+ * "whatever month happens to have ledger rows" (see lib/ledger.ts's
+ * monthlyFor) — an old statement upload must never silently read as current.
+ */
+export function currentMonthKey(now: Date): string {
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 /** Sum only the charges that actually settled (paid + succeeded). */

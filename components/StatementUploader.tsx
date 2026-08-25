@@ -19,6 +19,7 @@ export function StatementUploader() {
     // CSV → transaction ledger (categorized expenses); PDF → bank statement
     // summary (per-business income/net).
     const isPdf = /\.pdf$/i.test(file.name) || file.type === 'application/pdf';
+    const genericError = 'Error al subir el archivo';
     try {
       const body = new FormData();
       body.append('file', file);
@@ -26,18 +27,54 @@ export function StatementUploader() {
         method: 'POST',
         body,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setStatus(`✗ ${data.error ?? 'Error al subir el archivo'}`);
-      } else if (isPdf) {
-        setStatus(`✓ ${data.summary.business} ${data.summary.month}: ${(data.summary.creditsCents / 100).toLocaleString('es-ES', { maximumFractionDigits: 0 })} € recibidos`);
-        router.refresh();
-      } else {
-        setStatus(`✓ ${data.inserted} nuevas de ${data.parsed} filas analizadas`);
-        router.refresh();
+
+      // Never assume the body is JSON — read as text and parse defensively.
+      // A server-side failure can still come back empty or non-JSON (e.g. an
+      // upstream proxy error page); calling response.json() directly on that
+      // throws "Unexpected end of JSON input" straight into the catch below
+      // and would surface that raw browser message to the operator instead
+      // of a stable, useful one.
+      const raw = await res.text();
+      let data: unknown = null;
+      if (raw) {
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          data = null;
+        }
       }
-    } catch (err) {
-      setStatus(`✗ ${err instanceof Error ? err.message : 'Error al subir el archivo'}`);
+      const serverError =
+        data && typeof data === 'object' && 'error' in data && typeof (data as { error: unknown }).error === 'string'
+          ? (data as { error: string }).error
+          : null;
+
+      if (!res.ok) {
+        setStatus(`✗ ${serverError ?? genericError}`);
+      } else if (!data || typeof data !== 'object') {
+        setStatus(`✗ ${genericError}`);
+      } else if (isPdf) {
+        const summary = (data as { summary?: { business: string; month: string; creditsCents: number } }).summary;
+        if (!summary) {
+          setStatus(`✗ ${genericError}`);
+        } else {
+          setStatus(
+            `✓ ${summary.business} ${summary.month}: ${(summary.creditsCents / 100).toLocaleString('es-ES', { maximumFractionDigits: 0 })} € recibidos`,
+          );
+          router.refresh();
+        }
+      } else {
+        const { inserted, parsed } = data as { inserted?: number; parsed?: number };
+        if (inserted == null || parsed == null) {
+          setStatus(`✗ ${genericError}`);
+        } else {
+          setStatus(`✓ ${inserted} nuevas de ${parsed} filas analizadas`);
+          router.refresh();
+        }
+      }
+    } catch {
+      // Network/fetch-level failure only — response.json() is never called
+      // blindly above, so this never carries a raw parsing error message.
+      setStatus(`✗ ${genericError}`);
     } finally {
       setBusy(false);
       e.target.value = '';

@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import fs from 'node:fs';
 import path from 'node:path';
 import type { LedgerRow } from '@/lib/statements';
 
@@ -14,6 +15,11 @@ export type Ledger = {
   insertRows(rows: LedgerRow[]): number;
   /** Spend by category for the most recent month present (so "/mo" is honest). */
   monthly(): { category: string; total: number }[];
+  /** Spend by category for an explicit YYYY-MM period — used for current-month
+   *  operational KPIs so the figure never silently drifts to whatever month
+   *  happens to be latest in the ledger. Empty array when nothing was
+   *  imported for that month (never a fallback to another month). */
+  monthlyFor(month: string): { category: string; total: number }[];
   /** The latest YYYY-MM with spend, or null when empty. */
   latestMonth(): string | null;
   reconcile(incomeUsd: number): { income: number; expenses: number; net: number };
@@ -22,6 +28,11 @@ export type Ledger = {
 };
 
 export function openLedger(file: string = DEFAULT_PATH): Ledger {
+  // Same proven pattern as lib/data.ts's getDb() — a fresh clone/worktree has
+  // no data/ directory yet, and better-sqlite3 cannot create a missing parent
+  // directory itself (it throws "Cannot open database because the directory
+  // does not exist"). Idempotent — a no-op when data/ already exists.
+  if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new Database(file);
   db.pragma('journal_mode = WAL');
   db.exec(`CREATE TABLE IF NOT EXISTS ledger_rows (
@@ -45,6 +56,16 @@ export function openLedger(file: string = DEFAULT_PATH): Ledger {
     return r.m ?? null;
   };
 
+  const spendByCategoryStmt = db.prepare(
+    `SELECT category, SUM(amount_cents) AS cents FROM ledger_rows
+     WHERE direction = 'out' AND substr(date, 1, 7) = ? GROUP BY category ORDER BY cents DESC`,
+  );
+  const spendByCategory = (month: string): { category: string; total: number }[] =>
+    (spendByCategoryStmt.all(month) as { category: string; cents: number }[]).map((r) => ({
+      category: r.category,
+      total: r.cents / 100,
+    }));
+
   return {
     insertRows(rows) {
       let inserted = 0;
@@ -61,14 +82,9 @@ export function openLedger(file: string = DEFAULT_PATH): Ledger {
     monthly() {
       const m = latestMonthOf();
       if (!m) return [];
-      const rows = db
-        .prepare(
-          `SELECT category, SUM(amount_cents) AS cents FROM ledger_rows
-           WHERE direction = 'out' AND substr(date, 1, 7) = ? GROUP BY category ORDER BY cents DESC`,
-        )
-        .all(m) as { category: string; cents: number }[];
-      return rows.map((r) => ({ category: r.category, total: r.cents / 100 }));
+      return spendByCategory(m);
     },
+    monthlyFor: spendByCategory,
     reconcile(incomeUsd) {
       const m = latestMonthOf();
       const r = db
