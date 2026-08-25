@@ -13,6 +13,7 @@ describe('migration file discovery', () => {
       '0002_lead_events_whatsapp.sql',
       '0003_leads_created_at_index.sql',
       '0004_meta_ads_real_v1.sql',
+      '0005_auth_foundation.sql',
     ]);
   });
 });

@@ -18,6 +18,8 @@
   "dependencies": {
     "@notionhq/client": "^5.22.0",
     "@slack/web-api": "^7.16.0",
+    "@supabase/ssr": "^0.12.5",
+    "@supabase/supabase-js": "^2.112.4",
     "@types/d3-force": "^3.0.10",
     "ai": "^6.0.208",
     "better-sqlite3": "^11.3.0",
