@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from 'vitest';
+import { beforeAll, describe, expect, test, vi } from 'vitest';
 import { mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,6 +7,18 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 import { ClientsProvider } from '@/components/ClientsProvider';
 
+// /me is the first page that reads next/headers's cookies() — which only
+// works inside a real Next.js request context, not a plain direct function
+// call the way this file invokes every other server page. An empty cookie
+// jar is enough: it makes getSupabaseUser() resolve to "no session" (no
+// network call — there's no token to validate), which requireInternalUser()
+// turns into a caught AuthError(401) that /me's own error branch renders,
+// exactly like a real unauthenticated request. Every other page in this
+// file is unaffected — none of them import next/headers.
+vi.mock('next/headers', () => ({
+  cookies: () => ({ getAll: () => [], get: () => undefined, set: () => {} }),
+}));
+
 // Pages read the DB path at first access, so point it at a fresh seeded temp DB
 // before any page module is imported. FUNNEL_PROVIDER keeps /funnel off the
 // live Attio API in tests.
@@ -14,6 +26,11 @@ beforeAll(() => {
   process.env.FOUNDER_OS_DB = path.join(mkdtempSync(path.join(tmpdir(), 'founder-os-smoke-')), 'test.db');
   process.env.FUNNEL_PROVIDER = 'seed';
   process.env.GBRAIN_BIN = path.join(tmpdir(), 'founder-os-no-gbrain-cli');
+  // /me only — getSupabaseServerClient() validates these are set before it
+  // ever reaches next/headers; dummy, network-unreachable values are fine
+  // since the mocked empty cookie jar above never triggers a real Auth call.
+  process.env.NEXT_PUBLIC_SUPABASE_URL ??= 'https://smoke-test.supabase.co';
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??= 'smoke-test-publishable-key';
 });
 
 type PageEntry = {
@@ -73,6 +90,9 @@ const PAGES: PageEntry[] = [
   { file: 'ai-agents/page.tsx', load: () => import('@/app/ai-agents/page') },
   { file: 'connections/page.tsx', load: () => import('@/app/connections/page') },
   { file: 'results/page.tsx', load: () => import('@/app/results/page') },
+  // First Internal User + Login V1.
+  { file: 'login/page.tsx', load: () => import('@/app/login/page') },
+  { file: 'me/page.tsx', load: () => import('@/app/me/page') },
 ];
 
 function discoverPages(dir: string, base = ''): string[] {

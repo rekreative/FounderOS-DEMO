@@ -13,7 +13,8 @@
     "seed": "tsx scripts/seed.ts",
     "brain:docs": "tsx scripts/generate-brain-docs.ts",
     "db:migrate": "tsx lib/server/migrate.ts",
-    "db:seed": "tsx scripts/seed-backend-v1.ts"
+    "db:seed": "tsx scripts/seed-backend-v1.ts",
+    "db:seed-admin": "tsx scripts/seed-admin.ts"
   },
   "dependencies": {
     "@notionhq/client": "^5.22.0",
