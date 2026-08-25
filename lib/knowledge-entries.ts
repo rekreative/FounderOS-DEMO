@@ -366,15 +366,16 @@ export function searchKnowledgeEntries(entries: KnowledgeEntry[], query: string)
 
 // ===== WRITE =====
 
+/** Structural check only — a client-scoped entry must carry a non-empty
+ * clientId. Does NOT verify the id against any client registry: that used
+ * to be lib/clients.ts's localStorage mirror, which is never seeded by the
+ * live app once client identity moved to canonical PostgreSQL (lib/api/
+ * clients.ts) — checking against it silently broke writes for every real
+ * client created after that cutover. Same fix already shipped for Content;
+ * see assertScopeInvariant in lib/content-items.ts. */
 function assertScopeInvariant(scope: KnowledgeScope, clientId: string | null): void {
-  if (scope === 'client') {
-    if (!clientId) {
-      throw new Error('A client-scoped knowledge entry requires a clientId');
-    }
-    const clientExists = getClients().some((client) => client.id === clientId);
-    if (!clientExists) {
-      throw new Error('Cannot create knowledge entry for a missing client id');
-    }
+  if (scope === 'client' && !clientId) {
+    throw new Error('A client-scoped knowledge entry requires a clientId');
   }
 }
 

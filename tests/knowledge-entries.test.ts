@@ -66,16 +66,31 @@ describe('server-side (no window) behavior', () => {
     expect(getKnowledgeEntries()).toEqual([]);
   });
 
-  it('createKnowledgeEntry rejects a client id that cannot be found (client list is empty without window)', () => {
+  it('createKnowledgeEntry succeeds for any non-empty clientId without a window — no client-registry lookup', () => {
+    // G-Brain Truth V1: client existence is no longer verified against any
+    // client registry (that registry was the obsolete lib/clients.ts
+    // localStorage mirror, which silently broke writes for real PostgreSQL
+    // clients created after the Clients cutover). Only a non-empty clientId
+    // is required — see assertScopeInvariant in lib/knowledge-entries.ts.
+    const created = createKnowledgeEntry({
+      scope: 'client',
+      clientId: 'client-does-not-exist',
+      title: 'Test entry',
+      type: 'decision',
+      source: 'manual',
+    });
+    expect(created.clientId).toBe('client-does-not-exist');
+  });
+
+  it('createKnowledgeEntry rejects scope client with no clientId, even without a window', () => {
     expect(() =>
       createKnowledgeEntry({
         scope: 'client',
-        clientId: 'client-does-not-exist',
-        title: 'Test entry',
+        title: 'No client',
         type: 'decision',
         source: 'manual',
       }),
-    ).toThrow('Cannot create knowledge entry for a missing client id');
+    ).toThrow('A client-scoped knowledge entry requires a clientId');
   });
 
   it('createKnowledgeEntry with scope internal succeeds without a window (no client lookup needed)', () => {
@@ -297,16 +312,40 @@ describe('CRUD + scope invariant (browser-like storage)', () => {
     ).toThrow('A client-scoped knowledge entry requires a clientId');
   });
 
-  it('createKnowledgeEntry rejects scope client with a clientId that does not exist', () => {
-    expect(() =>
-      createKnowledgeEntry({
-        scope: 'client',
-        clientId: 'client-does-not-exist',
-        title: 'Bad client',
-        type: 'decision',
-        source: 'manual',
-      }),
-    ).toThrow('Cannot create knowledge entry for a missing client id');
+  it('createKnowledgeEntry succeeds for a real (non-seed) PostgreSQL-style clientId — the write-bug regression test', () => {
+    // Mirrors a real client created through lib/api/clients.ts /
+    // lib/server/clients-repo.ts's generateClientId() scheme
+    // (`client-<base36 timestamp>-<n>`), which never appears in the
+    // localStorage seed list (client-acme/client-northwind/client-lumen).
+    // Before G-Brain Truth V1 this threw "Cannot create knowledge entry for
+    // a missing client id" for every real client — create, edit, archive,
+    // and restore all shared the same broken invariant (updateKnowledgeEntry
+    // re-runs it whenever the merged scope is 'client').
+    const realClientId = `client-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`;
+
+    const created = createKnowledgeEntry({
+      scope: 'client',
+      clientId: realClientId,
+      title: 'Real client entry',
+      type: 'client_context',
+      source: 'manual',
+    });
+    expect(created.clientId).toBe(realClientId);
+    expect(created.dataSource).toBe('manual');
+    expect(getKnowledgeEntryById(created.id)).not.toBeNull();
+
+    const edited = updateKnowledgeEntry(created.id, { title: 'Real client entry, edited' });
+    expect(edited?.title).toBe('Real client entry, edited');
+
+    const archived = archiveKnowledgeEntry(created.id);
+    expect(archived?.status).toBe('archived');
+
+    const restored = restoreKnowledgeEntry(created.id);
+    expect(restored?.status).toBe('active');
+
+    const realClientEntries = getKnowledgeEntries(realClientId);
+    expect(realClientEntries.some((entry) => entry.id === created.id)).toBe(true);
+    expect(getKnowledgeEntries('client-acme').some((entry) => entry.id === created.id)).toBe(false);
   });
 
   it('createKnowledgeEntry forces clientId to null for scope internal even if one is passed', () => {
@@ -432,5 +471,111 @@ describe('CRUD + scope invariant (browser-like storage)', () => {
     const clients = [{ id: 'client-acme', name: 'Acme Co' }];
     expect(getClientNameForKnowledgeEntry('client-acme', clients)).toBe('Acme Co');
     expect(getClientNameForKnowledgeEntry('client-does-not-exist', clients)).toBe('Cliente desconocido');
+  });
+});
+
+// G-Brain Truth V1 — manual-only-by-default contract. KnowledgeBoard and
+// ClientKnowledgePanel both apply the same `entry.dataSource === 'manual'`
+// filter (a "Mostrar demo" toggle re-includes demo rows in both). That
+// filtering lives in the components, not in lib/knowledge-entries.ts — this
+// suite proves the underlying data contract those components depend on:
+// summarizeKnowledgeEntries computes honestly over whatever set it's given,
+// so a manual-only filter upstream is sufficient to keep demo rows out of
+// every KPI, and toggling it back in is sufficient to bring them back.
+describe('manual-only-by-default contract (dataSource filtering upstream of summarizeKnowledgeEntries)', () => {
+  beforeEach(() => {
+    installBrowserLikeStorage();
+    initializeClientsStoreIfNeeded();
+    initializeKnowledgeStoreIfNeeded();
+  });
+
+  afterEach(() => {
+    uninstallBrowserLikeStorage();
+  });
+
+  it('H/I: default (manual-only) filtering excludes every seeded demo row from the operational set and its KPI summary', () => {
+    createKnowledgeEntry({
+      scope: 'internal',
+      title: 'Manually captured decision',
+      type: 'decision',
+      source: 'manual',
+    });
+
+    const allEntries = getKnowledgeEntries();
+    expect(allEntries.some((entry) => entry.dataSource === 'demo')).toBe(true); // seed data present
+
+    const manualOnly = allEntries.filter((entry) => entry.dataSource === 'manual');
+    expect(manualOnly.length).toBe(1);
+    expect(manualOnly.every((entry) => entry.dataSource === 'manual')).toBe(true);
+
+    const summary = summarizeKnowledgeEntries(manualOnly);
+    expect(summary.activeTotal).toBe(1);
+    expect(summary.internal).toBe(1);
+    expect(summary.client).toBe(0);
+    expect(summary.clientsWithKnowledge).toBe(0);
+  });
+
+  it('J: enabling demo visibility (no filter) includes demo rows in the KPI summary again', () => {
+    const allEntries = getKnowledgeEntries();
+    const summaryWithDemo = summarizeKnowledgeEntries(allEntries);
+    // Matches the seed suite above: 5 internal + 3 client demo entries exist,
+    // so both counts are > 0 as soon as demo rows are back in view.
+    expect(summaryWithDemo.internal).toBeGreaterThan(0);
+    expect(summaryWithDemo.client).toBeGreaterThan(0);
+    expect(summaryWithDemo.activeTotal).toBeGreaterThan(1);
+  });
+
+  it('a client-tab-style manual-only summary excludes that client\'s demo knowledge and reflects only its manual entries', () => {
+    createKnowledgeEntry({
+      scope: 'client',
+      clientId: 'client-acme',
+      title: 'Real manual note for Acme',
+      type: 'client_context',
+      source: 'manual',
+    });
+
+    const acmeEntries = getKnowledgeEntries('client-acme');
+    expect(acmeEntries.some((entry) => entry.dataSource === 'demo')).toBe(true); // Acme has seeded demo knowledge too
+
+    const manualOnlySummary = summarizeKnowledgeEntries(acmeEntries.filter((entry) => entry.dataSource === 'manual'));
+    expect(manualOnlySummary.activeTotal).toBe(1);
+    expect(manualOnlySummary.client).toBe(1);
+
+    // Sanity check: the mixed (pre-Truth-V1) summary would have shown more
+    // than the one manual entry, since Acme's seeded demo entry is also
+    // active/client-scoped.
+    const mixedSummary = summarizeKnowledgeEntries(acmeEntries);
+    expect(mixedSummary.activeTotal).toBeGreaterThan(manualOnlySummary.activeTotal);
+  });
+});
+
+describe('K: search behavior is unchanged — plain substring match, no ranking/fuzzy/semantic behavior', () => {
+  const entries: KnowledgeEntry[] = [
+    {
+      id: 'k-search-1',
+      scope: 'internal',
+      clientId: null,
+      title: 'Meta Ads qualification framework',
+      type: 'strategy',
+      tags: ['leads', 'framework'],
+      summary: 'How we prioritize inbound leads',
+      content: 'Budget, timeline, decision maker.',
+      source: 'analysis',
+      sourceLabel: null,
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      dataSource: 'demo',
+    },
+  ];
+
+  it('does not match on typos, synonyms, or partial semantic overlap — proves no fuzzy/AI layer exists', () => {
+    expect(searchKnowledgeEntries(entries, 'metaads')).toEqual([]); // missing space — substring only
+    expect(searchKnowledgeEntries(entries, 'prospects')).toEqual([]); // synonym of "leads" — no semantic match
+    expect(searchKnowledgeEntries(entries, 'qualifying')).toEqual([]); // stem of "qualification" — no fuzzy match
+  });
+
+  it('matches only an exact case-insensitive substring, same as before', () => {
+    expect(searchKnowledgeEntries(entries, 'qualification').map((e) => e.id)).toEqual(['k-search-1']);
   });
 });

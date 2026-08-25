@@ -66,21 +66,31 @@ export function ClientKnowledgePanel({
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | KnowledgeType>('all');
   const [statusView, setStatusView] = useState<StatusView>('active');
+  // G-Brain Truth V1: operational default is manual-only, same convention as
+  // the global board (components/KnowledgeBoard.tsx) and Content
+  // (components/ClientContentPanel.tsx) — off on every load.
+  const [showDemo, setShowDemo] = useState(false);
 
   const [panelMode, setPanelMode] = useState<'closed' | 'view' | 'edit' | 'create'>('closed');
   const [activeEntry, setActiveEntry] = useState<KnowledgeEntry | null>(null);
   const [draft, setDraft] = useState<DraftKnowledgeEntry>(emptyDraft());
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const summary = useMemo(() => summarizeKnowledgeEntries(entries), [entries]);
+  const visibleEntries = useMemo(
+    () => entries.filter((entry) => showDemo || entry.dataSource === 'manual'),
+    [entries, showDemo],
+  );
+
+  const summary = useMemo(() => summarizeKnowledgeEntries(visibleEntries), [visibleEntries]);
 
   const scopedEntries = useMemo(
     () =>
-      entries.filter((entry) => {
+      visibleEntries.filter((entry) => {
         if (entry.status !== statusView) return false;
         if (typeFilter !== 'all' && entry.type !== typeFilter) return false;
         return true;
       }),
-    [entries, statusView, typeFilter],
+    [visibleEntries, statusView, typeFilter],
   );
 
   const filteredEntries = useMemo(() => searchKnowledgeEntries(scopedEntries, searchQuery), [scopedEntries, searchQuery]);
@@ -88,16 +98,19 @@ export function ClientKnowledgePanel({
   const openCreate = () => {
     setDraft(emptyDraft());
     setActiveEntry(null);
+    setSaveError(null);
     setPanelMode('create');
   };
 
   const openView = (entry: KnowledgeEntry) => {
     setActiveEntry(entry);
+    setSaveError(null);
     setPanelMode('view');
   };
 
   const openEdit = (entry: KnowledgeEntry) => {
     setActiveEntry(entry);
+    setSaveError(null);
     setDraft({
       title: entry.title,
       type: entry.type,
@@ -113,6 +126,7 @@ export function ClientKnowledgePanel({
   const closePanel = () => {
     setPanelMode('closed');
     setActiveEntry(null);
+    setSaveError(null);
     setDraft(emptyDraft());
   };
 
@@ -134,28 +148,42 @@ export function ClientKnowledgePanel({
       sourceLabel: draft.sourceLabel || null,
     };
 
-    if (panelMode === 'edit' && activeEntry) {
-      const updated = updateKnowledgeEntry(activeEntry.id, payload);
-      onKnowledgeChanged();
-      if (updated) openView(updated);
+    try {
+      if (panelMode === 'edit' && activeEntry) {
+        const updated = updateKnowledgeEntry(activeEntry.id, payload);
+        onKnowledgeChanged();
+        if (updated) openView(updated);
+        return;
+      }
+
+      createKnowledgeEntry({ ...payload, dataSource: 'manual' });
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'No se pudo guardar la entrada de conocimiento.');
       return;
     }
 
-    createKnowledgeEntry({ ...payload, dataSource: 'manual' });
     onKnowledgeChanged();
     closePanel();
   };
 
   const handleArchive = (id: string) => {
-    const updated = archiveKnowledgeEntry(id);
-    onKnowledgeChanged();
-    if (updated) openView(updated);
+    try {
+      const updated = archiveKnowledgeEntry(id);
+      onKnowledgeChanged();
+      if (updated) openView(updated);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'No se pudo archivar la entrada.');
+    }
   };
 
   const handleRestore = (id: string) => {
-    const updated = restoreKnowledgeEntry(id);
-    onKnowledgeChanged();
-    if (updated) openView(updated);
+    try {
+      const updated = restoreKnowledgeEntry(id);
+      onKnowledgeChanged();
+      if (updated) openView(updated);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'No se pudo restaurar la entrada.');
+    }
   };
 
   return (
@@ -171,11 +199,17 @@ export function ClientKnowledgePanel({
         </button>
       </div>
 
+      {showDemo && (
+        <div className="mb-2 font-mono text-[9px] uppercase tracking-[0.18em] text-os-warn">
+          Incluye datos de demostración — no todo lo de abajo es conocimiento real
+        </div>
+      )}
+
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
         {[
           { label: 'Activas', value: String(summary.activeTotal) },
           { label: 'Actualizadas (7d)', value: String(summary.recentlyUpdated) },
-          { label: 'Archivadas', value: String(entries.filter((entry) => entry.status === 'archived').length) },
+          { label: 'Archivadas', value: String(visibleEntries.filter((entry) => entry.status === 'archived').length) },
         ].map((tile) => (
           <div key={tile.label} className="border border-os-border bg-os-surface2 px-3 py-2.5">
             <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">{tile.label}</div>
@@ -191,6 +225,10 @@ export function ClientKnowledgePanel({
       ) : (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1.5 border border-os-border px-2 py-1 font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">
+              <input type="checkbox" checked={showDemo} onChange={(event) => setShowDemo(event.target.checked)} />
+              Mostrar demo
+            </label>
             <input
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
@@ -283,6 +321,10 @@ export function ClientKnowledgePanel({
                 cerrar
               </button>
             </div>
+
+            {saveError && (
+              <div className="mb-4 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{saveError}</div>
+            )}
 
             {panelMode === 'view' && activeEntry && (
               <div className="flex flex-col gap-4">

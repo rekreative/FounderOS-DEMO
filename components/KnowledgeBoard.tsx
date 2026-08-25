@@ -153,6 +153,13 @@ export function KnowledgeBoard() {
   const [panelMode, setPanelMode] = useState<'closed' | 'view' | 'edit' | 'create'>('closed');
   const [activeEntry, setActiveEntry] = useState<KnowledgeEntry | null>(null);
   const [draft, setDraft] = useState<DraftKnowledgeEntry>(emptyDraft());
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // G-Brain Truth V1: operational default is manual-only, same convention as
+  // Content (components/ContentBoard.tsx) — seed/demo rows stay in the store
+  // (never deleted) but are excluded from every list and KPI below unless
+  // explicitly opted into. Off on every load.
+  const [showDemo, setShowDemo] = useState(false);
 
   useEffect(() => {
     initializeKnowledgeStoreIfNeeded();
@@ -161,9 +168,14 @@ export function KnowledgeBoard() {
 
   const refresh = () => setEntries(getKnowledgeEntries());
 
+  const visibleEntries = useMemo(
+    () => entries.filter((entry) => showDemo || entry.dataSource === 'manual'),
+    [entries, showDemo],
+  );
+
   const scopedEntries = useMemo(
     () =>
-      entries.filter((entry) => {
+      visibleEntries.filter((entry) => {
         if (entry.status !== statusView) return false;
         if (scopeFilter !== 'all' && entry.scope !== scopeFilter) return false;
         if (scopeFilter === 'client' && clientFilter !== 'all' && entry.clientId !== clientFilter) return false;
@@ -171,29 +183,33 @@ export function KnowledgeBoard() {
         if (tagFilter && !entry.tags.some((tag) => tag.toLowerCase() === tagFilter.toLowerCase())) return false;
         return true;
       }),
-    [entries, statusView, scopeFilter, clientFilter, typeFilter, tagFilter],
+    [visibleEntries, statusView, scopeFilter, clientFilter, typeFilter, tagFilter],
   );
 
   const filteredEntries = useMemo(() => searchKnowledgeEntries(scopedEntries, searchQuery), [scopedEntries, searchQuery]);
 
-  // Coverage strip reflects the whole active store, not the current filters
-  // — it's meant to answer "what do we have overall", independent of what
-  // the user happens to be browsing right now.
-  const summary = useMemo(() => summarizeKnowledgeEntries(entries), [entries]);
+  // Coverage strip reflects the whole active (visible) store, not the
+  // current filters — it's meant to answer "what do we have overall",
+  // independent of what the user happens to be browsing right now. Demo
+  // entries never contribute unless "Mostrar demo" is on.
+  const summary = useMemo(() => summarizeKnowledgeEntries(visibleEntries), [visibleEntries]);
 
   const openCreate = () => {
     setDraft(emptyDraft());
     setActiveEntry(null);
+    setSaveError(null);
     setPanelMode('create');
   };
 
   const openView = (entry: KnowledgeEntry) => {
     setActiveEntry(entry);
+    setSaveError(null);
     setPanelMode('view');
   };
 
   const openEdit = (entry: KnowledgeEntry) => {
     setActiveEntry(entry);
+    setSaveError(null);
     setDraft({
       scope: entry.scope,
       clientId: entry.clientId ?? '',
@@ -211,6 +227,7 @@ export function KnowledgeBoard() {
   const closePanel = () => {
     setPanelMode('closed');
     setActiveEntry(null);
+    setSaveError(null);
     setDraft(emptyDraft());
   };
 
@@ -231,28 +248,42 @@ export function KnowledgeBoard() {
       sourceLabel: draft.sourceLabel || null,
     };
 
-    if (panelMode === 'edit' && activeEntry) {
-      const updated = updateKnowledgeEntry(activeEntry.id, payload);
-      refresh();
-      if (updated) openView(updated);
+    try {
+      if (panelMode === 'edit' && activeEntry) {
+        const updated = updateKnowledgeEntry(activeEntry.id, payload);
+        refresh();
+        if (updated) openView(updated);
+        return;
+      }
+
+      createKnowledgeEntry({ ...payload, dataSource: 'manual' });
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'No se pudo guardar la entrada de conocimiento.');
       return;
     }
 
-    createKnowledgeEntry({ ...payload, dataSource: 'manual' });
     refresh();
     closePanel();
   };
 
   const handleArchive = (id: string) => {
-    const updated = archiveKnowledgeEntry(id);
-    refresh();
-    if (updated) openView(updated);
+    try {
+      const updated = archiveKnowledgeEntry(id);
+      refresh();
+      if (updated) openView(updated);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'No se pudo archivar la entrada.');
+    }
   };
 
   const handleRestore = (id: string) => {
-    const updated = restoreKnowledgeEntry(id);
-    refresh();
-    if (updated) openView(updated);
+    try {
+      const updated = restoreKnowledgeEntry(id);
+      refresh();
+      if (updated) openView(updated);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'No se pudo restaurar la entrada.');
+    }
   };
 
   return (
@@ -281,7 +312,13 @@ export function KnowledgeBoard() {
         />
       </div>
 
-      {/* Coverage strip — honest, cheaply-derived counts only */}
+      {showDemo && (
+        <div className="mb-2 font-mono text-[9px] uppercase tracking-[0.18em] text-os-warn">
+          Incluye datos de demostración — no todo lo de abajo es conocimiento real
+        </div>
+      )}
+
+      {/* Coverage strip — honest, cheaply-derived counts only, manual-only by default */}
       <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {[
           { label: 'Entradas activas', value: String(summary.activeTotal) },
@@ -299,6 +336,11 @@ export function KnowledgeBoard() {
 
       {/* Filters */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-1.5 border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">
+          <input type="checkbox" checked={showDemo} onChange={(event) => setShowDemo(event.target.checked)} />
+          Mostrar demo
+        </label>
+
         <div className="flex items-center gap-2">
           <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Ámbito</label>
           <select
@@ -407,6 +449,10 @@ export function KnowledgeBoard() {
                 cerrar
               </button>
             </div>
+
+            {saveError && (
+              <div className="mb-4 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{saveError}</div>
+            )}
 
             {panelMode === 'view' && activeEntry && (
               <div className="flex flex-col gap-4">
