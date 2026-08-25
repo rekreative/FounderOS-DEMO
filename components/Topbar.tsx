@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import { Bot, Search } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { CONDUCTOR_OPEN_EVENT } from '@/components/ConductorPanel';
+import { LogoutButton } from '@/components/LogoutButton';
 
 const SEGMENT_LABELS: Record<string, string> = {
   '': 'inicio',
@@ -60,6 +61,7 @@ export function Topbar() {
         >
           <Bot className="h-3.5 w-3.5" />
         </button>
+        <LogoutButton />
       </div>
     </div>
   );

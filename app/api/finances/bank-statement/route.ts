@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { execFile } from 'node:child_process';
 import { parseBankStatementSummary } from '@/lib/bank-statements';
 import { openBankStore } from '@/lib/bank';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -32,6 +33,9 @@ function pdfToText(buf: Buffer): Promise<string> {
 /** Accept a bank-statement PDF, extract its summary (income/outflow per business
     per month), and upsert it into the bank store. Idempotent by account+month. */
 export async function POST(req: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const ctype = req.headers.get('content-type') ?? '';
   let buf: Buffer | null = null;
   try {

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { LeadNotFoundError, appendCommercialEvent, type CommercialEventType } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { ManualCommercialEventBodySchema } from '@/lib/server/schemas';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +24,9 @@ const DEFAULT_SUMMARY: Record<CommercialEventType, string> = {
  * POST /api/leads/[id]/events routes this mirrors.
  */
 export async function POST(request: Request, { params }: { params: { id: string } }): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = ManualCommercialEventBodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return jsonError(400, 'invalid request body', { issues: parsed.error.flatten() });
 

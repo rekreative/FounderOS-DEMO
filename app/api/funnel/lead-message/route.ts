@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { gatherCommsFeed } from '@/lib/comms-feed';
 import { lastMessageFor } from '@/lib/funnel-contact';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +14,9 @@ const FEED_BUDGET_MS = 4000;
  * `unavailable: true` = the comms feed itself couldn't answer in time.
  */
 export async function GET(request: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const url = new URL(request.url);
   const name = url.searchParams.get('name')?.trim();
   const email = url.searchParams.get('email')?.trim() || null;

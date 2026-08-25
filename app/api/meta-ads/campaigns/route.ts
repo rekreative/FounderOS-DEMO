@@ -9,6 +9,7 @@ import {
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { MetaAdsCampaignsQuerySchema } from '@/lib/server/schemas';
 import { resolveResultsPeriod } from '@/lib/server/results-time';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,9 @@ export const dynamic = 'force-dynamic';
  * even when `summary` is null in both cases.
  */
 export async function GET(request: Request): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const url = new URL(request.url);
   const parsed = MetaAdsCampaignsQuerySchema.safeParse({
     clientId: url.searchParams.get('clientId') ?? undefined,

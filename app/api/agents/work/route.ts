@@ -3,11 +3,15 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { getDb } from '@/lib/data';
 import { isValidCron } from '@/lib/cron';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 /** Tasks + cron jobs for one agent (or all agents when no id given). */
 export async function GET(request: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const agentId = new URL(request.url).searchParams.get('agentId');
   const db = getDb();
   return NextResponse.json({
@@ -27,6 +31,9 @@ const CreateSchema = z.discriminatedUnion('kind', [
 ]);
 
 export async function POST(request: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = CreateSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   const db = getDb();
@@ -52,6 +59,9 @@ const PatchSchema = z.discriminatedUnion('kind', [
 ]);
 
 export async function PATCH(request: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = PatchSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   const db = getDb();
@@ -63,6 +73,9 @@ export async function PATCH(request: Request) {
 const DeleteSchema = z.object({ kind: z.enum(['task', 'cron']), id: z.string().min(1) });
 
 export async function DELETE(request: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = DeleteSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   const db = getDb();

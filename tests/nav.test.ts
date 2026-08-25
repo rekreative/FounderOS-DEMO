@@ -58,8 +58,11 @@ describe('shared nav config', () => {
   });
 
   test('every digit target is a real page route', () => {
+    // Session Refresh + Internal Route Protection V1 moved every internal
+    // page under app/(internal)/ — a route group, invisible to the URLs
+    // this test checks, but real on disk.
     for (const href of DIGIT_VIEWS) {
-      const rel = href === '/' ? 'app/page.tsx' : `app/${href.replace(/^\//, '')}/page.tsx`;
+      const rel = href === '/' ? 'app/(internal)/page.tsx' : `app/(internal)/${href.replace(/^\//, '')}/page.tsx`;
       expect(existsSync(path.join(process.cwd(), rel)), `${href} should have a page.tsx`).toBe(true);
     }
   });
@@ -71,7 +74,10 @@ describe('shared nav config', () => {
   });
 
   test('the command palette source builds its nav commands from REKREATIVE_PRIMARY, not a private list', () => {
-    const src = readFileSync(path.join(process.cwd(), 'app', 'layout.tsx'), 'utf8');
+    // Moved from app/layout.tsx into app/(internal)/layout.tsx — the root
+    // layout is now bare (no CommandPalette, no internal-shell providers);
+    // see the Session Refresh + Internal Route Protection V1 milestone.
+    const src = readFileSync(path.join(process.cwd(), 'app', '(internal)', 'layout.tsx'), 'utf8');
     expect(src).toMatch(/REKREATIVE_PRIMARY/);
     for (const href of LEGACY_FOUNDEROS_ROUTES) {
       expect(src, `${href} must not be a hard-coded command href`).not.toMatch(new RegExp(`href: '${href}'`));

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { sendSlackMessage } from '@/lib/connectors/slack';
 import { sendEmailReply } from '@/lib/connectors/email';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +24,9 @@ const ReplySchema = z.discriminatedUnion('source', [
 ]);
 
 export async function POST(request: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = ReplySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });

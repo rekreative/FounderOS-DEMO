@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getDb } from '@/lib/data';
 import { LeadMagnetStatusSchema } from '@/lib/schemas';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,10 +39,16 @@ function slugify(name: string): string {
 }
 
 export async function GET() {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   return NextResponse.json({ leadMagnets: getDb().leadMagnets.all() });
 }
 
 export async function POST(req: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = CreateSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });

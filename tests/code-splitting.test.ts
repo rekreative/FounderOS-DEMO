@@ -34,7 +34,7 @@ describe('code-splitting the heavy graphs', () => {
     expect(lazy).toMatch(/dynamic\(\s*\(\)\s*=>\s*import\('@\/components\/AudienceConsistency'\)/);
     expect(lazy).toMatch(/ssr:\s*false/);
     expect(lazy).toContain('rounded-lg-t border border-os-border bg-os-surface'); // card-shaped placeholder
-    const page = read('app/social/page.tsx');
+    const page = read('app/(internal)/social/page.tsx');
     expect(page).toContain('AudienceConsistencyLazy');
     expect(page).not.toMatch(/from '@\/components\/AudienceConsistency';/);
   });
@@ -50,7 +50,7 @@ describe('code-splitting the heavy graphs', () => {
     // aspect-matched skeletons: radial svg is 1100/680, the orbit space 1100/460
     expect(lazy).toContain('1100 / 680');
     expect(lazy).toContain('1100 / 460');
-    const page = read('app/funnel/page.tsx');
+    const page = read('app/(internal)/funnel/page.tsx');
     expect(page).toContain('FunnelRadialLazy');
     expect(page).toContain('FunnelSpaceLazy');
     expect(page).not.toMatch(/from '@\/components\/FunnelRadial';/);

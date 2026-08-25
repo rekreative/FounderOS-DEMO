@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getResults } from '@/lib/server/results-repo';
 import { unexpectedError, jsonError } from '@/lib/server/http';
 import { ResultsQuerySchema } from '@/lib/server/schemas';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,9 @@ export const dynamic = 'force-dynamic';
  * there is no field here a client could mistake for live Meta Ads data.
  */
 export async function GET(request: Request): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const url = new URL(request.url);
   const parsed = ResultsQuerySchema.safeParse({
     clientId: url.searchParams.get('clientId') ?? undefined,

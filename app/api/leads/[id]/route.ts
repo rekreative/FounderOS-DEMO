@@ -2,10 +2,14 @@ import { NextResponse } from 'next/server';
 import { getLeadById, updateLead } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { UpdateLeadBodySchema } from '@/lib/server/schemas';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(_request: Request, { params }: { params: { id: string } }): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   try {
     const lead = await getLeadById(params.id);
     if (!lead) return jsonError(404, 'lead not found');
@@ -22,6 +26,9 @@ export async function GET(_request: Request, { params }: { params: { id: string 
  * the matching stage_changed event.
  */
 export async function PATCH(request: Request, { params }: { params: { id: string } }): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = UpdateLeadBodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return jsonError(400, 'invalid request body', { issues: parsed.error.flatten() });
 

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClientMetaAccount, listClientMetaAccounts } from '@/lib/server/meta-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { CreateClientMetaAccountBodySchema, ListClientMetaAccountsQuerySchema } from '@/lib/server/schemas';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,9 @@ function isUniqueViolation(error: unknown): boolean {
  * lib/server/meta-repo.ts's module doc comment).
  */
 export async function GET(request: Request): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const url = new URL(request.url);
   const parsed = ListClientMetaAccountsQuerySchema.safeParse({ clientId: url.searchParams.get('clientId') ?? undefined });
   if (!parsed.success) return jsonError(400, 'invalid query parameters', { issues: parsed.error.flatten() });
@@ -34,6 +38,9 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = CreateClientMetaAccountBodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return jsonError(400, 'invalid request body', { issues: parsed.error.flatten() });
 

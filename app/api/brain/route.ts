@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getBrainProvider } from '@/lib/brain';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +8,9 @@ export const dynamic = 'force-dynamic';
 // Next requires the first param type be exactly `Request | NextRequest` — an
 // optional/defaulted param widens it to `Request | undefined` and fails the build.
 export async function GET(request: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const provider = getBrainProvider();
   const q = new URL(request.url).searchParams.get('q')?.trim();
   if (q) {

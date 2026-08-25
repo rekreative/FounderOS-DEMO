@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { LeadValidationError, createLead, listLeads } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { CreateLeadBodySchema, ListLeadsQuerySchema } from '@/lib/server/schemas';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,9 @@ export const dynamic = 'force-dynamic';
  * memory even if the response later narrows them).
  */
 export async function GET(request: Request): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const url = new URL(request.url);
   const parsed = ListLeadsQuerySchema.safeParse({
     clientId: url.searchParams.get('clientId') ?? undefined,
@@ -30,6 +34,9 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = CreateLeadBodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return jsonError(400, 'invalid request body', { issues: parsed.error.flatten() });
 

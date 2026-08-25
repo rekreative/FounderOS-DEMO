@@ -9,6 +9,10 @@ vi.mock('@/lib/server/profiles-repo', () => ({
   getProfileRole: (...args: unknown[]) => getProfileRole(...args),
   hasClientAccess: (...args: unknown[]) => hasClientAccess(...args),
 }));
+// This file tests lib/server/auth.ts itself — defeat the global "always
+// internal" test default (tests/setup.ts) so the REAL module runs here,
+// against the mocked lower-level dependencies above.
+vi.unmock('@/lib/server/auth');
 
 const { AuthError } = await import('@/lib/server/auth-errors');
 const { requireUser, requireInternalUser, requireClientAccess } = await import('@/lib/server/auth');

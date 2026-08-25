@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getClientOpsSnapshot } from '@/lib/server/ops-status';
 import { unexpectedError } from '@/lib/server/http';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,6 +16,9 @@ export const dynamic = 'force-dynamic';
  * returns secrets, same contract as GET /api/ops/status.
  */
 export async function GET(_request: Request, { params }: { params: { clientId: string } }): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   try {
     const snapshot = await getClientOpsSnapshot(params.clientId);
     return NextResponse.json(snapshot);

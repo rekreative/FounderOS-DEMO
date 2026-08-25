@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { screenContextFor, screenTitleFor } from '@/lib/screen-context';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs'; // better-sqlite3 is native — keep off the edge runtime
@@ -11,6 +12,9 @@ const CONTEXT_BUDGET_MS = 2500;
 
 /** What the Conductor panel tells the agent about the screen it's docked on. */
 export async function GET(req: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const path = new URL(req.url).searchParams.get('path') ?? '/';
   const fallback = new Promise<{ title: string; context: string }>((resolve) =>
     setTimeout(() => resolve({ title: screenTitleFor(path), context: `${screenTitleFor(path)} view of Founder OS.` }), CONTEXT_BUDGET_MS),

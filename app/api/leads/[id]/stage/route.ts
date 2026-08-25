@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { setLeadStage } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { StageChangeBodySchema } from '@/lib/server/schemas';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +10,9 @@ export const dynamic = 'force-dynamic';
  *  stage, because it's the only path that atomically appends the matching
  *  stage_changed event too (see lib/server/leads-repo.ts's setLeadStage). */
 export async function POST(request: Request, { params }: { params: { id: string } }): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = StageChangeBodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return jsonError(400, 'invalid request body', { issues: parsed.error.flatten() });
 

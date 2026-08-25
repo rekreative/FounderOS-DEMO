@@ -2,11 +2,15 @@ import { NextResponse } from 'next/server';
 import { LeadNotFoundError, appendLeadEvent, getLeadById, listLeadEvents } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { AppendManualEventBodySchema } from '@/lib/server/schemas';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 /** GET → the ordered timeline (occurred_at, then created_at, then id). */
 export async function GET(_request: Request, { params }: { params: { id: string } }): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   try {
     const lead = await getLeadById(params.id);
     if (!lead) return jsonError(404, 'lead not found');
@@ -28,6 +32,9 @@ export async function GET(_request: Request, { params }: { params: { id: string 
  * through this one.
  */
 export async function POST(request: Request, { params }: { params: { id: string } }): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = AppendManualEventBodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return jsonError(400, 'invalid request body', { issues: parsed.error.flatten() });
 

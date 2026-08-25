@@ -2,10 +2,14 @@ import { NextResponse } from 'next/server';
 import { deleteClient, getClientById, updateClient } from '@/lib/server/clients-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { UpdateClientBodySchema } from '@/lib/server/schemas';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(_request: Request, { params }: { params: { id: string } }): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   try {
     const client = await getClientById(params.id);
     if (!client) return jsonError(404, 'client not found');
@@ -16,6 +20,9 @@ export async function GET(_request: Request, { params }: { params: { id: string 
 }
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = UpdateClientBodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return jsonError(400, 'invalid request body', { issues: parsed.error.flatten() });
 
@@ -35,6 +42,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
  * the right status code.
  */
 export async function DELETE(_request: Request, { params }: { params: { id: string } }): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   try {
     const result = await deleteClient(params.id);
     if (result.outcome === 'not_found') return jsonError(404, 'client not found');

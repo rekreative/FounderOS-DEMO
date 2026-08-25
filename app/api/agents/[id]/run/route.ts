@@ -2,10 +2,14 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/data';
 import { createRuntime } from '@/lib/agents/runtime';
 import { realAgents } from '@/lib/agents/real';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const runtime = createRuntime(getDb(), realAgents);
   try {
     const run = await runtime.run(params.id);

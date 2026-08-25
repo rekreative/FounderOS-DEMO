@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getOpsSnapshot } from '@/lib/server/ops-status';
 import { unexpectedError } from '@/lib/server/http';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,9 @@ export const dynamic = 'force-dynamic';
  * lead/event-derived text.
  */
 export async function GET(): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   try {
     const snapshot = await getOpsSnapshot();
     return NextResponse.json(snapshot);

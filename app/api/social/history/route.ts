@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { zernioRecentPosts } from '@/lib/connectors/zernio';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +8,9 @@ export const dynamic = 'force-dynamic';
     Distinct from /api/social/posts, which is the outgoing publish queue.
     `?limit=` caps the count. */
 export async function GET(req: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const limit = Number(new URL(req.url).searchParams.get('limit')) || 6;
   const posts = await zernioRecentPosts(Math.min(Math.max(limit, 1), 24));
   return NextResponse.json({ posts });

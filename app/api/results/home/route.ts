@@ -11,6 +11,7 @@ import {
 } from '@/lib/server/results-repo';
 import { unexpectedError, jsonError } from '@/lib/server/http';
 import { ResultsHomeQuerySchema } from '@/lib/server/schemas';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,9 @@ const DEFAULT_VALUE_WINDOW_DAYS = 7;
  * two HTTP shapes), so counting rules can never drift between the two pages.
  */
 export async function GET(request: Request): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const url = new URL(request.url);
   const parsed = ResultsHomeQuerySchema.safeParse({
     limit: url.searchParams.get('limit') ?? undefined,

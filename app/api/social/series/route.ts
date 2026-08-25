@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/data';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 import {
   audienceSeries,
   dmSeries,
@@ -17,6 +18,9 @@ export const dynamic = 'force-dynamic';
  * Growth per range is derived client-side from these points.
  */
 export async function GET(request: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const metric = new URL(request.url).searchParams.get('metric');
   const db = getDb();
   syncFromZernioConfig(db);

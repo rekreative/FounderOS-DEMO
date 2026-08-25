@@ -5,10 +5,14 @@ import { attioFunnelJourneys } from '@/lib/funnel-live';
 import { ghlFunnelJourneys } from '@/lib/funnel-ghl';
 import { mergeTrakyoTouches, trakyoTouches } from '@/lib/funnel-trakyo';
 import { FunnelVentureSchema, type FunnelVenture } from '@/lib/schemas';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const raw = new URL(req.url).searchParams.get('venture');
   let venture: FunnelVenture | undefined;
   if (raw !== null) {

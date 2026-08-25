@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { parseStatementCsv, categorize, type LedgerRow } from '@/lib/statements';
 import { openLedger } from '@/lib/ledger';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,6 +9,9 @@ export const dynamic = 'force-dynamic';
     text/csv body), parse + categorize it, persist to the separate ledger store,
     and report what landed. Non-CSV / unparseable → 400, never a silent success. */
 export async function POST(req: Request) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const ctype = req.headers.get('content-type') ?? '';
   let text: string | null = null;
   try {

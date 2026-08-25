@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { updateClientMetaAccount } from '@/lib/server/meta-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { UpdateClientMetaAccountBodySchema } from '@/lib/server/schemas';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +10,9 @@ export const dynamic = 'force-dynamic';
  *  doc comment. To re-map a client to a different ad account: PATCH the old
  *  mapping to `active: false`, then POST a new one. */
 export async function PATCH(request: Request, { params }: { params: { id: string } }): Promise<Response> {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const parsed = UpdateClientMetaAccountBodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return jsonError(400, 'invalid request body', { issues: parsed.error.flatten() });
 

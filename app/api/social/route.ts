@@ -10,10 +10,14 @@ import {
   totalDms,
 } from '@/lib/social';
 import { buildEmailList } from '@/lib/email-list';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   const db = getDb();
   // Every read captures today's follower counts from the Zernio config, so
   // growth history accrues for real just by using the dashboard.

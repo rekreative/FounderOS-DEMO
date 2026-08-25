@@ -3,11 +3,15 @@ import { getDb } from '@/lib/data';
 import { realAgents } from '@/lib/agents/real';
 import { chatWithAgent } from '@/lib/agents/chat';
 import { routeConductorMessage } from '@/lib/agents/conductor';
+import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs'; // better-sqlite3 is native — keep off the edge runtime
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const auth = await requireInternalUserOrResponse();
+  if ('response' in auth) return auth.response;
+
   let message = '';
   let screenContext: string | undefined;
   try {
