@@ -54,9 +54,19 @@ larger architectural change explicitly out of scope for this milestone.
 - **Postgres**: `lib/server/db.ts`'s `pg.Pool` (max 10 connections),
   singleton-anchored on `globalThis` to survive Next.js dev hot-reload. In
   production, point `DATABASE_URL` at Supabase's **Session Pooler**
-  connection string with `sslmode=require` — see `.env.example` for the
-  exact shape. `lib/server/db.ts` issues no named prepared statements, so
-  transaction-mode pgbouncer is also safe if ever needed.
+  connection string — see `.env.example` for the exact shape. `lib/server/db.ts`
+  issues no named prepared statements, so transaction-mode pgbouncer is also
+  safe if ever needed.
+- **TLS (Supabase TLS V1)**: production sets `SUPABASE_CA_PEM` (the public
+  Supabase Root 2021 CA cert — not a secret) so `lib/server/db.ts` passes an
+  explicit `ssl: { ca, rejectUnauthorized: true }` to the pool, verifying the
+  Session Pooler's certificate chain against Supabase's real CA rather than
+  either trusting nothing or skipping verification. Production's
+  `DATABASE_URL` must NOT carry `sslmode`/`uselibpqcompat` — pg-connection-string
+  re-parses the connection string and merges it in after this explicit `ssl`
+  config, so those query params would silently override it. When
+  `SUPABASE_CA_PEM` is unset (local dev), `ssl` is omitted entirely and
+  behavior is unchanged from before.
 - **Migrations**: manual only. `npm run db:migrate` runs
   `lib/server/migrate.ts`, which is guarded so importing it never runs
   anything — nothing in this app runs migrations automatically on boot. Run

@@ -23,6 +23,27 @@ types.setTypeParser(PG_DATE_OID, (value: string) => value);
 
 const globalForPg = globalThis as unknown as { __rekreativePgPool?: Pool };
 
+/**
+ * Explicit TLS for the Supabase Session Pooler (Supabase TLS V1). Only used
+ * when SUPABASE_CA_PEM (the public Supabase Root CA cert — not a secret) is
+ * set; when it's absent, `ssl` is omitted entirely so pg-connection-string's
+ * own parsing of DATABASE_URL's sslmode (local dev, or any deployment that
+ * hasn't opted in yet) keeps working exactly as before.
+ *
+ * Passing an explicit `ssl` object here only takes effect because
+ * production's DATABASE_URL has sslmode/uselibpqcompat deliberately
+ * stripped out: `new Pool({ connectionString, ssl })`'s `connectionString`
+ * is re-parsed and merged in AFTER this config
+ * (pg/lib/connection-parameters.js), so any sslmode/sslcert/sslkey/
+ * sslrootcert left in the URL would silently overwrite `ssl` here. Never
+ * reintroduce those query params alongside SUPABASE_CA_PEM.
+ */
+function getSslConfig(): { ca: string; rejectUnauthorized: true } | undefined {
+  const ca = process.env.SUPABASE_CA_PEM;
+  if (!ca) return undefined;
+  return { ca, rejectUnauthorized: true };
+}
+
 function createPool(): Pool {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
@@ -31,6 +52,7 @@ function createPool(): Pool {
         '(see .env.example for the exact connection string shape).',
     );
   }
+  const ssl = getSslConfig();
   return new Pool({
     connectionString,
     // Small, sensible pool for local dev / a single Next.js server process —
@@ -39,6 +61,7 @@ function createPool(): Pool {
     max: 10,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
+    ...(ssl ? { ssl } : {}),
   });
 }
 
