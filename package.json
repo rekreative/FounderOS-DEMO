@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev -p 4100",
     "build": "next build",
-    "start": "next start -p 4100",
+    "start": "node scripts/start-standalone.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

@@ -164,3 +164,45 @@ describe('M2M bypasses the legacy FOUNDER_OS_ACCESS_TOKEN gate too — the criti
     expect(refreshMiddlewareSession).not.toHaveBeenCalled(); // never got past the legacy gate
   });
 });
+
+describe('PUBLIC HEALTH CHECK — /api/health, exact match only, never blocked by any layer', () => {
+  it('unauthenticated /api/health passes through — no redirect, no challenge, Supabase never invoked', async () => {
+    mockSession(null);
+    const res = await middleware(req('/api/health'));
+    expect(res.headers.get('location')).toBeNull();
+    expect(res.status).not.toBe(401);
+    expect(refreshMiddlewareSession).not.toHaveBeenCalled();
+  });
+
+  describe('with FOUNDER_OS_ACCESS_TOKEN configured and no cookie', () => {
+    const originalToken = process.env.FOUNDER_OS_ACCESS_TOKEN;
+
+    beforeEach(() => {
+      process.env.FOUNDER_OS_ACCESS_TOKEN = 'configured-deployment-secret';
+    });
+
+    afterEach(() => {
+      if (originalToken === undefined) delete process.env.FOUNDER_OS_ACCESS_TOKEN;
+      else process.env.FOUNDER_OS_ACCESS_TOKEN = originalToken;
+    });
+
+    it('/api/health still passes through — never the legacy challenge page', async () => {
+      const res = await middleware(req('/api/health'));
+      expect(res.status).not.toBe(401);
+      expect(res.headers.get('content-type')).not.toBe('text/html; charset=utf-8');
+      expect(refreshMiddlewareSession).not.toHaveBeenCalled();
+    });
+  });
+
+  it('a near-miss path does not become public — /api/health/foo still goes through the Supabase perimeter', async () => {
+    mockSession(null);
+    await middleware(req('/api/health/foo'));
+    expect(refreshMiddlewareSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('a near-miss path does not become public — /api/healthcheck still goes through the Supabase perimeter', async () => {
+    mockSession(null);
+    await middleware(req('/api/healthcheck'));
+    expect(refreshMiddlewareSession).toHaveBeenCalledTimes(1);
+  });
+});

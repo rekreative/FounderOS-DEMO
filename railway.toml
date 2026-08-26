@@ -1,0 +1,11 @@
+# Railway config-as-code — repository preparation only. No account/project
+# IDs, no domain, no secrets. A persistent volume mounted over `data/` (for
+# the SQLite files) must still be configured manually in the Railway UI —
+# see docs/deployment.md; Railway volumes aren't expressible here.
+
+[build]
+buildCommand = "npm run build"
+
+[deploy]
+startCommand = "npm run start"
+healthcheckPath = "/api/health"

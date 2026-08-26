@@ -87,7 +87,7 @@ describe('GET /api/webhooks/manychat', () => {
     const body = await res.json();
     expect(body).not.toHaveProperty('secured');
     expect(body).toMatchObject({ ok: true, endpoint: 'manychat-webhook' });
-    expect(typeof body.stored).toBe('number');
+    expect(body).not.toHaveProperty('stored');
     delete process.env.MANYCHAT_WEBHOOK_SECRET;
   });
 });

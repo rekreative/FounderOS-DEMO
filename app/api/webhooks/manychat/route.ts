@@ -45,11 +45,12 @@ export async function POST(request: Request): Promise<Response> {
   return NextResponse.json({ ok: true, id: message.id, subscriberId: message.subscriberId });
 }
 
-/** Lightweight health check: how many DMs are stored. */
+/**
+ * Lightweight liveness ping for this route only — not the deployment health
+ * check (see /api/health for that). Unauthenticated by design (ManyChat's
+ * own dashboard may probe it), so it returns no counts or other stored-data
+ * detail, only that the route is reachable.
+ */
 export async function GET(): Promise<Response> {
-  return NextResponse.json({
-    ok: true,
-    endpoint: 'manychat-webhook',
-    stored: getDb().social.dmMessages('instagram').length,
-  });
+  return NextResponse.json({ ok: true, endpoint: 'manychat-webhook' });
 }

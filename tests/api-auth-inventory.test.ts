@@ -60,6 +60,15 @@ const TENANT_READ_ROUTES: ReadonlySet<string> = new Set([
   '/api/ops/status/client/[clientId]',
 ]);
 
+/**
+ * Deployment health check(s) — genuinely public, no api-auth guard, and
+ * deliberately NOT M2M: M2M_PATHS (lib/server/m2m-routes.ts) is reserved for
+ * bearer/shared-secret-authenticated integrations, whereas a health probe
+ * has no credential at all. See app/api/health/route.ts and
+ * middleware.ts's PUBLIC_HEALTH_PATH exception.
+ */
+const PUBLIC_UNAUTHENTICATED_ROUTES: ReadonlySet<string> = new Set(['/api/health']);
+
 function discoverRouteFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -118,8 +127,11 @@ describe('every internal-human API route method is wired to the correct api-auth
     expect(routeFiles.length).toBeGreaterThan(M2M_PATHS.size);
   });
 
-  const internalRoutes = routeFiles.filter((f) => !M2M_PATHS.has(toRoutePath(f)));
+  const internalRoutes = routeFiles.filter(
+    (f) => !M2M_PATHS.has(toRoutePath(f)) && !PUBLIC_UNAUTHENTICATED_ROUTES.has(toRoutePath(f)),
+  );
   const m2mRoutes = routeFiles.filter((f) => M2M_PATHS.has(toRoutePath(f)));
+  const publicRoutes = routeFiles.filter((f) => PUBLIC_UNAUTHENTICATED_ROUTES.has(toRoutePath(f)));
 
   it(`found ${m2mRoutes.length} of the ${M2M_PATHS.size} declared M2M routes on disk — catches a renamed/moved/deleted M2M route`, () => {
     expect(m2mRoutes.length).toBe(M2M_PATHS.size);
@@ -175,6 +187,22 @@ describe('every internal-human API route method is wired to the correct api-auth
         importsAnyApiAuthGuard(source),
         `${toRoutePath(file)} (${path.relative(process.cwd(), file)}) is classified as M2M but imports an api-auth guard — ` +
           'either it is no longer M2M and must be removed from lib/server/m2m-routes.ts, or this guard was added by mistake',
+      ).toBe(false);
+    },
+  );
+
+  it(`found ${publicRoutes.length} of the ${PUBLIC_UNAUTHENTICATED_ROUTES.size} declared public unauthenticated routes on disk — catches a renamed/moved/deleted health route`, () => {
+    expect(publicRoutes.length).toBe(PUBLIC_UNAUTHENTICATED_ROUTES.size);
+  });
+
+  it.each(publicRoutes.map((f) => [toRoutePath(f), f] as const))(
+    'public route %s does NOT import any api-auth guard — it must remain genuinely unauthenticated',
+    (_routePath, file) => {
+      const source = fs.readFileSync(file, 'utf8');
+      expect(
+        importsAnyApiAuthGuard(source),
+        `${toRoutePath(file)} (${path.relative(process.cwd(), file)}) is classified as a public unauthenticated route but imports an api-auth guard — ` +
+          'either it needs real auth and must be removed from PUBLIC_UNAUTHENTICATED_ROUTES, or this guard was added by mistake',
       ).toBe(false);
     },
   );
