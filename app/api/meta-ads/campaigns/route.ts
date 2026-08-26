@@ -9,7 +9,7 @@ import {
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { MetaAdsCampaignsQuerySchema } from '@/lib/server/schemas';
 import { resolveResultsPeriod } from '@/lib/server/results-time';
-import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { requireClientAccessOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +20,9 @@ export const dynamic = 'force-dynamic';
  *
  * The real PostgreSQL read side of Meta Ads Real V1 — global (no clientId)
  * and client-scoped (ClientMetaAdsPanel) both call this one endpoint.
+ * Tenant-aware: internal may omit clientId for the global/byClient view; a
+ * client-role caller must pass a clientId it holds a grant for — omitting
+ * it is rejected, never falls through to the global byClient breakdown.
  * Reuses lib/server/results-time.ts's period resolver so "this month" means
  * the exact same Madrid-anchored window Results uses. Every number is real
  * or explicitly null — no demo/localStorage MetaCampaign data reaches this
@@ -28,9 +31,6 @@ export const dynamic = 'force-dynamic';
  * even when `summary` is null in both cases.
  */
 export async function GET(request: Request): Promise<Response> {
-  const auth = await requireInternalUserOrResponse();
-  if ('response' in auth) return auth.response;
-
   const url = new URL(request.url);
   const parsed = MetaAdsCampaignsQuerySchema.safeParse({
     clientId: url.searchParams.get('clientId') ?? undefined,
@@ -39,6 +39,9 @@ export async function GET(request: Request): Promise<Response> {
     end: url.searchParams.get('end') ?? undefined,
   });
   if (!parsed.success) return jsonError(400, 'invalid query parameters', { issues: parsed.error.flatten() });
+
+  const auth = await requireClientAccessOrResponse(parsed.data.clientId);
+  if ('response' in auth) return auth.response;
 
   const { clientId, preset, start, end } = parsed.data;
   const period = resolveResultsPeriod(preset ?? 'all', start && end ? { start, end } : undefined);

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClientMetaAccount, listClientMetaAccounts } from '@/lib/server/meta-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { CreateClientMetaAccountBodySchema, ListClientMetaAccountsQuerySchema } from '@/lib/server/schemas';
-import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { requireClientAccessOrResponse, requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,14 +20,18 @@ function isUniqueViolation(error: unknown): boolean {
  * a new client without direct SQL: create/list/update. No DELETE — a mapping
  * is retired via `active: false` (PATCH), preserving history (see
  * lib/server/meta-repo.ts's module doc comment).
+ *
+ * GET is tenant-aware: internal may omit clientId to list every mapping; a
+ * client-role caller must pass a clientId it holds a grant for — omitting
+ * it is rejected, never falls through to every client's account mappings.
  */
 export async function GET(request: Request): Promise<Response> {
-  const auth = await requireInternalUserOrResponse();
-  if ('response' in auth) return auth.response;
-
   const url = new URL(request.url);
   const parsed = ListClientMetaAccountsQuerySchema.safeParse({ clientId: url.searchParams.get('clientId') ?? undefined });
   if (!parsed.success) return jsonError(400, 'invalid query parameters', { issues: parsed.error.flatten() });
+
+  const auth = await requireClientAccessOrResponse(parsed.data.clientId);
+  if ('response' in auth) return auth.response;
 
   try {
     const accounts = await listClientMetaAccounts(parsed.data.clientId);

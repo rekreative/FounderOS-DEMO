@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { LeadValidationError, createLead, listLeads } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { CreateLeadBodySchema, ListLeadsQuerySchema } from '@/lib/server/schemas';
-import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { requireClientAccessOrResponse, requireInternalUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,20 +10,23 @@ export const dynamic = 'force-dynamic';
  * GET /api/leads
  * GET /api/leads?clientId=client-acme
  * GET /api/leads?scope=internal | client
- * Filters are applied in SQL (lib/server/leads-repo.ts's listLeads) — never
- * "fetch everything, filter in JS" (that path leaks other clients' rows into
- * memory even if the response later narrows them).
+ * Tenant-aware: internal gets every clientId (or none, for global); a
+ * client-role caller must pass a clientId it holds a grant for — omitting
+ * it is rejected, never falls through to every client's leads. Filters are
+ * applied in SQL (lib/server/leads-repo.ts's listLeads) — never "fetch
+ * everything, filter in JS" (that path leaks other clients' rows into memory
+ * even if the response later narrows them).
  */
 export async function GET(request: Request): Promise<Response> {
-  const auth = await requireInternalUserOrResponse();
-  if ('response' in auth) return auth.response;
-
   const url = new URL(request.url);
   const parsed = ListLeadsQuerySchema.safeParse({
     clientId: url.searchParams.get('clientId') ?? undefined,
     scope: url.searchParams.get('scope') ?? undefined,
   });
   if (!parsed.success) return jsonError(400, 'invalid query parameters', { issues: parsed.error.flatten() });
+
+  const auth = await requireClientAccessOrResponse(parsed.data.clientId);
+  if ('response' in auth) return auth.response;
 
   try {
     const leads = await listLeads(parsed.data);

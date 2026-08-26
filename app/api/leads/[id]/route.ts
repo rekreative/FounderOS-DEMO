@@ -2,17 +2,24 @@ import { NextResponse } from 'next/server';
 import { getLeadById, updateLead } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { UpdateLeadBodySchema } from '@/lib/server/schemas';
-import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { canAccessClientScopedObject, requireInternalUserOrResponse, requireUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Tenant-aware: authorization is derived from the fetched lead's own
+ * clientId (never a caller-supplied value — there isn't one on this route
+ * anyway). A lead with clientId null (internal-scoped) is invisible to
+ * client-role callers, same 404 as an unknown id.
+ */
 export async function GET(_request: Request, { params }: { params: { id: string } }): Promise<Response> {
-  const auth = await requireInternalUserOrResponse();
+  const auth = await requireUserOrResponse();
   if ('response' in auth) return auth.response;
 
   try {
     const lead = await getLeadById(params.id);
     if (!lead) return jsonError(404, 'lead not found');
+    if (!(await canAccessClientScopedObject(auth.user, lead.clientId))) return jsonError(404, 'lead not found');
     return NextResponse.json({ lead });
   } catch (error) {
     return unexpectedError('GET /api/leads/[id]', error);

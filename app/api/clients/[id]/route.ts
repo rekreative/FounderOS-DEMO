@@ -2,17 +2,25 @@ import { NextResponse } from 'next/server';
 import { deleteClient, getClientById, updateClient } from '@/lib/server/clients-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { UpdateClientBodySchema } from '@/lib/server/schemas';
-import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { canAccessClientScopedObject, requireInternalUserOrResponse, requireUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Tenant-aware: a client-role caller may only read its own client row. The
+ * access check runs against the fetched row's own id (the object IS the
+ * tenant here), not blindly against params.id, so it stays consistent with
+ * every other object-scoped route's "derive from the stored object" rule.
+ * Denial collapses into the same 404 as a genuinely unknown id.
+ */
 export async function GET(_request: Request, { params }: { params: { id: string } }): Promise<Response> {
-  const auth = await requireInternalUserOrResponse();
+  const auth = await requireUserOrResponse();
   if ('response' in auth) return auth.response;
 
   try {
     const client = await getClientById(params.id);
     if (!client) return jsonError(404, 'client not found');
+    if (!(await canAccessClientScopedObject(auth.user, client.id))) return jsonError(404, 'client not found');
     return NextResponse.json({ client });
   } catch (error) {
     return unexpectedError('GET /api/clients/[id]', error);
