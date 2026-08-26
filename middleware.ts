@@ -28,21 +28,23 @@ import { M2M_PATHS } from '@/lib/server/m2m-routes';
  *    checking it here would duplicate, not replace, the authoritative
  *    checks in app/(internal)/layout.tsx and lib/server/api-auth.ts.
  *
- * Separately from the three layers above: /api/health (PUBLIC_HEALTH_PATH)
- * is an exact-match public exception, checked right after layer 1. It is
- * NOT an M2M integration (deliberately not added to M2M_PATHS) — it exists
- * so a deployment platform's health probe, which carries neither a
- * founder_os_access cookie nor a Supabase session, is never blocked by the
- * optional legacy gate (layer 2) when FOUNDER_OS_ACCESS_TOKEN is configured.
+ * Separately from the three layers above: /api/health and /api/ready
+ * (PUBLIC_STATUS_PATHS) are exact-match public exceptions, checked right
+ * after layer 1. Neither is an M2M integration (deliberately not added to
+ * M2M_PATHS) — they exist so a deployment platform's liveness/readiness
+ * probes, which carry neither a founder_os_access cookie nor a Supabase
+ * session, are never blocked by the optional legacy gate (layer 2) when
+ * FOUNDER_OS_ACCESS_TOKEN is configured.
  */
 
 // The one page middleware must never redirect away from, even with no
 // session: /login is genuinely public.
 const LOGIN_PATH = '/login';
 
-// Deployment health check (see app/api/health/route.ts) — exact match only,
-// same discipline as M2M_PATHS. Must stay reachable with zero auth.
-const PUBLIC_HEALTH_PATH = '/api/health';
+// Deployment status checks (see app/api/health/route.ts and
+// app/api/ready/route.ts) — exact match only, same discipline as
+// M2M_PATHS. Must stay reachable with zero auth.
+const PUBLIC_STATUS_PATHS: ReadonlySet<string> = new Set(['/api/health', '/api/ready']);
 
 export async function middleware(req: NextRequest) {
   // ── Layer 1: M2M exclusion, checked before anything else ──────────────
@@ -50,8 +52,8 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // ── Public health check, exact match only ──────────────────────────────
-  if (req.nextUrl.pathname === PUBLIC_HEALTH_PATH) {
+  // ── Public deployment status checks, exact match only ─────────────────
+  if (PUBLIC_STATUS_PATHS.has(req.nextUrl.pathname)) {
     return NextResponse.next();
   }
 

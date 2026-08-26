@@ -34,6 +34,7 @@ const ROUTES: RouteEntry[] = [
   { route: 'departments', load: () => import('@/app/api/departments/route'), url: 'http://localhost/api/departments' },
   { route: 'funnel', load: () => import('@/app/api/funnel/route'), url: 'http://localhost/api/funnel' },
   { route: 'funnel/lead-message', load: () => import('@/app/api/funnel/lead-message/route'), url: 'http://localhost/api/funnel/lead-message?name=Smoke%20Test%20Lead' },
+  { route: 'health', load: () => import('@/app/api/health/route'), url: 'http://localhost/api/health' },
   { route: 'keys', load: () => import('@/app/api/keys/route'), url: 'http://localhost/api/keys' },
   { route: 'life/map', load: () => import('@/app/api/life/map/route'), url: 'http://localhost/api/life/map' },
   { route: 'metrics', load: () => import('@/app/api/metrics/route'), url: 'http://localhost/api/metrics' },
@@ -87,10 +88,12 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
     // Meta Ads Real V1's meta-ads/accounts and meta-ads/campaigns routes are
     // the same shape again (real PostgreSQL only) — full coverage lives in
     // tests/api-meta-ads-accounts.test.ts and tests/api-meta-ads-campaigns.test.ts.
-    // health (Deployment Prep V1) is the same shape once more — it pings
+    // ready (Deployment Health V1) is the same shape once more — it pings
     // real PostgreSQL and honestly returns 503 (not 200) when unreachable,
     // which this SQLite-only smoke net can't satisfy by design. Full
-    // 200-and-503-path coverage lives in tests/health-route.test.ts.
+    // 200-and-503-path coverage lives in tests/ready-route.test.ts. health
+    // itself is DB-free (pure process liveness) so it's covered above in
+    // ROUTES like any other always-200 route.
     const IGNORE = new Set([
       'skills/[slug]',
       'clients',
@@ -104,7 +107,7 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
       'ops/status/client/[clientId]',
       'meta-ads/accounts',
       'meta-ads/campaigns',
-      'health',
+      'ready',
     ]);
     const discovered = discoverGetRoutes(path.join(process.cwd(), 'app', 'api')).filter((r) => !IGNORE.has(r)).sort();
     const covered = ROUTES.map((r) => r.route).sort();

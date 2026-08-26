@@ -1,53 +1,40 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { closePool } from '@/lib/server/db';
-import { installTestDatabaseUrl } from './helpers/pg-test-env';
+import { describe, expect, it, vi } from 'vitest';
 
 /**
- * GET /api/health — the unauthenticated deployment health check (Railway /
- * load balancer). See middleware.test.ts for the public-route-exception
- * coverage; this file covers the route's own 200/503 semantics and that its
- * response body never carries raw Postgres error detail.
+ * GET /api/health — Railway's liveness probe. Pure process-liveness: no
+ * DATABASE_URL access, no Postgres query, always 200. See
+ * tests/ready-route.test.ts for the DB-readiness counterpart and
+ * middleware.test.ts for the public-route-exception coverage.
  */
-const TEST_DATABASE_URL = installTestDatabaseUrl();
-
-describe.runIf(Boolean(TEST_DATABASE_URL))('GET /api/health — real PostgreSQL', () => {
-  afterAll(async () => {
-    await closePool();
-  });
-
-  it('returns 200 { ok: true } and nothing else when Postgres is reachable', async () => {
-    const { GET } = await import('@/app/api/health/route');
-    const res = await GET();
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ ok: true });
-  });
-});
-
-describe('GET /api/health — Postgres unavailable', () => {
-  const originalDb = process.env.DATABASE_URL;
-
-  beforeEach(async () => {
-    // Drop any cached pool so the route's next query re-evaluates
-    // DATABASE_URL fresh instead of reusing an already-open connection.
-    await closePool();
+describe('GET /api/health', () => {
+  it('returns 200 { ok: true } with no DATABASE_URL set at all', async () => {
+    const original = process.env.DATABASE_URL;
     delete process.env.DATABASE_URL;
+    try {
+      const { GET } = await import('@/app/api/health/route');
+      const res = await GET();
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual({ ok: true });
+    } finally {
+      if (original === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = original;
+    }
   });
 
-  afterEach(async () => {
-    await closePool();
-    if (originalDb === undefined) delete process.env.DATABASE_URL;
-    else process.env.DATABASE_URL = originalDb;
-  });
-
-  it('returns 503 { ok: false } and never leaks the underlying error message, stack, or connection string', async () => {
-    const { GET } = await import('@/app/api/health/route');
-    const res = await GET();
-    expect(res.status).toBe(503);
-    const body = await res.json();
-    expect(body).toEqual({ ok: false });
-    const serialized = JSON.stringify(body);
-    expect(serialized).not.toMatch(/postgres(ql)?:\/\//i);
-    expect(serialized).not.toContain('DATABASE_URL');
+  it('never imports or calls the Postgres query primitive', async () => {
+    vi.resetModules();
+    const query = vi.fn();
+    vi.doMock('@/lib/server/db', () => ({ query }));
+    try {
+      const { GET } = await import('@/app/api/health/route');
+      const res = await GET();
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+      expect(query).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('@/lib/server/db');
+      vi.resetModules();
+    }
   });
 });

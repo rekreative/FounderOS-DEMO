@@ -165,10 +165,10 @@ describe('M2M bypasses the legacy FOUNDER_OS_ACCESS_TOKEN gate too — the criti
   });
 });
 
-describe('PUBLIC HEALTH CHECK — /api/health, exact match only, never blocked by any layer', () => {
-  it('unauthenticated /api/health passes through — no redirect, no challenge, Supabase never invoked', async () => {
+describe('PUBLIC DEPLOYMENT STATUS CHECKS — /api/health and /api/ready, exact match only, never blocked by any layer', () => {
+  it.each(['/api/health', '/api/ready'])('unauthenticated %s passes through — no redirect, no challenge, Supabase never invoked', async (pathname) => {
     mockSession(null);
-    const res = await middleware(req('/api/health'));
+    const res = await middleware(req(pathname));
     expect(res.headers.get('location')).toBeNull();
     expect(res.status).not.toBe(401);
     expect(refreshMiddlewareSession).not.toHaveBeenCalled();
@@ -186,23 +186,20 @@ describe('PUBLIC HEALTH CHECK — /api/health, exact match only, never blocked b
       else process.env.FOUNDER_OS_ACCESS_TOKEN = originalToken;
     });
 
-    it('/api/health still passes through — never the legacy challenge page', async () => {
-      const res = await middleware(req('/api/health'));
+    it.each(['/api/health', '/api/ready'])('%s still passes through — never the legacy challenge page', async (pathname) => {
+      const res = await middleware(req(pathname));
       expect(res.status).not.toBe(401);
       expect(res.headers.get('content-type')).not.toBe('text/html; charset=utf-8');
       expect(refreshMiddlewareSession).not.toHaveBeenCalled();
     });
   });
 
-  it('a near-miss path does not become public — /api/health/foo still goes through the Supabase perimeter', async () => {
-    mockSession(null);
-    await middleware(req('/api/health/foo'));
-    expect(refreshMiddlewareSession).toHaveBeenCalledTimes(1);
-  });
-
-  it('a near-miss path does not become public — /api/healthcheck still goes through the Supabase perimeter', async () => {
-    mockSession(null);
-    await middleware(req('/api/healthcheck'));
-    expect(refreshMiddlewareSession).toHaveBeenCalledTimes(1);
-  });
+  it.each(['/api/health/foo', '/api/healthcheck', '/api/ready/foo', '/api/readiness'])(
+    'a near-miss path does not become public — %s still goes through the Supabase perimeter',
+    async (pathname) => {
+      mockSession(null);
+      await middleware(req(pathname));
+      expect(refreshMiddlewareSession).toHaveBeenCalledTimes(1);
+    },
+  );
 });

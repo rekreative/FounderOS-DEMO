@@ -92,10 +92,25 @@ four, `x-manychat-secret` for ManyChat), same secret values as configured in
 the deployment's environment variables — no code change required for this
 swap.
 
-## Health check
+## Health check vs. readiness check
 
-`GET /api/health` — unauthenticated, minimal (`{ ok: true }` / `{ ok: false
-}`, HTTP 200/503), pings Postgres via the same `SELECT 1` primitive
-`lib/server/ops-status.ts` uses. See `middleware.ts` for the explicit exact-
-match public-route exception that lets it bypass the optional legacy
-`FOUNDER_OS_ACCESS_TOKEN` gate.
+Liveness and DB readiness are deliberately separate endpoints, because a
+transient/temporary database issue must not cause Railway to kill an
+otherwise-healthy Next.js process:
+
+- `GET /api/health` — **process liveness**. Unauthenticated, minimal
+  (`{ ok: true }`, always HTTP 200 as long as the process can serve a
+  request). Touches nothing — no `DATABASE_URL`, no Postgres, no
+  filesystem. This is the endpoint Railway's `healthcheckPath`
+  (`railway.toml`) actually probes; if the DB is briefly unreachable, the
+  process still reports healthy and Railway keeps the replica up.
+- `GET /api/ready` — **application/database readiness**. Unauthenticated,
+  pings Postgres via the same `SELECT 1` primitive `lib/server/ops-status.ts`
+  uses (`{ ok: true }` HTTP 200 when reachable, `{ ok: false }` HTTP 503
+  otherwise, no raw error detail in the body). Useful for diagnostics and
+  external monitoring, but **not** consulted by Railway to decide whether
+  to keep the process alive.
+
+Both are exact-match public routes — see `middleware.ts`'s
+`PUBLIC_STATUS_PATHS` exception, which lets them bypass the optional legacy
+`FOUNDER_OS_ACCESS_TOKEN` gate and the Supabase session check.

@@ -61,13 +61,13 @@ const TENANT_READ_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Deployment health check(s) — genuinely public, no api-auth guard, and
+ * Deployment status check(s) — genuinely public, no api-auth guard, and
  * deliberately NOT M2M: M2M_PATHS (lib/server/m2m-routes.ts) is reserved for
- * bearer/shared-secret-authenticated integrations, whereas a health probe
- * has no credential at all. See app/api/health/route.ts and
- * middleware.ts's PUBLIC_HEALTH_PATH exception.
+ * bearer/shared-secret-authenticated integrations, whereas a liveness/
+ * readiness probe has no credential at all. See app/api/health/route.ts,
+ * app/api/ready/route.ts, and middleware.ts's PUBLIC_STATUS_PATHS exception.
  */
-const PUBLIC_UNAUTHENTICATED_ROUTES: ReadonlySet<string> = new Set(['/api/health']);
+const PUBLIC_UNAUTHENTICATED_ROUTES: ReadonlySet<string> = new Set(['/api/health', '/api/ready']);
 
 function discoverRouteFiles(dir: string): string[] {
   const out: string[] = [];
