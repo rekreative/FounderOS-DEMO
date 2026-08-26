@@ -1,8 +1,22 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/data';
 import { parseManyChatWebhook } from '@/lib/connectors/manychat-webhook';
+import { checkManyChatAuth, type ManyChatAuthFailureReason } from '@/lib/server/manychat-auth';
+import { jsonError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
+
+const AUTH_ERROR_STATUS: Record<ManyChatAuthFailureReason, number> = {
+  not_configured: 500,
+  missing_header: 401,
+  invalid_token: 401,
+};
+
+const AUTH_ERROR_MESSAGE: Record<ManyChatAuthFailureReason, string> = {
+  not_configured: 'manychat webhook is not configured',
+  missing_header: 'unauthorized',
+  invalid_token: 'unauthorized',
+};
 
 /**
  * ManyChat "External Request" ingest. ManyChat's API can't be polled for DMs,
@@ -11,13 +25,14 @@ export const dynamic = 'force-dynamic';
  * carrying the contact + message. Each message upserts by id, so replays don't
  * duplicate.
  *
- * If MANYCHAT_WEBHOOK_SECRET is set, the request must carry a matching
- * `x-manychat-secret` header (add it in the ManyChat External Request headers).
+ * Auth: see lib/server/manychat-auth.ts — fails closed if
+ * MANYCHAT_WEBHOOK_SECRET isn't configured, and never reveals whether a
+ * supplied `x-manychat-secret` header was missing or wrong.
  */
 export async function POST(request: Request): Promise<Response> {
-  const secret = process.env.MANYCHAT_WEBHOOK_SECRET;
-  if (secret && request.headers.get('x-manychat-secret') !== secret) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  const auth = checkManyChatAuth(request);
+  if (!auth.ok) {
+    return jsonError(AUTH_ERROR_STATUS[auth.reason], AUTH_ERROR_MESSAGE[auth.reason]);
   }
 
   const raw = await request.json().catch(() => null);
@@ -32,11 +47,9 @@ export async function POST(request: Request): Promise<Response> {
 
 /** Lightweight health check: how many DMs are stored. */
 export async function GET(): Promise<Response> {
-  const secret = process.env.MANYCHAT_WEBHOOK_SECRET;
   return NextResponse.json({
     ok: true,
     endpoint: 'manychat-webhook',
-    secured: Boolean(secret),
     stored: getDb().social.dmMessages('instagram').length,
   });
 }
