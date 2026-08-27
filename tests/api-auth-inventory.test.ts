@@ -58,6 +58,7 @@ const TENANT_READ_ROUTES: ReadonlySet<string> = new Set([
   '/api/meta-ads/campaigns',
   '/api/meta-ads/accounts',
   '/api/ops/status/client/[clientId]',
+  '/api/revenue-records',
 ]);
 
 /**

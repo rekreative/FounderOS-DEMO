@@ -88,6 +88,9 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
     // Meta Ads Real V1's meta-ads/accounts and meta-ads/campaigns routes are
     // the same shape again (real PostgreSQL only) — full coverage lives in
     // tests/api-meta-ads-accounts.test.ts and tests/api-meta-ads-campaigns.test.ts.
+    // Results Manual Revenue V1's revenue-records route is the same shape
+    // once more (real PostgreSQL only, requires a clientId) — full coverage
+    // lives in tests/api-revenue-records.test.ts.
     // ready (Deployment Health V1) is the same shape once more — it pings
     // real PostgreSQL and honestly returns 503 (not 200) when unreachable,
     // which this SQLite-only smoke net can't satisfy by design. Full
@@ -108,6 +111,7 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
       'meta-ads/accounts',
       'meta-ads/campaigns',
       'ready',
+      'revenue-records',
     ]);
     const discovered = discoverGetRoutes(path.join(process.cwd(), 'app', 'api')).filter((r) => !IGNORE.has(r)).sort();
     const covered = ROUTES.map((r) => r.route).sort();

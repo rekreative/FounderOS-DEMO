@@ -35,11 +35,18 @@ export type {
 } from '@/lib/results-domain';
 
 // Results V1 — "What business outcome is REKREATIVE generating for this
-// client?" Everything here is either (a) the ONE new stored entity,
-// RevenueRecord, or (b) a pure function deriving funnel/KPI numbers from
-// RevenueRecord + the existing lib/leads.ts + lib/meta-ads.ts data. No KPI is
-// ever persisted — same discipline as getCampaignCPL/getAutomationHealth/
+// client?" Everything here is either (a) the RevenueRecord type/pure helpers,
+// or (b) a pure function deriving funnel/KPI numbers from RevenueRecord + the
+// existing lib/leads.ts + lib/meta-ads.ts data. No KPI is ever persisted —
+// same discipline as getCampaignCPL/getAutomationHealth/
 // getIntegrationConfigurationStatus.
+//
+// Results Manual Revenue V1 — RevenueRecord persistence moved to PostgreSQL
+// (lib/server/revenue-records-repo.ts, via lib/api/revenue-records.ts). This
+// module keeps only the type and pure functions that never touched
+// localStorage directly (period/trend/formatting/dedup-prep), still reused
+// unchanged by both the new API client and the (untouched) legacy
+// computeClientResults/aggregateResultsTotals calculation path below.
 //
 // Funnel counting / rates / trend-bucketing were extracted to
 // lib/results-domain.ts (pure, window-free) so lib/server/results-repo.ts
@@ -81,7 +88,7 @@ export type RevenueRecord = {
   amount: number;
   /** ISO date of the sale/payment itself, not the entry date. */
   occurredAt: string;
-  /** Only 'manual' is producible by this module in V1 (see createRevenueRecord). */
+  /** Only 'manual' is producible by the API in V1 (see lib/server/revenue-records-repo.ts). */
   source: RevenueRecordSource;
   /** Dedup key for a future automated sync. Always null for manual entries. */
   externalRef: string | null;
@@ -90,185 +97,6 @@ export type RevenueRecord = {
   updatedAt: string;
   dataSource: RevenueRecordDataSource;
 };
-
-export type CreateRevenueRecordInput = {
-  clientId: string;
-  amount: number;
-  occurredAt: string;
-  notes?: string | null;
-  dataSource?: RevenueRecordDataSource;
-};
-
-/** clientId/amount/occurredAt/notes only — source/externalRef/dataSource stay
- * system-controlled, same single-writer discipline as
- * lib/integration-connections.ts's UpdateIntegrationConnectionInput excluding
- * verification fields. */
-export type UpdateRevenueRecordInput = Partial<Pick<RevenueRecord, 'clientId' | 'amount' | 'occurredAt' | 'notes'>>;
-
-const STORAGE_KEY = 'rek_revenue_records_v1';
-
-function readStorage<T>(key: string): T[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    console.error(`Failed to parse ${key} from localStorage`, error);
-    return [];
-  }
-}
-
-function writeStorage<T>(key: string, value: T[]) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch (error) {
-    console.error(`Failed to write ${key} to localStorage`, error);
-  }
-}
-
-function isoNow(): string {
-  return new Date().toISOString();
-}
-
-// ===== Seed / demo data =====
-// Intentionally obvious REKREATIVE-style demo revenue, spread across the
-// seeded clients (lib/clients.ts) to validate: multiple records for one
-// client (client-acme, across two different months — exercises period
-// filtering), a client with revenue but a thinner campaign spend
-// (client-lumen), and a client with ZERO revenue records at all
-// (client-northwind — which also has zero real conversions in the seeded
-// Leads data, so it doubles as the zero-conversion + zero-revenue edge case).
-function seedDemoRevenueRecords(): RevenueRecord[] {
-  const now = new Date();
-  const daysAgo = (days: number) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - days);
-    return d.toISOString();
-  };
-  const createdAt = daysAgo(45);
-
-  return [
-    {
-      id: 'revenue-demo-1',
-      clientId: 'client-acme',
-      amount: 2600,
-      occurredAt: daysAgo(5),
-      source: 'manual',
-      externalRef: null,
-      notes: 'Pago inicial — paquete Full-funnel Meta Ads',
-      createdAt: daysAgo(5),
-      updatedAt: daysAgo(5),
-      dataSource: 'demo',
-    },
-    {
-      id: 'revenue-demo-2',
-      clientId: 'client-acme',
-      amount: 1400,
-      occurredAt: daysAgo(35),
-      source: 'manual',
-      externalRef: null,
-      notes: 'Upsell — servicio adicional',
-      createdAt: daysAgo(35),
-      updatedAt: daysAgo(35),
-      dataSource: 'demo',
-    },
-    {
-      id: 'revenue-demo-3',
-      clientId: 'client-lumen',
-      amount: 1350,
-      occurredAt: daysAgo(10),
-      source: 'manual',
-      externalRef: null,
-      notes: 'Cierre de consultoría inicial',
-      createdAt: createdAt,
-      updatedAt: daysAgo(10),
-      dataSource: 'demo',
-    },
-    // client-northwind intentionally has NO revenue records — zero-revenue
-    // client, paired with zero real conversions in its seeded Leads data.
-  ];
-}
-
-export function initializeResultsStoreIfNeeded(): RevenueRecord[] {
-  if (typeof window === 'undefined') {
-    return seedDemoRevenueRecords();
-  }
-
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    const seeded = seedDemoRevenueRecords();
-    writeStorage(STORAGE_KEY, seeded);
-    return seeded;
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as RevenueRecord[]) : seedDemoRevenueRecords();
-  } catch (error) {
-    console.error('Failed to parse revenue records from localStorage; leaving existing store intact.', error);
-    return seedDemoRevenueRecords();
-  }
-}
-
-// ===== CRUD =====
-
-export function getRevenueRecords(clientId?: string): RevenueRecord[] {
-  const records = readStorage<RevenueRecord>(STORAGE_KEY);
-  const result = !clientId ? records : records.filter((record) => record.clientId === clientId);
-  return result.sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
-}
-
-export function getRevenueRecordById(id: string): RevenueRecord | null {
-  return readStorage<RevenueRecord>(STORAGE_KEY).find((record) => record.id === id) ?? null;
-}
-
-/** Always writes source: 'manual', externalRef: null — this module has no
- * path to producing a 'stripe'/'paypal'/'crm' record in V1. */
-export function createRevenueRecord(input: CreateRevenueRecordInput): RevenueRecord {
-  const clientExists = getClients().some((client) => client.id === input.clientId);
-  if (!clientExists) {
-    throw new Error('Cannot create revenue record for a missing client id');
-  }
-
-  const now = isoNow();
-  const created: RevenueRecord = {
-    id: `revenue-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    clientId: input.clientId,
-    amount: input.amount,
-    occurredAt: input.occurredAt,
-    source: 'manual',
-    externalRef: null,
-    notes: input.notes?.trim() || null,
-    createdAt: now,
-    updatedAt: now,
-    dataSource: input.dataSource ?? 'manual',
-  };
-
-  const records = readStorage<RevenueRecord>(STORAGE_KEY);
-  writeStorage(STORAGE_KEY, [created, ...records]);
-  return created;
-}
-
-export function updateRevenueRecord(id: string, patch: UpdateRevenueRecordInput): RevenueRecord | null {
-  const records = readStorage<RevenueRecord>(STORAGE_KEY);
-  const index = records.findIndex((record) => record.id === id);
-  if (index === -1) return null;
-
-  if (patch.clientId) {
-    const clientExists = getClients().some((client) => client.id === patch.clientId);
-    if (!clientExists) {
-      throw new Error('Cannot move revenue record to a missing client id');
-    }
-  }
-
-  const updated: RevenueRecord = { ...records[index], ...patch, updatedAt: isoNow() };
-  records[index] = updated;
-  writeStorage(STORAGE_KEY, records);
-  return updated;
-}
 
 export function getClientNameForRevenueRecord(clientId: string): string {
   return getClients().find((client) => client.id === clientId)?.name ?? 'Cliente desconocido';

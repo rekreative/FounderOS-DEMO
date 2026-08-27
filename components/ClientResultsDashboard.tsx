@@ -6,22 +6,20 @@ import { useSearchParams } from 'next/navigation';
 import type { Client } from '@/lib/clients';
 import { getClientById } from '@/lib/api/clients';
 import { getResults, type ResultsResponse } from '@/lib/api/results';
+import { createRevenueRecord, getRevenueRecords, updateRevenueRecord } from '@/lib/api/revenue-records';
+import { ApiError } from '@/lib/api/http';
 import {
   PERIOD_PRESET_OPTIONS,
-  createRevenueRecord,
   filterRevenueRecordsByPeriod,
   formatEUR,
   formatRate,
-  getRevenueRecords,
   getRevenueSourceLabel,
   getStoredPeriodPreference,
   groupRevenueByPeriod,
   hasDemoRevenueRecords,
-  initializeResultsStoreIfNeeded,
   resolvePeriod,
   resolveTrendGranularity,
   setStoredPeriodPreference,
-  updateRevenueRecord,
   type PeriodPreset,
   type RevenueRecord,
 } from '@/lib/results';
@@ -58,8 +56,9 @@ const emptyRevenueDraft = (): RevenueDraft => ({ amount: '', occurredAt: new Dat
 
 /** Real CRM funnel/rates/value (lib/server/results-repo.ts via GET
  * /api/results?clientId=...) plus a SEPARATE manual revenue log
- * (RevenueRecord, localStorage — lib/results.ts) that is never summed into
- * "Valor generado". Meta Ads spend/leads/CAC/ROAS/CPL come from the same
+ * (RevenueRecord, PostgreSQL — lib/server/revenue-records-repo.ts via
+ * lib/api/revenue-records.ts) that is never summed into "Valor generado".
+ * Meta Ads spend/leads/CAC/ROAS/CPL come from the same
  * response's `meta` field (Meta Ads Real V1) — real once this client has an
  * active client_meta_accounts mapping with synced data for the period,
  * honestly unavailable otherwise, never from the demo MetaCampaign store. */
@@ -77,6 +76,7 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
   const [resultsData, setResultsData] = useState<ResultsResponse | null>(null);
   const [resultsError, setResultsError] = useState<string | null>(null);
   const [revenueRecords, setRevenueRecords] = useState<RevenueRecord[]>([]);
+  const [revenueError, setRevenueError] = useState<string | null>(null);
 
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
   const [customRange, setCustomRange] = useState({ start: '', end: '' });
@@ -85,12 +85,18 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
   const [editingRevenueId, setEditingRevenueId] = useState<string | null>(null);
   const [revenueDraft, setRevenueDraft] = useState<RevenueDraft>(emptyRevenueDraft());
 
-  const refreshRevenue = () => setRevenueRecords(getRevenueRecords(clientId));
+  const refreshRevenue = () => {
+    setRevenueError(null);
+    getRevenueRecords(clientId)
+      .then((records) => setRevenueRecords(records))
+      .catch((error: unknown) => {
+        setRevenueError(error instanceof Error ? error.message : 'No se pudo cargar el registro manual de ingresos.');
+      });
+  };
 
   // Client identity: canonical PostgreSQL.
   useEffect(() => {
     let cancelled = false;
-    initializeResultsStoreIfNeeded();
 
     setLoadError(null);
     getClientById(clientId)
@@ -209,14 +215,18 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
       notes: revenueDraft.notes.trim() || null,
     };
 
-    if (editingRevenueId) {
-      updateRevenueRecord(editingRevenueId, payload);
-    } else {
-      createRevenueRecord(payload);
-    }
+    const save = editingRevenueId ? updateRevenueRecord(editingRevenueId, payload) : createRevenueRecord(payload);
 
-    refreshRevenue();
-    closeRevenueForm();
+    save
+      .then(() => {
+        refreshRevenue();
+        closeRevenueForm();
+      })
+      .catch((error: unknown) => {
+        setRevenueError(
+          error instanceof ApiError ? error.message : 'No se pudo guardar el ingreso.',
+        );
+      });
   };
 
   if (loadError && !client) {
@@ -411,6 +421,9 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
             </button>
           </div>
         </div>
+        {revenueError && (
+          <div className="mb-4 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{revenueError}</div>
+        )}
         <p className="mb-4 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">
           Entradas manuales, no combinadas con &quot;Valor generado&quot; ni con la facturación total del cliente.
         </p>

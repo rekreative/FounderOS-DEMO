@@ -21,7 +21,8 @@ import {
   summarizeClientOnboarding,
   type ClientIntegrationRequirement,
 } from '@/lib/client-integration-requirements';
-import { getRevenueRecords, initializeResultsStoreIfNeeded, sumAttributedRevenue, type RevenueRecord } from '@/lib/results';
+import { sumAttributedRevenue, type RevenueRecord } from '@/lib/results';
+import { getRevenueRecords } from '@/lib/api/revenue-records';
 import { getContentItems, initializeContentStoreIfNeeded, summarizeContentItems, type ContentItem } from '@/lib/content-items';
 import { getKnowledgeEntries, initializeKnowledgeStoreIfNeeded, type KnowledgeEntry } from '@/lib/knowledge-entries';
 import { ClientsForm, type NewClientInput } from '@/components/ClientsForm';
@@ -147,7 +148,6 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     initializeAiAgentsStoreIfNeeded();
     initializeIntegrationConnectionsStoreIfNeeded();
     initializeClientIntegrationRequirementsStoreIfNeeded();
-    initializeResultsStoreIfNeeded();
     initializeContentStoreIfNeeded();
     initializeKnowledgeStoreIfNeeded();
 
@@ -155,9 +155,18 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     setAgents(getAiAgents(clientId));
     setAllConnections(getIntegrationConnections());
     setRequirements(getClientIntegrationRequirements(clientId));
-    setRevenueRecords(getRevenueRecords(clientId));
     setContentItems(getContentItems(clientId));
     setKnowledgeEntries(getKnowledgeEntries(clientId));
+
+    // Manual revenue ledger: canonical PostgreSQL (Results Manual Revenue V1).
+    setRevenueRecords([]);
+    getRevenueRecords(clientId)
+      .then((records) => {
+        if (!cancelled) setRevenueRecords(records);
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to load revenue records', error);
+      });
 
     return () => {
       cancelled = true;
