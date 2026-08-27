@@ -309,6 +309,38 @@ export const ResultsHomeQuerySchema = z
   })
   .strict();
 
+// Results Manual Revenue V1 — unlike ResultsQuerySchema, clientId is
+// REQUIRED here: there is no global/all-clients manual revenue view (the
+// ledger only ever renders on one client's own dashboard), so omitting it is
+// a 400, not a fallback to every client's records.
+export const ListRevenueRecordsQuerySchema = z
+  .object({
+    clientId: z.string().trim().min(1),
+  })
+  .strict();
+
+export const CreateRevenueRecordBodySchema = z
+  .object({
+    clientId: z.string().trim().min(1),
+    amount: z.number().finite().positive(),
+    occurredAt: isoDateTime,
+    notes: z.string().trim().min(1).nullable().optional(),
+  })
+  .strict();
+
+// clientId/amount/occurredAt/notes only — source/externalRef/dataSource stay
+// system-controlled, and createdBy/updatedBy are never accepted from the
+// request body (set server-side from the authenticated user).
+export const UpdateRevenueRecordBodySchema = z
+  .object({
+    clientId: z.string().trim().min(1),
+    amount: z.number().finite().positive(),
+    occurredAt: isoDateTime,
+    notes: z.string().trim().min(1).nullable(),
+  })
+  .partial()
+  .strict();
+
 export const IngestLeadBodySchema = z
   .object({
     deliveryId: z.string().trim().min(1),

@@ -55,6 +55,23 @@ describe('representative internal-human APIs reject an unauthenticated request (
     expect(res.status).toBe(401);
   });
 
+  it('GET /api/revenue-records → 401', async () => {
+    const { GET } = await import('@/app/api/revenue-records/route');
+    const res = await GET(new Request('http://x/api/revenue-records?clientId=client-acme'));
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /api/revenue-records → 401', async () => {
+    const { POST } = await import('@/app/api/revenue-records/route');
+    const res = await POST(
+      new Request('http://x/api/revenue-records', {
+        method: 'POST',
+        body: JSON.stringify({ clientId: 'client-acme', amount: 100, occurredAt: '2026-08-01T00:00:00.000Z' }),
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('the manual (internal-human) commercial-events variant also requires auth — confirming the M2M/human split was applied correctly, not just at the middleware layer', async () => {
     const { POST } = await import('@/app/api/leads/[id]/commercial-events/route');
     const res = await POST(new Request('http://x/api/leads/lead-1/commercial-events', { method: 'POST', body: '{}' }), {
