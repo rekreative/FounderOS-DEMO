@@ -72,6 +72,32 @@ describe('representative internal-human APIs reject an unauthenticated request (
     expect(res.status).toBe(401);
   });
 
+  it('GET /api/knowledge-entries → 401', async () => {
+    const { GET } = await import('@/app/api/knowledge-entries/route');
+    const res = await GET(new Request('http://x/api/knowledge-entries'));
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /api/knowledge-entries → 401', async () => {
+    const { POST } = await import('@/app/api/knowledge-entries/route');
+    const res = await POST(
+      new Request('http://x/api/knowledge-entries', {
+        method: 'POST',
+        body: JSON.stringify({ scope: 'internal', title: 'x', type: 'decision', source: 'manual' }),
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('PATCH /api/knowledge-entries/[id] → 401', async () => {
+    const { PATCH } = await import('@/app/api/knowledge-entries/[id]/route');
+    const res = await PATCH(
+      new Request('http://x/api/knowledge-entries/knowledge-1', { method: 'PATCH', body: JSON.stringify({ title: 'x' }) }),
+      { params: { id: 'knowledge-1' } },
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('the manual (internal-human) commercial-events variant also requires auth — confirming the M2M/human split was applied correctly, not just at the middleware layer', async () => {
     const { POST } = await import('@/app/api/leads/[id]/commercial-events/route');
     const res = await POST(new Request('http://x/api/leads/lead-1/commercial-events', { method: 'POST', body: '{}' }), {

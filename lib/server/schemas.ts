@@ -445,3 +445,60 @@ export const MetaAdsCampaignsQuerySchema = z
     end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'end must be YYYY-MM-DD').optional(),
   })
   .strict();
+
+// G-Brain Postgres V1 — preserves the exact current KnowledgeEntry enums
+// from lib/knowledge-entries.ts's KNOWLEDGE_*_OPTIONS.
+export const KnowledgeScopeSchema = z.enum(['internal', 'client']);
+export const KnowledgeTypeSchema = z.enum([
+  'decision',
+  'learning',
+  'sop',
+  'strategy',
+  'client_context',
+  'technical_note',
+  'other',
+]);
+export const KnowledgeSourceSchema = z.enum([
+  'manual',
+  'client',
+  'campaign',
+  'meeting',
+  'analysis',
+  'document',
+  'system',
+  'other',
+]);
+export const KnowledgeStatusSchema = z.enum(['active', 'archived']);
+
+// clientId omitted → the global board's contract (internal + every client).
+// Given → that client's entries only. Never required, unlike
+// ListRevenueRecordsQuerySchema (which has no global view).
+export const ListKnowledgeEntriesQuerySchema = z
+  .object({
+    clientId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
+// title/type/source only required — matches the current create form's own
+// "title is the only hard-required field" contract. dataSource/createdBy/
+// updatedBy/createdAt/updatedAt are deliberately absent: server-controlled,
+// never accepted from the request body.
+export const CreateKnowledgeEntryBodySchema = z
+  .object({
+    scope: KnowledgeScopeSchema,
+    clientId: z.string().trim().min(1).nullable().optional(),
+    title: z.string().trim().min(1),
+    type: KnowledgeTypeSchema,
+    tags: z.array(z.string()).optional(),
+    summary: z.string().optional(),
+    content: z.string().optional(),
+    source: KnowledgeSourceSchema,
+    sourceLabel: z.string().trim().min(1).nullable().optional(),
+    status: KnowledgeStatusSchema.optional(),
+  })
+  .strict();
+
+// Same field set as create, all optional — status is included here (not on
+// create) so archive/restore can PATCH it directly. dataSource/createdBy/
+// updatedBy/createdAt/updatedAt stay excluded, same as create.
+export const UpdateKnowledgeEntryBodySchema = CreateKnowledgeEntryBodySchema.partial();

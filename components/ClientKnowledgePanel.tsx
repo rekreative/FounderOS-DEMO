@@ -1,30 +1,29 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { ApiError } from '@/lib/api/http';
+import { archiveKnowledgeEntry, createKnowledgeEntry, restoreKnowledgeEntry, updateKnowledgeEntry } from '@/lib/api/knowledge-entries';
 import {
   KNOWLEDGE_SOURCE_OPTIONS,
   KNOWLEDGE_TYPE_OPTIONS,
-  archiveKnowledgeEntry,
-  createKnowledgeEntry,
   getKnowledgeSourceLabel,
   getKnowledgeTypeLabel,
-  restoreKnowledgeEntry,
   searchKnowledgeEntries,
   summarizeKnowledgeEntries,
-  updateKnowledgeEntry,
   type KnowledgeEntry,
   type KnowledgeSource,
   type KnowledgeType,
 } from '@/lib/knowledge-entries';
 
-// Client-scoped G-Brain CRUD — reads/writes the SAME KnowledgeEntry store
-// the global /brain board uses. The caller (app/clients/[clientId]/page.tsx)
-// fetches entries via getKnowledgeEntries(clientId), which by construction
-// excludes internal REKREATIVE knowledge and every other client's entries;
-// this panel never queries the store itself, so it can never show anything
-// outside that set. scope is always hardcoded to 'client' and clientId to
-// the current workspace's clientId — there is no scope/client picker here,
-// same discipline as components/ClientContentPanel.tsx.
+// Client-scoped G-Brain CRUD — reads/writes the SAME PostgreSQL-backed
+// KnowledgeEntry store the global /brain board uses. The caller
+// (app/(internal)/clients/[clientId]/page.tsx) fetches entries via
+// getKnowledgeEntries(clientId) (lib/api/knowledge-entries.ts), which by
+// construction excludes internal REKREATIVE knowledge and every other
+// client's entries; this panel never queries the store itself, so it can
+// never show anything outside that set. scope is always hardcoded to
+// 'client' and clientId to the current workspace's clientId — there is no
+// scope/client picker here, same discipline as components/ClientContentPanel.tsx.
 
 type StatusView = 'active' | 'archived';
 
@@ -75,6 +74,7 @@ export function ClientKnowledgePanel({
   const [activeEntry, setActiveEntry] = useState<KnowledgeEntry | null>(null);
   const [draft, setDraft] = useState<DraftKnowledgeEntry>(emptyDraft());
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const visibleEntries = useMemo(
     () => entries.filter((entry) => showDemo || entry.dataSource === 'manual'),
@@ -130,7 +130,7 @@ export function ClientKnowledgePanel({
     setDraft(emptyDraft());
   };
 
-  const submit = () => {
+  const submit = async () => {
     const title = draft.title.trim();
     if (!title) return;
 
@@ -148,41 +148,50 @@ export function ClientKnowledgePanel({
       sourceLabel: draft.sourceLabel || null,
     };
 
+    setIsSaving(true);
     try {
       if (panelMode === 'edit' && activeEntry) {
-        const updated = updateKnowledgeEntry(activeEntry.id, payload);
+        const updated = await updateKnowledgeEntry(activeEntry.id, payload);
         onKnowledgeChanged();
-        if (updated) openView(updated);
+        openView(updated);
         return;
       }
 
-      createKnowledgeEntry({ ...payload, dataSource: 'manual' });
+      await createKnowledgeEntry(payload);
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'No se pudo guardar la entrada de conocimiento.');
+      setSaveError(error instanceof ApiError ? error.message : 'No se pudo guardar la entrada de conocimiento.');
       return;
+    } finally {
+      setIsSaving(false);
     }
 
     onKnowledgeChanged();
     closePanel();
   };
 
-  const handleArchive = (id: string) => {
+  const handleArchive = async (id: string) => {
+    setIsSaving(true);
     try {
-      const updated = archiveKnowledgeEntry(id);
+      const updated = await archiveKnowledgeEntry(id);
       onKnowledgeChanged();
-      if (updated) openView(updated);
+      openView(updated);
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'No se pudo archivar la entrada.');
+      setSaveError(error instanceof ApiError ? error.message : 'No se pudo archivar la entrada.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const handleRestore = (id: string) => {
+  const handleRestore = async (id: string) => {
+    setIsSaving(true);
     try {
-      const updated = restoreKnowledgeEntry(id);
+      const updated = await restoreKnowledgeEntry(id);
       onKnowledgeChanged();
-      if (updated) openView(updated);
+      openView(updated);
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'No se pudo restaurar la entrada.');
+      setSaveError(error instanceof ApiError ? error.message : 'No se pudo restaurar la entrada.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -384,23 +393,26 @@ export function ClientKnowledgePanel({
                       <button
                         type="button"
                         onClick={() => handleArchive(activeEntry.id)}
-                        className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim hover:border-os-warn hover:text-os-warn"
+                        disabled={isSaving}
+                        className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim hover:border-os-warn hover:text-os-warn disabled:opacity-50"
                       >
-                        Archivar
+                        {isSaving ? 'Archivando…' : 'Archivar'}
                       </button>
                     ) : (
                       <button
                         type="button"
                         onClick={() => handleRestore(activeEntry.id)}
-                        className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim hover:border-os-ok hover:text-os-ok"
+                        disabled={isSaving}
+                        className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim hover:border-os-ok hover:text-os-ok disabled:opacity-50"
                       >
-                        Restaurar
+                        {isSaving ? 'Restaurando…' : 'Restaurar'}
                       </button>
                     )}
                     <button
                       type="button"
                       onClick={() => openEdit(activeEntry)}
-                      className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface"
+                      disabled={isSaving}
+                      className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface disabled:opacity-50"
                     >
                       Editar
                     </button>
@@ -493,15 +505,21 @@ export function ClientKnowledgePanel({
                 </label>
 
                 <div className="mt-2 flex justify-end gap-2">
-                  <button type="button" onClick={closePanel} className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim">
+                  <button
+                    type="button"
+                    onClick={closePanel}
+                    disabled={isSaving}
+                    className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim disabled:opacity-50"
+                  >
                     Cancelar
                   </button>
                   <button
                     type="button"
                     onClick={submit}
-                    className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface"
+                    disabled={isSaving}
+                    className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface disabled:opacity-50"
                   >
-                    {panelMode === 'edit' ? 'Guardar cambios' : 'Crear entrada'}
+                    {isSaving ? 'Guardando…' : panelMode === 'edit' ? 'Guardar cambios' : 'Crear entrada'}
                   </button>
                 </div>
               </div>

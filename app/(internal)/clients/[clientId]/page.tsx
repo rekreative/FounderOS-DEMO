@@ -24,7 +24,8 @@ import {
 import { sumAttributedRevenue, type RevenueRecord } from '@/lib/results';
 import { getRevenueRecords } from '@/lib/api/revenue-records';
 import { getContentItems, initializeContentStoreIfNeeded, summarizeContentItems, type ContentItem } from '@/lib/content-items';
-import { getKnowledgeEntries, initializeKnowledgeStoreIfNeeded, type KnowledgeEntry } from '@/lib/knowledge-entries';
+import type { KnowledgeEntry } from '@/lib/knowledge-entries';
+import { getKnowledgeEntries } from '@/lib/api/knowledge-entries';
 import { ClientsForm, type NewClientInput } from '@/components/ClientsForm';
 import { ClientOverviewPanel } from '@/components/ClientOverviewPanel';
 import { ClientMetaAdsPanel } from '@/components/ClientMetaAdsPanel';
@@ -149,14 +150,12 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     initializeIntegrationConnectionsStoreIfNeeded();
     initializeClientIntegrationRequirementsStoreIfNeeded();
     initializeContentStoreIfNeeded();
-    initializeKnowledgeStoreIfNeeded();
 
     setAutomations(getAutomations(clientId));
     setAgents(getAiAgents(clientId));
     setAllConnections(getIntegrationConnections());
     setRequirements(getClientIntegrationRequirements(clientId));
     setContentItems(getContentItems(clientId));
-    setKnowledgeEntries(getKnowledgeEntries(clientId));
 
     // Manual revenue ledger: canonical PostgreSQL (Results Manual Revenue V1).
     setRevenueRecords([]);
@@ -166,6 +165,16 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
       })
       .catch((error: unknown) => {
         console.error('Failed to load revenue records', error);
+      });
+
+    // G-Brain: canonical PostgreSQL (G-Brain Postgres V1).
+    setKnowledgeEntries([]);
+    getKnowledgeEntries(clientId)
+      .then((entries) => {
+        if (!cancelled) setKnowledgeEntries(entries);
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to load knowledge entries', error);
       });
 
     return () => {
@@ -428,7 +437,11 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
           <ClientKnowledgePanel
             clientId={clientId}
             entries={knowledgeEntries}
-            onKnowledgeChanged={() => setKnowledgeEntries(getKnowledgeEntries(clientId))}
+            onKnowledgeChanged={() => {
+              getKnowledgeEntries(clientId)
+                .then(setKnowledgeEntries)
+                .catch((error: unknown) => console.error('Failed to reload knowledge entries', error));
+            }}
           />
         )}
 
