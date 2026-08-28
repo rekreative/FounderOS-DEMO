@@ -14,6 +14,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
+    "backup:sqlite": "tsx scripts/backup-sqlite.ts",
     "brain:docs": "tsx scripts/generate-brain-docs.ts",
     "db:migrate": "tsx lib/server/migrate.ts",
     "db:seed": "tsx scripts/seed-backend-v1.ts",

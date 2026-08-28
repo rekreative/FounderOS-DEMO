@@ -3,6 +3,7 @@ node_modules/
 .next-*/
 data/*.db
 data/*.db-*
+data/backups/
 *.tsbuildinfo
 next-env.d.ts
 .DS_Store
