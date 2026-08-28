@@ -12,11 +12,7 @@ import {
   setClientIntegrationRequirement,
   type ClientIntegrationRequirement,
 } from '@/lib/client-integration-requirements';
-import {
-  getIntegrationPlatformLabel,
-  initializeIntegrationConnectionsStoreIfNeeded,
-  type IntegrationConnection,
-} from '@/lib/integration-connections';
+import { getIntegrationPlatformLabel, type IntegrationConnection } from '@/lib/integration-connections';
 
 // Same rationale as tests/integration-connections.test.ts: this suite runs
 // under vitest's `node` environment (no window/localStorage). What IS
@@ -50,6 +46,7 @@ function connection(overrides: Partial<IntegrationConnection> = {}): Integration
     externalRef: 'act_123',
     externalLabel: 'Cuenta de prueba',
     notes: null,
+    status: 'active',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     dataSource: 'manual',
@@ -232,23 +229,6 @@ describe('summarizeClientOnboarding', () => {
   });
 });
 
-describe('Acme default onboarding summary against the real seeded demo data', () => {
-  it('is 4/5 required configured, 80%, 1 pendiente — Meta and Google Sheets client-owned, Make and OpenAI satisfied by REKREATIVE\'s shared connections, WhatsApp missing', () => {
-    const allRequirements = initializeClientIntegrationRequirementsStoreIfNeeded();
-    const allConnections = initializeIntegrationConnectionsStoreIfNeeded();
-    const acmeRequirements = allRequirements.filter((r) => r.clientId === 'client-acme');
-    const internalConnections = allConnections.filter((c) => c.scope === 'internal');
-    const acmeConnections = allConnections.filter((c) => c.clientId === 'client-acme');
-
-    const summary = summarizeClientOnboarding('client-acme', acmeRequirements, [...acmeConnections, ...internalConnections]);
-
-    expect(summary.requiredTotal).toBe(5);
-    expect(summary.requiredConfigured).toBe(4);
-    expect(summary.requiredPending).toBe(1);
-    expect(summary.progressPercent).toBe(80);
-  });
-});
-
 describe('computeRequirementInitialization — bug fix: a client newly created through /clients must be seeded automatically', () => {
   it('an arbitrary newly-created client (no hardcoded id) receives the full template exactly once', () => {
     const dynamicClientId = 'client-whatever-was-just-created-in-the-ui';
@@ -303,13 +283,16 @@ describe('computeRequirementInitialization — bug fix: a client newly created t
     expect(result.initializedClientIds).toEqual([preExistingClientId]);
   });
 
-  it('"Test onboarding": a dynamic client with no connections of its own resolves to 2/5 required configured, 40%, 3 pendientes, via REKREATIVE\'s shared Make/OpenAI connections', () => {
+  it('a dynamic client with no connections of its own resolves onboarding via REKREATIVE\'s shared Make/OpenAI connections only', () => {
     const dynamicClientId = 'client-test-onboarding';
     const { newRows: requirements } = computeRequirementInitialization([], [], [dynamicClientId]);
 
-    const allConnections = initializeIntegrationConnectionsStoreIfNeeded();
-    const internalConnections = allConnections.filter((c) => c.scope === 'internal');
-    // This client owns no IntegrationConnection records of its own yet.
+    // Local fixtures — REKREATIVE's shared internal connections only; this
+    // client owns no IntegrationConnection records of its own.
+    const internalConnections = [
+      connection({ id: 'con-make', scope: 'internal', clientId: null, platform: 'make', verificationStatus: 'not_verified' }),
+      connection({ id: 'con-openai', scope: 'internal', clientId: null, platform: 'openai', verificationStatus: 'not_verified' }),
+    ];
 
     const summary = summarizeClientOnboarding(dynamicClientId, requirements, internalConnections);
 

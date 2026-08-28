@@ -14,7 +14,8 @@ import { getLeads, type Lead } from '@/lib/api/leads';
 import { countActiveMetaCampaigns, getMetaAdsCampaigns, type MetaAdsCampaignsResponse } from '@/lib/api/meta-ads';
 import { getAutomations, initializeAutomationsStoreIfNeeded, summarizeAutomations, type Automation } from '@/lib/automations';
 import { getAiAgents, initializeAiAgentsStoreIfNeeded, summarizeAiAgents, type AiAgent } from '@/lib/agents-ai';
-import { getIntegrationConnections, initializeIntegrationConnectionsStoreIfNeeded, type IntegrationConnection } from '@/lib/integration-connections';
+import type { IntegrationConnection } from '@/lib/integration-connections';
+import { getIntegrationConnections } from '@/lib/api/integration-connections';
 import {
   getClientIntegrationRequirements,
   initializeClientIntegrationRequirementsStoreIfNeeded,
@@ -102,6 +103,12 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [agents, setAgents] = useState<AiAgent[]>([]);
   const [allConnections, setAllConnections] = useState<IntegrationConnection[]>([]);
+  // Module-specific loading/error for the Integraciones tab — kept separate
+  // from the page-wide fatal `loadError` (client identity/leads) so an
+  // integration-connections failure never hides otherwise-healthy client
+  // data on every other tab.
+  const [connectionsLoading, setConnectionsLoading] = useState(true);
+  const [connectionsError, setConnectionsError] = useState<string | null>(null);
   const [requirements, setRequirements] = useState<ClientIntegrationRequirement[]>([]);
   const [revenueRecords, setRevenueRecords] = useState<RevenueRecord[]>([]);
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
@@ -147,15 +154,37 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
     // Everything else stays localStorage in this pass — unchanged, synchronous.
     initializeAutomationsStoreIfNeeded();
     initializeAiAgentsStoreIfNeeded();
-    initializeIntegrationConnectionsStoreIfNeeded();
     initializeClientIntegrationRequirementsStoreIfNeeded();
     initializeContentStoreIfNeeded();
 
     setAutomations(getAutomations(clientId));
     setAgents(getAiAgents(clientId));
-    setAllConnections(getIntegrationConnections());
     setRequirements(getClientIntegrationRequirements(clientId));
     setContentItems(getContentItems(clientId));
+
+    // Integration connections: canonical PostgreSQL (Connections/Secrets V1).
+    // Fetches every ACTIVE connection (not scoped to clientId) — onboarding
+    // matching needs this client's own connections AND every shared internal
+    // connection (see relevantConnectionsForOnboarding below), same contract
+    // the old localStorage read had. connectionsLoading/connectionsError are
+    // module-specific (not the page-wide loadError) so a failure here is
+    // visible in the Integraciones tab without breaking the rest of the
+    // client workspace.
+    setAllConnections([]);
+    setConnectionsLoading(true);
+    setConnectionsError(null);
+    getIntegrationConnections()
+      .then((connections) => {
+        if (!cancelled) setAllConnections(connections);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        console.error('Failed to load integration connections', error);
+        setConnectionsError(error instanceof Error ? error.message : 'No se pudieron cargar las integraciones.');
+      })
+      .finally(() => {
+        if (!cancelled) setConnectionsLoading(false);
+      });
 
     // Manual revenue ledger: canonical PostgreSQL (Results Manual Revenue V1).
     setRevenueRecords([]);
@@ -422,7 +451,13 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
         )}
 
         {activeTab === 'integrations' && (
-          <ClientIntegrationsPanel clientId={clientId} requirements={requirements} allConnections={allConnections} />
+          <ClientIntegrationsPanel
+            clientId={clientId}
+            requirements={requirements}
+            allConnections={allConnections}
+            loading={connectionsLoading}
+            error={connectionsError}
+          />
         )}
 
         {activeTab === 'content' && (

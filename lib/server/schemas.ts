@@ -502,3 +502,97 @@ export const CreateKnowledgeEntryBodySchema = z
 // create) so archive/restore can PATCH it directly. dataSource/createdBy/
 // updatedBy/createdAt/updatedAt stay excluded, same as create.
 export const UpdateKnowledgeEntryBodySchema = CreateKnowledgeEntryBodySchema.partial();
+
+// ── Connections/Secrets V1 ──────────────────────────────────────────────────
+// Preserves the exact current IntegrationConnection enums from
+// lib/integration-connections.ts's INTEGRATION_*_OPTIONS.
+export const IntegrationConnectionScopeSchema = z.enum(['internal', 'client']);
+export const IntegrationConnectionPlatformSchema = z.enum([
+  'meta',
+  'instagram',
+  'whatsapp',
+  'make',
+  'manychat',
+  'openai',
+  'anthropic',
+  'google_sheets',
+  'google_calendar',
+  'stripe',
+  'paypal',
+  'other',
+]);
+export const IntegrationConnectionRecordStatusSchema = z.enum(['active', 'archived']);
+export const IntegrationConnectionVerificationTargetSchema = z.enum(['verified', 'failed', 'not_verified']);
+
+export const ListIntegrationConnectionsQuerySchema = z
+  .object({
+    clientId: z.string().trim().min(1).optional(),
+    status: IntegrationConnectionRecordStatusSchema.optional(),
+  })
+  .strict();
+
+// No length-cap precedent exists elsewhere in this file (every other repo's
+// text columns are unbounded) — these are new, deliberately generous but
+// finite bounds so a request body can never be unbounded. name/externalRef/
+// externalLabel are short identifiers/labels; notes is free text and gets
+// more room.
+const IntegrationConnectionNameSchema = z.string().trim().min(1).max(200);
+const IntegrationConnectionClientIdSchema = z.string().trim().min(1).max(200);
+const IntegrationConnectionRefSchema = z.string().trim().min(1).max(200).nullable();
+const IntegrationConnectionNotesSchema = z.string().trim().min(1).max(4000).nullable();
+
+export const CreateIntegrationConnectionBodySchema = z
+  .object({
+    scope: IntegrationConnectionScopeSchema,
+    clientId: IntegrationConnectionClientIdSchema.nullable().optional(),
+    platform: IntegrationConnectionPlatformSchema,
+    name: IntegrationConnectionNameSchema,
+    externalRef: IntegrationConnectionRefSchema.optional(),
+    externalLabel: IntegrationConnectionRefSchema.optional(),
+    notes: IntegrationConnectionNotesSchema.optional(),
+  })
+  .strict();
+
+/**
+ * PATCH — exactly one mutation family per request, discriminated on `action`:
+ * 'edit' (business fields), 'verify' (verification state), or 'archive'
+ * (archive state). A caller-supplied id/createdBy/updatedBy/timestamp/
+ * dataSource/verificationMethod is structurally impossible to express here
+ * (none of the three shapes has such a key), not merely runtime-rejected.
+ * The server derives verificationMethod ('manual') and every timestamp —
+ * 'verify'/'archive' bodies carry only the target state, never a method or
+ * a time. An 'edit' body with no business field beyond `action` is rejected
+ * by the superRefine below (an empty PATCH is as ambiguous as a mixed one).
+ */
+export const UpdateIntegrationConnectionBodySchema = z
+  .discriminatedUnion('action', [
+    z
+      .object({
+        action: z.literal('edit'),
+        scope: IntegrationConnectionScopeSchema.optional(),
+        clientId: IntegrationConnectionClientIdSchema.nullable().optional(),
+        platform: IntegrationConnectionPlatformSchema.optional(),
+        name: IntegrationConnectionNameSchema.optional(),
+        externalRef: IntegrationConnectionRefSchema.optional(),
+        externalLabel: IntegrationConnectionRefSchema.optional(),
+        notes: IntegrationConnectionNotesSchema.optional(),
+      })
+      .strict(),
+    z
+      .object({
+        action: z.literal('verify'),
+        status: IntegrationConnectionVerificationTargetSchema,
+      })
+      .strict(),
+    z
+      .object({
+        action: z.literal('archive'),
+        status: IntegrationConnectionRecordStatusSchema,
+      })
+      .strict(),
+  ])
+  .superRefine((body, ctx) => {
+    if (body.action === 'edit' && Object.keys(body).every((key) => key === 'action')) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'edit requires at least one business field' });
+    }
+  });

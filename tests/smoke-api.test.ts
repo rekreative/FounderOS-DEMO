@@ -35,7 +35,6 @@ const ROUTES: RouteEntry[] = [
   { route: 'funnel', load: () => import('@/app/api/funnel/route'), url: 'http://localhost/api/funnel' },
   { route: 'funnel/lead-message', load: () => import('@/app/api/funnel/lead-message/route'), url: 'http://localhost/api/funnel/lead-message?name=Smoke%20Test%20Lead' },
   { route: 'health', load: () => import('@/app/api/health/route'), url: 'http://localhost/api/health' },
-  { route: 'keys', load: () => import('@/app/api/keys/route'), url: 'http://localhost/api/keys' },
   { route: 'life/map', load: () => import('@/app/api/life/map/route'), url: 'http://localhost/api/life/map' },
   { route: 'metrics', load: () => import('@/app/api/metrics/route'), url: 'http://localhost/api/metrics' },
   { route: 'roadmap', load: () => import('@/app/api/roadmap/route'), url: 'http://localhost/api/roadmap' },
@@ -94,6 +93,9 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
     // G-Brain Postgres V1's knowledge-entries route is the same shape again
     // (real PostgreSQL only, internal-auth-gated) — full coverage lives in
     // tests/api-knowledge-entries.test.ts.
+    // Connections/Secrets V1's integration-connections route is the same
+    // shape once more (real PostgreSQL only, internal-auth-gated) — full
+    // coverage lives in tests/api-integration-connections.test.ts.
     // ready (Deployment Health V1) is the same shape once more — it pings
     // real PostgreSQL and honestly returns 503 (not 200) when unreachable,
     // which this SQLite-only smoke net can't satisfy by design. Full
@@ -116,6 +118,7 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
       'ready',
       'revenue-records',
       'knowledge-entries',
+      'integration-connections',
     ]);
     const discovered = discoverGetRoutes(path.join(process.cwd(), 'app', 'api')).filter((r) => !IGNORE.has(r)).sort();
     const covered = ROUTES.map((r) => r.route).sort();

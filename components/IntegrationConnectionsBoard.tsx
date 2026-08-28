@@ -7,25 +7,28 @@ import {
   INTEGRATION_CONFIGURATION_STATUS_OPTIONS,
   INTEGRATION_PLATFORM_OPTIONS,
   INTEGRATION_VERIFICATION_STATUS_OPTIONS,
-  createIntegrationConnection,
   getClientNameForIntegrationConnection,
   getIntegrationConfigurationStatus,
   getIntegrationConfigurationStatusLabel,
   getIntegrationPlatformLabel,
-  getIntegrationConnections,
   getIntegrationVerificationStatusLabel,
-  initializeIntegrationConnectionsStoreIfNeeded,
-  markIntegrationConnectionFailed,
-  markIntegrationConnectionVerified,
-  resetIntegrationConnectionVerification,
   summarizeIntegrationConnections,
-  updateIntegrationConnection,
   type IntegrationConnection,
   type IntegrationConfigurationStatus,
   type IntegrationPlatform,
   type IntegrationScope,
   type IntegrationVerificationStatus,
 } from '@/lib/integration-connections';
+import {
+  archiveIntegrationConnection,
+  createIntegrationConnection,
+  getIntegrationConnections,
+  markIntegrationConnectionFailed,
+  markIntegrationConnectionVerified,
+  resetIntegrationConnectionVerification,
+  restoreIntegrationConnection,
+  updateIntegrationConnection,
+} from '@/lib/api/integration-connections';
 import {
   buildClientRequirementRows,
   getClientIntegrationRequirements,
@@ -385,6 +388,8 @@ function ConnectionCard({
   onMarkVerified,
   onMarkFailed,
   onReset,
+  onArchive,
+  pending,
 }: {
   connection: IntegrationConnection;
   clientName: string;
@@ -400,6 +405,14 @@ function ConnectionCard({
   onMarkVerified: () => void;
   onMarkFailed: () => void;
   onReset: () => void;
+  /** Only ever called on an active card — archived cards never render in
+   *  this list (see the separate "Archivadas" panel), so there is no
+   *  onRestore here. */
+  onArchive: () => void;
+  /** True while this exact record has a verify/fail/reset/archive mutation
+   *  in flight — disables edit/verify/fail/reset/archive (never the detail
+   *  toggle, which mutates nothing) and shows a minimal busy label. */
+  pending: boolean;
 }) {
   return (
     <div className="flex flex-col border border-os-border bg-os-surface p-3.5">
@@ -436,22 +449,55 @@ function ConnectionCard({
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-os-border pt-2.5">
         <DataSourceTag dataSource={connection.dataSource} />
         <div className="flex flex-wrap items-center gap-3">
+          {pending && (
+            <span className="font-mono text-[9px] uppercase tracking-wide text-os-dim" role="status">
+              Procesando…
+            </span>
+          )}
           {connection.verificationStatus === 'not_verified' ? (
             <>
-              <button type="button" onClick={onMarkVerified} className="font-mono text-[9px] uppercase tracking-wide text-os-ok hover:opacity-80">
+              <button
+                type="button"
+                disabled={pending}
+                onClick={onMarkVerified}
+                className="font-mono text-[9px] uppercase tracking-wide text-os-ok hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+              >
                 marcar verificada
               </button>
-              <button type="button" onClick={onMarkFailed} className="font-mono text-[9px] uppercase tracking-wide text-os-err hover:opacity-80">
+              <button
+                type="button"
+                disabled={pending}
+                onClick={onMarkFailed}
+                className="font-mono text-[9px] uppercase tracking-wide text-os-err hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+              >
                 marcar incidencia
               </button>
             </>
           ) : (
-            <button type="button" onClick={onReset} className="font-mono text-[9px] uppercase tracking-wide text-os-muted hover:text-os-accent">
+            <button
+              type="button"
+              disabled={pending}
+              onClick={onReset}
+              className="font-mono text-[9px] uppercase tracking-wide text-os-muted hover:text-os-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
               restablecer a no verificada
             </button>
           )}
-          <button type="button" onClick={onEdit} className="font-mono text-[9px] uppercase tracking-wide text-os-muted hover:text-os-accent">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={onEdit}
+            className="font-mono text-[9px] uppercase tracking-wide text-os-muted hover:text-os-accent disabled:cursor-not-allowed disabled:opacity-40"
+          >
             editar
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={onArchive}
+            className="font-mono text-[9px] uppercase tracking-wide text-os-dim hover:text-os-err disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            archivar
           </button>
           <button type="button" onClick={onToggle} className="font-mono text-[9px] uppercase tracking-wide text-os-dim hover:text-os-accent">
             {expanded ? '− ocultar detalle' : '+ detalle'}
@@ -565,13 +611,29 @@ export function IntegrationConnectionsBoard({
   // fake client. Defaults to REKREATIVE. Local UI state only, same pattern
   // as AutomationsBoard's/AgentsAiBoard's moduleScope.
   const [moduleScope, setModuleScope] = useState<IntegrationScope>('internal');
-  const [connections, setConnections] = useState<IntegrationConnection[]>([]);
-  // Unfiltered by clientFilter — the onboarding overview, selected-client
-  // workspace, internal-connections section, and platform catalog all need
-  // every connection regardless of the operational board's own Cliente/
-  // Ámbito filter below. `connections` (above) stays exactly as before,
-  // scoped to that filter, for the existing "Conexiones actuales" board.
+  // Active connections only — Postgres-backed (Connections/Secrets V1).
+  // Every section below (onboarding overview, selected-client workspace,
+  // internal-connections section, platform catalog, "Conexiones actuales")
+  // derives from this one fetched array; the Cliente/Ámbito filter below is
+  // a client-side filter over it, not a separate fetch.
   const [allConnections, setAllConnections] = useState<IntegrationConnection[]>([]);
+  const [connectionsLoading, setConnectionsLoading] = useState(true);
+  const [connectionsError, setConnectionsError] = useState<string | null>(null);
+  const [archivedConnections, setArchivedConnections] = useState<IntegrationConnection[] | null>(null);
+  const [archivedLoading, setArchivedLoading] = useState(false);
+  const [archivedError, setArchivedError] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  // Single pending record/action state — a connection can only ever be
+  // active (main board) or archived (archived modal) at once, never both, so
+  // one id is enough to gate every record-level mutation (verify/fail/reset/
+  // archive/restore) without a per-record Set or a concurrency manager.
+  const [pendingConnectionId, setPendingConnectionId] = useState<string | null>(null);
+  // Verify/fail/reset/archive share one banner in the manual-connections
+  // section (Issue 1); restore gets its own, shown inside the archived
+  // modal, since it operates on a different list the section banner can't
+  // reach while the modal is open.
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const [requirements, setRequirements] = useState<ClientIntegrationRequirement[]>([]);
   const [selectedOnboardingClientId, setSelectedOnboardingClientId] = useState<string | null>(null);
   const [showRequirementsEditor, setShowRequirementsEditor] = useState(false);
@@ -587,21 +649,53 @@ export function IntegrationConnectionsBoard({
   const onboardingWorkspaceRef = useRef<HTMLDivElement>(null);
   const internalConnectionsSectionRef = useRef<HTMLDivElement>(null);
 
-  const activeClientId = () => (clientFilter === 'all' ? undefined : clientFilter);
+  /** Silent refresh — used after every successful mutation (create/edit/
+   *  verify/fail/reset/archive/restore). Deliberately does NOT touch
+   *  connectionsLoading: the manual-records section is already showing real
+   *  data at that point, and re-gating the whole section behind the initial
+   *  loading placeholder after every click would be a bigger regression than
+   *  the one this pass fixes. Only the initial mount and retryLoadConnections
+   *  below (which explicitly re-arms connectionsLoading first) show the
+   *  full-section loading placeholder. */
+  const refreshConnections = async () => {
+    try {
+      setConnectionsError(null);
+      const connections = await getIntegrationConnections();
+      setAllConnections(connections);
+    } catch (error) {
+      setConnectionsError(error instanceof Error ? error.message : 'No se pudieron cargar las conexiones.');
+    } finally {
+      setConnectionsLoading(false);
+    }
+  };
 
-  const refresh = () => {
-    setConnections(getIntegrationConnections(activeClientId()));
-    setAllConnections(getIntegrationConnections());
+  /** The manual-connections section's retry control (Issue 3) — re-arms the
+   *  loading placeholder so a retry reads the same as the first attempt,
+   *  never a stale error sitting next to fresh zeros. */
+  const retryLoadConnections = () => {
+    setConnectionsLoading(true);
+    void refreshConnections();
+  };
+
+  const refreshArchivedConnections = async () => {
+    setArchivedLoading(true);
+    setArchivedError(null);
+    try {
+      const connections = await getIntegrationConnections({ status: 'archived' });
+      setArchivedConnections(connections);
+    } catch (error) {
+      setArchivedError(error instanceof Error ? error.message : 'No se pudieron cargar las conexiones archivadas.');
+    } finally {
+      setArchivedLoading(false);
+    }
   };
 
   const refreshRequirements = () => setRequirements(getClientIntegrationRequirements());
 
   useEffect(() => {
-    initializeIntegrationConnectionsStoreIfNeeded();
     initializeClientIntegrationRequirementsStoreIfNeeded();
-    setConnections(getIntegrationConnections());
-    setAllConnections(getIntegrationConnections());
     setRequirements(getClientIntegrationRequirements());
+    void refreshConnections();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -611,11 +705,6 @@ export function IntegrationConnectionsBoard({
   useEffect(() => {
     setSelectedOnboardingClientId((current) => current ?? clients[0]?.id ?? null);
   }, [clients]);
-
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientFilter]);
 
   // ── Onboarding derivations (requirements bridged to connections) ────────
   const requirementsByClient = useMemo(() => {
@@ -704,18 +793,19 @@ export function IntegrationConnectionsBoard({
   // before the primary scope selector existed.
   const clientVisibleConnections = useMemo(
     () =>
-      connections.filter((connection) => {
+      allConnections.filter((connection) => {
         // Internal (scope==='internal') connections are managed exclusively
         // through "Infraestructura compartida de REKREATIVE" (REKREATIVE
         // scope) — never shown here too. Display/filtering only; nothing is
         // removed from storage.
         if (connection.scope === 'internal') return false;
+        if (clientFilter !== 'all' && connection.clientId !== clientFilter) return false;
         if (platformFilter !== 'all' && connection.platform !== platformFilter) return false;
         if (configurationFilter !== 'all' && getIntegrationConfigurationStatus(connection) !== configurationFilter) return false;
         if (verificationFilter !== 'all' && connection.verificationStatus !== verificationFilter) return false;
         return true;
       }),
-    [connections, clientFilter, platformFilter, configurationFilter, verificationFilter],
+    [allConnections, clientFilter, platformFilter, configurationFilter, verificationFilter],
   );
 
   // REKREATIVE scope board — REKREATIVE's own shared connections only,
@@ -791,9 +881,13 @@ export function IntegrationConnectionsBoard({
     setShowForm(false);
     setEditingConnectionId(null);
     setDraft(emptyDraft(clients[0]?.id ?? ''));
+    setFormError(null);
   };
 
-  const submitConnection = () => {
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formSubmitting, setFormSubmitting] = useState(false);
+
+  const submitConnection = async () => {
     const name = draft.name.trim();
     if (!name) return;
     if (draft.scope === 'client' && !draft.clientId) return;
@@ -808,27 +902,72 @@ export function IntegrationConnectionsBoard({
       notes: draft.notes.trim() || null,
     };
 
-    if (editingConnectionId) {
-      updateIntegrationConnection(editingConnectionId, payload);
-    } else {
-      createIntegrationConnection({ ...payload, dataSource: 'manual' });
+    setFormSubmitting(true);
+    setFormError(null);
+    try {
+      if (editingConnectionId) {
+        await updateIntegrationConnection(editingConnectionId, payload);
+      } else {
+        await createIntegrationConnection(payload);
+      }
+      await refreshConnections();
+      closeForm();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'No se pudo guardar la conexión.');
+    } finally {
+      setFormSubmitting(false);
     }
-
-    refresh();
-    closeForm();
   };
 
-  const handleMarkVerified = (id: string) => {
-    markIntegrationConnectionVerified(id);
-    refresh();
+  /** Shared runner for every main-board record mutation (verify/fail/reset/
+   *  archive): clears the previous action error, marks the record pending,
+   *  and — critically — only calls refreshConnections() (which replaces
+   *  `allConnections`) once `mutate()` itself has resolved without throwing.
+   *  A failed mutation therefore leaves the record exactly as it was, still
+   *  visible, with the error surfaced in the manual-connections section
+   *  banner. pendingConnectionId is always cleared in `finally`, success or
+   *  failure. */
+  const runConnectionAction = async (id: string, mutate: () => Promise<unknown>) => {
+    setActionError(null);
+    setPendingConnectionId(id);
+    try {
+      await mutate();
+      await refreshConnections();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'No se pudo completar la acción sobre la conexión.');
+    } finally {
+      setPendingConnectionId(null);
+    }
   };
-  const handleMarkFailed = (id: string) => {
-    markIntegrationConnectionFailed(id);
-    refresh();
+
+  const handleMarkVerified = (id: string) => runConnectionAction(id, () => markIntegrationConnectionVerified(id));
+  const handleMarkFailed = (id: string) => runConnectionAction(id, () => markIntegrationConnectionFailed(id));
+  const handleReset = (id: string) => runConnectionAction(id, () => resetIntegrationConnectionVerification(id));
+  const handleArchive = (id: string) => runConnectionAction(id, () => archiveIntegrationConnection(id));
+
+  /** Restore's own runner (not runConnectionAction): a failed restore must
+   *  surface inside the archived modal (restoreError), never the main
+   *  board's actionError banner, and a successful restore must refresh both
+   *  the active list (the record now belongs there) and the archived list
+   *  (the record must disappear from it). */
+  const handleRestore = async (id: string) => {
+    setRestoreError(null);
+    setPendingConnectionId(id);
+    try {
+      await restoreIntegrationConnection(id);
+      await refreshConnections();
+      await refreshArchivedConnections();
+    } catch (error) {
+      setRestoreError(error instanceof Error ? error.message : 'No se pudo restaurar la conexión.');
+    } finally {
+      setPendingConnectionId(null);
+    }
   };
-  const handleReset = (id: string) => {
-    resetIntegrationConnectionVerification(id);
-    refresh();
+
+  const openArchived = () => {
+    setShowArchived(true);
+    setRestoreError(null);
+    void refreshArchivedConnections();
   };
 
   return (
@@ -844,8 +983,17 @@ export function IntegrationConnectionsBoard({
         <div className="flex items-center gap-2">
           <button
             type="button"
+            disabled={connectionsLoading || Boolean(connectionsError)}
+            onClick={openArchived}
+            className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Ver archivadas
+          </button>
+          <button
+            type="button"
+            disabled={connectionsLoading || Boolean(connectionsError)}
             onClick={() => openCreateForm(undefined, undefined, moduleScope)}
-            className="border border-os-border bg-os-surface px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-text hover:border-os-border-strong hover:text-os-accent"
+            className="border border-os-border bg-os-surface px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-text hover:border-os-border-strong hover:text-os-accent disabled:cursor-not-allowed disabled:opacity-40"
           >
             + Añadir conexión
           </button>
@@ -874,20 +1022,46 @@ export function IntegrationConnectionsBoard({
         )}
       </div>
 
-      {/* Registros manuales / demo — everything from here down (KPI counters,
-          onboarding, catalog, connection cards) is the localStorage
-          IntegrationConnection store: manually-recorded claims or seeded
-          demo rows, never a live check. Visually separated from "Estado
-          real de REKREATIVE" above so the two are never mistaken for one
-          another — see Real V1 milestone. */}
+      {/* Registros manuales — everything from here down (KPI counters,
+          onboarding, catalog, connection cards) is the Postgres-backed
+          integration_connections table (Connections/Secrets V1):
+          manually-recorded claims, never a live check. Visually separated
+          from "Estado real de REKREATIVE" above so the two are never
+          mistaken for one another — see Real V1 milestone. */}
       <div className="mb-4 mt-6 border-t border-os-border pt-4">
-        <SectionHead label="Registros manuales / demo" />
+        <SectionHead label="Registros manuales" />
         <p className="mb-1 max-w-2xl text-[11px] text-os-muted">
           Seguimiento manual de qué plataformas usa cada cliente — nunca deriva de una comprobación real. Las cifras y catálogos de esta sección
           (Configuradas, Incompletas, No verificadas, Incidencias, Principales, Explorar por categoría) describen estos registros, no el estado
           operativo real mostrado arriba.
         </p>
       </div>
+
+      {/* Issue 3 fix: while the active-connections request is loading or has
+          failed, none of the KPI/onboarding/connection-list/catalog sections
+          below render at all — a real empty Postgres result and "haven't
+          loaded yet" must never look the same. Only "Estado real de
+          REKREATIVE" above (an independent fetch) keeps rendering regardless. */}
+      {connectionsError ? (
+        <div className="mb-4 border border-os-err/40 bg-os-err/10 px-3 py-6 text-center font-mono text-[10.5px] text-os-err">
+          <p>{connectionsError}</p>
+          <button
+            type="button"
+            onClick={retryLoadConnections}
+            className="mt-3 border border-os-err/40 px-3 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-err hover:bg-os-err/10"
+          >
+            Reintentar
+          </button>
+        </div>
+      ) : connectionsLoading ? (
+        <div className="mb-4 border border-dashed border-os-border px-3 py-10 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+          Cargando conexiones…
+        </div>
+      ) : (
+        <>
+      {actionError && (
+        <div className="mb-4 border border-os-err/40 bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{actionError}</div>
+      )}
 
       {/* Primary scope — REKREATIVE's own shared infrastructure vs. client
           integrations. Conceptually above every section/filter below,
@@ -1110,9 +1284,11 @@ export function IntegrationConnectionsBoard({
                 expanded={Boolean(expanded[connection.id])}
                 onToggle={() => setExpanded((prev) => ({ ...prev, [connection.id]: !prev[connection.id] }))}
                 onEdit={() => openEditForm(connection)}
-                onMarkVerified={() => handleMarkVerified(connection.id)}
-                onMarkFailed={() => handleMarkFailed(connection.id)}
-                onReset={() => handleReset(connection.id)}
+                onMarkVerified={() => void handleMarkVerified(connection.id)}
+                onMarkFailed={() => void handleMarkFailed(connection.id)}
+                onReset={() => void handleReset(connection.id)}
+                onArchive={() => void handleArchive(connection.id)}
+                pending={pendingConnectionId === connection.id}
               />
             ))}
           </div>
@@ -1230,9 +1406,11 @@ export function IntegrationConnectionsBoard({
               expanded={Boolean(expanded[connection.id])}
               onToggle={() => setExpanded((prev) => ({ ...prev, [connection.id]: !prev[connection.id] }))}
               onEdit={() => openEditForm(connection)}
-              onMarkVerified={() => handleMarkVerified(connection.id)}
-              onMarkFailed={() => handleMarkFailed(connection.id)}
-              onReset={() => handleReset(connection.id)}
+              onMarkVerified={() => void handleMarkVerified(connection.id)}
+              onMarkFailed={() => void handleMarkFailed(connection.id)}
+              onReset={() => void handleReset(connection.id)}
+              onArchive={() => void handleArchive(connection.id)}
+              pending={pendingConnectionId === connection.id}
             />
           ))}
         </div>
@@ -1294,6 +1472,8 @@ export function IntegrationConnectionsBoard({
           ))}
         </div>
       </div>
+        </>
+      )}
 
       {showForm && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
@@ -1367,6 +1547,10 @@ export function IntegrationConnectionsBoard({
                 />
               </label>
 
+              <div className="col-span-2 border border-os-warn/40 bg-os-warn/10 px-2.5 py-1.5 font-mono text-[9.5px] text-os-warn">
+                No pegues claves, tokens ni contraseñas en estos campos.
+              </div>
+
               <label className="col-span-1">
                 <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Referencia externa</span>
                 <input
@@ -1402,12 +1586,21 @@ export function IntegrationConnectionsBoard({
               El estado de verificación se gestiona desde la tarjeta, no desde este formulario.
             </p>
 
+            {formError && (
+              <div className="mt-3 border border-os-err/40 bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{formError}</div>
+            )}
+
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={closeForm} className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim">
                 Cancelar
               </button>
-              <button type="button" onClick={submitConnection} className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface">
-                {editingConnectionId ? 'Guardar conexión' : 'Crear conexión'}
+              <button
+                type="button"
+                disabled={formSubmitting}
+                onClick={() => void submitConnection()}
+                className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface disabled:opacity-50"
+              >
+                {formSubmitting ? 'Guardando…' : editingConnectionId ? 'Guardar conexión' : 'Crear conexión'}
               </button>
             </div>
           </div>
@@ -1474,6 +1667,68 @@ export function IntegrationConnectionsBoard({
                 Listo
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Conexiones archivadas — the minimal archive-view control: a fetch
+          only triggered on open (never part of the primary active-records
+          fetch), a flat list, and the one action archived rows support
+          (restore). No edit/verify affordances here — an archived record
+          must be restored before it can be touched again. */}
+      {showArchived && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-sm-t border border-os-border bg-os-surface p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold uppercase tracking-wide">Conexiones archivadas</h2>
+              <button
+                type="button"
+                onClick={() => setShowArchived(false)}
+                className="font-mono text-[10px] uppercase tracking-wide text-os-dim hover:text-os-accent"
+              >
+                cerrar
+              </button>
+            </div>
+
+            {restoreError && (
+              <div className="mb-3 border border-os-err/40 bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{restoreError}</div>
+            )}
+
+            {archivedError ? (
+              <div className="border border-os-err/40 bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{archivedError}</div>
+            ) : archivedLoading ? (
+              <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+                Cargando conexiones archivadas…
+              </div>
+            ) : !archivedConnections || archivedConnections.length === 0 ? (
+              <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+                No hay conexiones archivadas.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {archivedConnections.map((connection) => {
+                  const restoring = pendingConnectionId === connection.id;
+                  return (
+                    <div key={connection.id} className="flex items-center justify-between gap-3 border border-os-border bg-os-surface px-3.5 py-2.5">
+                      <div className="min-w-0">
+                        <div className="truncate text-[12.5px] font-semibold leading-tight text-os-text">{connection.name || 'Sin nombre'}</div>
+                        <div className="mt-1 font-mono text-[10px] text-os-dim">
+                          {getIntegrationPlatformLabel(connection.platform)} · {getClientNameForIntegrationConnection(connection.clientId, clients)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={restoring}
+                        onClick={() => void handleRestore(connection.id)}
+                        className="shrink-0 border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-text hover:border-os-border-strong hover:text-os-accent disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {restoring ? 'Procesando…' : 'Restaurar'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -5,6 +5,9 @@ import path from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime';
+// Not re-exported from the public 'next/navigation' entrypoint in this Next
+// version — same internal-import pattern as AppRouterContext below.
+import { getURLFromRedirectError, isRedirectError } from 'next/dist/client/components/redirect';
 import { ClientsProvider } from '@/components/ClientsProvider';
 
 // /login is the first page that reads next/headers's cookies() (via its own
@@ -56,6 +59,11 @@ type PageEntry = {
    * only exists inside an actual render. These render through React instead
    * of the direct-call trick server/wrapper pages use below. */
   client?: boolean;
+  /** This page does nothing but next/navigation's redirect() to another
+   *  route — that throws a NEXT_REDIRECT error by design (see
+   *  app/(internal)/integrations/page.tsx), so "renders" for a page like
+   *  this means "throws the expected redirect", not "resolves truthy". */
+  redirectsTo?: string;
 };
 
 // A minimal, inert router so `useRouter()` (only called by
@@ -103,7 +111,7 @@ const PAGES: PageEntry[] = [
   { file: 'finances/page.tsx', load: () => import('@/app/(internal)/finances/page') },
   { file: 'funnel/page.tsx', load: () => import('@/app/(internal)/funnel/page'), props: { searchParams: {} } },
   { file: 'workflows/page.tsx', load: () => import('@/app/(internal)/workflows/page') },
-  { file: 'integrations/page.tsx', load: () => import('@/app/(internal)/integrations/page') },
+  { file: 'integrations/page.tsx', load: () => import('@/app/(internal)/integrations/page'), redirectsTo: '/connections' },
   { file: 'roadmap/page.tsx', load: () => import('@/app/(internal)/roadmap/page') },
   { file: 'analytics/page.tsx', load: () => import('@/app/(internal)/analytics/page') },
   { file: 'reference/page.tsx', load: () => import('@/app/(internal)/reference/page') },
@@ -141,10 +149,21 @@ describe('platform smoke — every page renders without throwing', () => {
   // 20s: pages that shell out to the gbrain CLI or distill the brain-store
   // (/brain) legitimately exceed vitest's 5s default under a loaded
   // parallel suite — this is a does-it-throw net, not a performance gate.
-  test.each(PAGES)('$file renders', async ({ load, props, client }) => {
+  test.each(PAGES)('$file renders', async ({ load, props, client, redirectsTo }) => {
     const mod = await load();
     const Page = mod.default;
-    if (client) {
+    if (redirectsTo) {
+      let thrown: unknown;
+      try {
+        Page(props);
+      } catch (error) {
+        thrown = error;
+      }
+      if (!isRedirectError(thrown)) {
+        throw new Error('expected redirect() to throw a NEXT_REDIRECT error');
+      }
+      expect(getURLFromRedirectError(thrown)).toBe(redirectsTo);
+    } else if (client) {
       // 'use client' pages call hooks directly, so they need React's real
       // dispatcher — renderToStaticMarkup gives every child component one
       // without needing jsdom (useEffect simply never fires, same as any

@@ -7,6 +7,15 @@ import { getClients } from '@/lib/clients';
 // lib/agents-ai.ts's AiAgentDataSource, and deliberately isolated from
 // FounderOS's real lib/connectors/* + app/integrations (machine-bound,
 // secret-writing infrastructure this module must never touch or resemble).
+//
+// Connections/Secrets V1: persistence lives in
+// lib/server/integration-connections-repo.ts (server) and
+// lib/api/integration-connections.ts (browser), reached over
+// GET/POST /api/integration-connections and
+// PATCH /api/integration-connections/[id]. This module keeps only the
+// IntegrationConnection type, its controlled enums/labels, and pure/
+// presentational helpers shared by both the API layer and the components —
+// nothing here reads or writes localStorage anymore.
 
 export const INTEGRATION_SCOPE_OPTIONS = [
   { id: 'client', label: 'Cliente' },
@@ -44,10 +53,10 @@ export type IntegrationConfigurationStatus = (typeof INTEGRATION_CONFIGURATION_S
 
 // ── Verification status — PERSISTED (unlike configurationStatus above),
 // because V1 has no live checker to derive it from: it's a manually-recorded
-// claim, not a computed fact. Defaults to 'not_verified' on every connection
-// and must never be seeded as anything else. The UI must never render this
-// as "Conectada"/"Connected"/"Healthy"/"Operativa" — only the combined
-// status+method label from getIntegrationVerificationStatusLabel below.
+// claim, not a computed fact. Defaults to 'not_verified' on every connection.
+// The UI must never render this as "Conectada"/"Connected"/"Healthy"/
+// "Operativa" — only the combined status+method label from
+// getIntegrationVerificationStatusLabel below.
 export const INTEGRATION_VERIFICATION_STATUS_OPTIONS = [
   { id: 'not_verified', label: 'No verificada' },
   { id: 'verified', label: 'Verificada' },
@@ -58,7 +67,7 @@ export type IntegrationVerificationStatus = (typeof INTEGRATION_VERIFICATION_STA
 // ── Verification method — HOW a verified/failed status was determined.
 // 'manual' is the only method V1 can produce (the user checked it themselves
 // outside REKREATIVE OS). 'system' is reserved for a future real backend
-// verifier and is never written by this module. Always null while
+// verifier and is never written by the API. Always null while
 // verificationStatus is 'not_verified'.
 export const INTEGRATION_VERIFICATION_METHOD_OPTIONS = [
   { id: 'manual', label: 'Manual' },
@@ -66,11 +75,22 @@ export const INTEGRATION_VERIFICATION_METHOD_OPTIONS = [
 ] as const;
 export type IntegrationVerificationMethod = (typeof INTEGRATION_VERIFICATION_METHOD_OPTIONS)[number]['id'];
 
+// ── Record status — archive/restore without a hard delete (Connections/
+// Secrets V1). New relative to the old localStorage model, which had no
+// archive concept at all. Active records are the default view everywhere;
+// archived ones are reached through an explicit, minimal toggle.
+export const INTEGRATION_RECORD_STATUS_OPTIONS = [
+  { id: 'active', label: 'Activa' },
+  { id: 'archived', label: 'Archivada' },
+] as const;
+export type IntegrationRecordStatus = (typeof INTEGRATION_RECORD_STATUS_OPTIONS)[number]['id'];
+
 /** 'demo' = seeded placeholder data, 'manual' = entered by hand in this UI.
  * Same honesty rule as lib/automations.ts's AutomationDataSource — 'live' is
  * deliberately absent from V1's own type: this module has no backend/API
- * source yet, unlike Automations/Agents which at least name a future
- * external provider. */
+ * source of live connector truth, unlike Automations/Agents which at least
+ * name a future external provider. No 'demo' row is ever written by the API
+ * in Phase 1 — production starts empty. */
 export type IntegrationDataSource = 'demo' | 'manual';
 
 export type IntegrationConnection = {
@@ -98,314 +118,14 @@ export type IntegrationConnection = {
 
   notes: string | null;
 
+  /** Archive/restore without a hard delete — see INTEGRATION_RECORD_STATUS_OPTIONS. */
+  status: IntegrationRecordStatus;
+
   createdAt: string;
   updatedAt: string;
 
   dataSource: IntegrationDataSource;
 };
-
-export type CreateIntegrationConnectionInput = {
-  scope: IntegrationScope;
-  clientId?: string | null;
-  platform: IntegrationPlatform;
-  name: string;
-  externalRef?: string | null;
-  externalLabel?: string | null;
-  notes?: string | null;
-  dataSource?: IntegrationDataSource;
-};
-
-/** Verification fields are deliberately excluded — the only way they may
- *  change is through markIntegrationConnectionVerified/Failed/Reset below,
- *  same single-writer discipline as lib/automations.ts's appendAutomationRun
- *  owning lastRunAt/lastRunStatus/lastError. */
-export type UpdateIntegrationConnectionInput = Partial<
-  Omit<IntegrationConnection, 'id' | 'createdAt' | 'verificationStatus' | 'verificationMethod' | 'lastVerifiedAt'>
->;
-
-const STORAGE_KEY = 'rek_integration_connections_v1';
-
-// ===== RAW STORAGE (kept private to this module) =====
-
-function readStorage<T>(key: string): T[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    console.error(`Failed to parse ${key} from localStorage`, error);
-    return [];
-  }
-}
-
-function writeStorage<T>(key: string, value: T[]) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch (error) {
-    console.error(`Failed to write ${key} to localStorage`, error);
-  }
-}
-
-function isoNow(): string {
-  return new Date().toISOString();
-}
-
-// ===== SEED / DEMO DATA =====
-// Intentionally obvious REKREATIVE-style demo connections, spread across the
-// seeded REKREATIVE clients (see lib/clients.ts) plus internal/REKREATIVE
-// entries. CRITICAL: every seeded row has verificationStatus 'not_verified',
-// verificationMethod null, and lastVerifiedAt null — no demo connection may
-// pretend REKREATIVE OS ever checked it.
-
-function seedDemoIntegrationConnections(): IntegrationConnection[] {
-  const now = new Date();
-  const daysAgo = (days: number) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - days);
-    return d.toISOString();
-  };
-
-  const base = {
-    verificationStatus: 'not_verified' as const,
-    verificationMethod: null,
-    lastVerifiedAt: null,
-    dataSource: 'demo' as const,
-  };
-
-  return [
-    {
-      id: 'connection-meta-acme',
-      scope: 'client',
-      clientId: 'client-acme',
-      platform: 'meta',
-      name: 'Meta Ads — Acme Co',
-      externalRef: 'act_9384712065',
-      externalLabel: 'Cuenta de anuncios Meta — Acme Co',
-      notes: 'Cuenta de anuncios usada para las campañas de Full-funnel Meta Ads.',
-      createdAt: daysAgo(60),
-      updatedAt: daysAgo(60),
-      ...base,
-    },
-    {
-      id: 'connection-whatsapp-northwind',
-      scope: 'client',
-      clientId: 'client-northwind',
-      platform: 'whatsapp',
-      name: 'WhatsApp Business — Northwind',
-      externalRef: '+1 555 0142',
-      externalLabel: 'WhatsApp Comercial Northwind',
-      notes: 'Número usado por las automatizaciones de recordatorio de citas.',
-      createdAt: daysAgo(40),
-      updatedAt: daysAgo(40),
-      ...base,
-    },
-    {
-      id: 'connection-make-internal',
-      scope: 'internal',
-      clientId: null,
-      platform: 'make',
-      name: 'Make — Workspace REKREATIVE',
-      externalRef: null,
-      externalLabel: 'Workspace REKREATIVE',
-      notes: 'Workspace donde viven los escenarios que sirven a todos los clientes.',
-      createdAt: daysAgo(90),
-      updatedAt: daysAgo(90),
-      ...base,
-    },
-    {
-      id: 'connection-openai-internal',
-      scope: 'internal',
-      clientId: null,
-      platform: 'openai',
-      name: 'OpenAI — REKREATIVE',
-      externalRef: null,
-      externalLabel: null,
-      notes: 'Cuenta interna usada por los agentes de IA para cualificación y resúmenes.',
-      createdAt: daysAgo(90),
-      updatedAt: daysAgo(90),
-      ...base,
-    },
-    {
-      id: 'connection-manychat-lumen',
-      scope: 'client',
-      clientId: 'client-lumen',
-      platform: 'manychat',
-      name: 'ManyChat — Lumen Studio',
-      externalRef: null,
-      externalLabel: null,
-      notes: 'Pendiente de vincular la cuenta de ManyChat del cliente.',
-      createdAt: daysAgo(4),
-      updatedAt: daysAgo(4),
-      ...base,
-    },
-    {
-      id: 'connection-sheets-acme',
-      scope: 'client',
-      clientId: 'client-acme',
-      platform: 'google_sheets',
-      name: 'Google Sheets — Reporting Acme',
-      externalRef: null,
-      externalLabel: 'Sheet de reporting mensual — Acme Co',
-      notes: 'Hoja donde las automatizaciones registran leads y métricas semanales.',
-      createdAt: daysAgo(75),
-      updatedAt: daysAgo(0),
-      ...base,
-    },
-  ];
-}
-
-// ===== STORE INITIALIZATION =====
-
-export function initializeIntegrationConnectionsStoreIfNeeded(): IntegrationConnection[] {
-  if (typeof window === 'undefined') {
-    return seedDemoIntegrationConnections();
-  }
-
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    const seeded = seedDemoIntegrationConnections();
-    writeStorage(STORAGE_KEY, seeded);
-    return seeded;
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    const existing: IntegrationConnection[] = Array.isArray(parsed) ? parsed : [];
-    return existing.length ? existing : seedDemoIntegrationConnections();
-  } catch (error) {
-    console.error('Failed to parse integration connections from localStorage; leaving existing store intact.', error);
-    return seedDemoIntegrationConnections();
-  }
-}
-
-// ===== READ =====
-
-export function getIntegrationConnections(clientId?: string): IntegrationConnection[] {
-  const connections = readStorage<IntegrationConnection>(STORAGE_KEY);
-  const result = !clientId ? connections : connections.filter((connection) => connection.clientId === clientId);
-  return result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-}
-
-export function getIntegrationConnectionById(id: string): IntegrationConnection | null {
-  return readStorage<IntegrationConnection>(STORAGE_KEY).find((connection) => connection.id === id) ?? null;
-}
-
-// ===== WRITE =====
-
-function assertScopeInvariant(scope: IntegrationScope, clientId: string | null): void {
-  if (scope === 'client') {
-    if (!clientId) {
-      throw new Error('A client-scoped integration connection requires a clientId');
-    }
-    const clientExists = getClients().some((client) => client.id === clientId);
-    if (!clientExists) {
-      throw new Error('Cannot create integration connection for a missing client id');
-    }
-  }
-}
-
-export function createIntegrationConnection(input: CreateIntegrationConnectionInput): IntegrationConnection {
-  const clientId = input.scope === 'client' ? input.clientId ?? null : null;
-  assertScopeInvariant(input.scope, clientId);
-
-  const now = isoNow();
-  const created: IntegrationConnection = {
-    id: `connection-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    scope: input.scope,
-    clientId,
-    platform: input.platform,
-    name: input.name.trim(),
-    verificationStatus: 'not_verified',
-    verificationMethod: null,
-    lastVerifiedAt: null,
-    externalRef: input.externalRef?.trim() || null,
-    externalLabel: input.externalLabel?.trim() || null,
-    notes: input.notes?.trim() || null,
-    createdAt: now,
-    updatedAt: now,
-    dataSource: input.dataSource ?? 'manual',
-  };
-
-  const connections = readStorage<IntegrationConnection>(STORAGE_KEY);
-  writeStorage(STORAGE_KEY, [created, ...connections]);
-  return created;
-}
-
-export function updateIntegrationConnection(
-  id: string,
-  patch: UpdateIntegrationConnectionInput,
-): IntegrationConnection | null {
-  const connections = readStorage<IntegrationConnection>(STORAGE_KEY);
-  const index = connections.findIndex((connection) => connection.id === id);
-  if (index === -1) return null;
-
-  const merged: IntegrationConnection = { ...connections[index], ...patch };
-
-  if (merged.scope === 'internal') {
-    merged.clientId = null;
-  } else {
-    assertScopeInvariant(merged.scope, merged.clientId);
-  }
-
-  const updated: IntegrationConnection = { ...merged, updatedAt: isoNow() };
-  connections[index] = updated;
-  writeStorage(STORAGE_KEY, connections);
-  return updated;
-}
-
-/** The only way verificationStatus/verificationMethod/lastVerifiedAt may
- *  change to 'verified' — always method 'manual' in V1. A future real
- *  backend verifier is the only thing allowed to write method 'system'. */
-export function markIntegrationConnectionVerified(id: string): IntegrationConnection | null {
-  return applyVerification(id, 'verified', 'manual');
-}
-
-/** The only way to record a manually-observed problem. */
-export function markIntegrationConnectionFailed(id: string): IntegrationConnection | null {
-  return applyVerification(id, 'failed', 'manual');
-}
-
-/** Clears a verification claim back to the honest default. */
-export function resetIntegrationConnectionVerification(id: string): IntegrationConnection | null {
-  const connections = readStorage<IntegrationConnection>(STORAGE_KEY);
-  const index = connections.findIndex((connection) => connection.id === id);
-  if (index === -1) return null;
-
-  const updated: IntegrationConnection = {
-    ...connections[index],
-    verificationStatus: 'not_verified',
-    verificationMethod: null,
-    lastVerifiedAt: null,
-    updatedAt: isoNow(),
-  };
-  connections[index] = updated;
-  writeStorage(STORAGE_KEY, connections);
-  return updated;
-}
-
-function applyVerification(
-  id: string,
-  status: 'verified' | 'failed',
-  method: IntegrationVerificationMethod,
-): IntegrationConnection | null {
-  const connections = readStorage<IntegrationConnection>(STORAGE_KEY);
-  const index = connections.findIndex((connection) => connection.id === id);
-  if (index === -1) return null;
-
-  const updated: IntegrationConnection = {
-    ...connections[index],
-    verificationStatus: status,
-    verificationMethod: method,
-    lastVerifiedAt: isoNow(),
-    updatedAt: isoNow(),
-  };
-  connections[index] = updated;
-  writeStorage(STORAGE_KEY, connections);
-  return updated;
-}
 
 // ===== DERIVED (never persisted) =====
 
@@ -437,7 +157,8 @@ export type IntegrationConnectionsSummary = {
 };
 
 /** KPI totals over a set of connections — computed from whatever set is
- * passed in, so callers recompute from the currently filtered list. */
+ * passed in, so callers recompute from the currently filtered list (active
+ * or archived, whichever is on screen). */
 export function summarizeIntegrationConnections(connections: IntegrationConnection[]): IntegrationConnectionsSummary {
   return {
     configured: connections.filter((c) => getIntegrationConfigurationStatus(c) === 'configured').length,
@@ -449,8 +170,9 @@ export function summarizeIntegrationConnections(connections: IntegrationConnecti
 
 // ===== LABELS =====
 
-/** See lib/automations.ts's getClientNameForAutomation — same pattern: pass
- *  the canonical PostgreSQL `clients` list when the caller has one loaded. */
+/** See lib/knowledge-entries.ts's getClientNameForKnowledgeEntry — same
+ *  pattern: pass the canonical PostgreSQL `clients` list when the caller has
+ *  one loaded (every current caller does, via useClientsRegistry()). */
 export function getClientNameForIntegrationConnection(
   clientId: string | null,
   clients: { id: string; name: string }[] = getClients(),
@@ -470,6 +192,10 @@ export function getIntegrationPlatformLabel(platform: IntegrationPlatform): stri
 
 export function getIntegrationConfigurationStatusLabel(status: IntegrationConfigurationStatus): string {
   return INTEGRATION_CONFIGURATION_STATUS_OPTIONS.find((option) => option.id === status)?.label ?? status;
+}
+
+export function getIntegrationRecordStatusLabel(status: IntegrationRecordStatus): string {
+  return INTEGRATION_RECORD_STATUS_OPTIONS.find((option) => option.id === status)?.label ?? status;
 }
 
 /** The one honesty-critical label helper: combines verificationStatus AND

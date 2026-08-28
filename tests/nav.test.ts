@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { REKREATIVE_PRIMARY, NAV_ORDER, DIGIT_VIEWS } from '@/lib/nav';
+import { REKREATIVE_PRIMARY, NAV_ORDER, DIGIT_VIEWS, NAV_SYSTEM } from '@/lib/nav';
 
 // Legacy FounderOS routes that must never be reachable from the global
 // command palette or digit shortcuts — a stray keystroke or search must
@@ -44,6 +44,19 @@ describe('shared nav config', () => {
     for (const item of REKREATIVE_PRIMARY) {
       expect(LEGACY_FOUNDEROS_ROUTES).not.toContain(item.href);
     }
+  });
+
+  test('"/integrations" (retired legacy marketplace, now a redirect to /connections) is not discoverable in any nav collection', () => {
+    // Visual QA correction, 2026-08-28: superseded the earlier "keep it
+    // read-only" decision — the route itself still exists (as a redirect),
+    // but must not be independently linkable from anywhere in the app.
+    expect(NAV_SYSTEM.map((n) => n.href)).not.toContain('/integrations');
+    expect(REKREATIVE_PRIMARY.map((n) => n.href)).not.toContain('/integrations');
+  });
+
+  test('the canonical "Integraciones" entry still points at /connections', () => {
+    const connections = REKREATIVE_PRIMARY.find((n) => n.label === 'Integraciones');
+    expect(connections?.href).toBe('/connections');
   });
 
   test('digit shortcuts (1–9) map to the first 9 REKREATIVE views in visible order', () => {
