@@ -139,18 +139,29 @@ route, and nothing runs this automatically on boot or deploy. See
 npm run backup:sqlite
 ```
 
+`founder-os.db` is required. `bank.db` and `ledger.db` are optional: both
+are separate, independently-created stores (see `lib/bank.ts` and
+`lib/ledger.ts`) that legitimately do not exist until a finance statement
+has been viewed or uploaded in the app. A backup run does not require them
+to exist.
+
 What it does, in order:
 
-1. **Preflight**: opens all three source databases read-only
-   (`fileMustExist: true`, so a missing file throws instead of silently
-   creating an empty replacement, and a forced first-page read catches a
-   corrupt/non-SQLite file too). If **any** of the three is missing or
-   unreadable, the run aborts immediately with a non-zero exit and creates
-   **no** files at all, never a partial or misleading backup set.
-2. **Collision check**: if a snapshot or manifest filename for the run id
-   about to be used already exists on disk, the run aborts immediately and
-   creates no files. A backup never overwrites a previous set.
-3. **Snapshot**: for each source, calls `better-sqlite3`'s
+1. **Preflight**: opens each source database read-only
+   (`fileMustExist: true`, so an existing-but-unreadable file throws instead
+   of silently creating an empty replacement, and a forced first-page read
+   catches a corrupt/non-SQLite file too). `founder-os.db` is required - if
+   it is missing or unreadable, the run aborts immediately with a non-zero
+   exit and creates **no** files at all. `bank.db`/`ledger.db` are optional -
+   a missing one is not a failure, but an existing-and-unreadable one still
+   aborts the run the same as a required source, since "optional" means "may
+   be absent", never "may be corrupt".
+2. **Collision check**: only for sources that will actually produce a
+   snapshot this run (the ones that passed preflight), plus the manifest. If
+   a snapshot or manifest filename for the run id about to be used already
+   exists on disk, the run aborts immediately and creates no files. A backup
+   never overwrites a previous set.
+3. **Snapshot**: for each source that exists, calls `better-sqlite3`'s
    `Database#backup()` (the wrapped SQLite Online Backup API), which
    produces a transactionally consistent copy of a live WAL-mode database
    without stopping the app or requiring a manual checkpoint. Snapshots land
@@ -163,26 +174,36 @@ What it does, in order:
    created, that failure is caught per source: the snapshot file is kept on
    disk as failed-run evidence, and the run is marked failed rather than
    crashing partway through.
-5. **Manifest**: writes one `data/backups/manifest-<timestamp>.json`
-   recording, per database: source name, source path, snapshot filename,
-   byte size, timestamp, SHA-256, and integrity result (or the error, for a
-   source that failed verification). The founder-os.db entry additionally
-   records row counts for `agent_messages`, `agent_runs`, and `broadcasts`,
-   the tables flagged as unbounded-growth risks, so growth is visible in
-   every run without needing a separate query.
-6. **Retention**: only when **all three** snapshots pass verification, keeps
-   the latest 3 successful backup sets under `data/backups/` and deletes the
-   snapshot and manifest files of any older successful sets. A manifest is
-   only trusted for retention if it is structurally exact: its own filename
-   matches its declared run id, it lists exactly one entry per required
-   source with no duplicates and no unexpected sources, and every entry
-   filename equals exactly what that source and run id would produce, with
-   no path separators of any kind. Deletion additionally only ever unlinks a
-   path whose resolved parent directory is exactly the resolved backups
-   directory, so a source `.db`, a `-wal`/`-shm` sidecar, a file outside
-   `data/backups/`, or any manifest that fails validation is never a
-   deletion candidate. A run that fails verification skips retention
-   entirely, so failed-run evidence is never auto-deleted.
+5. **Manifest**: writes one `data/backups/manifest-<timestamp>.json` with
+   exactly one entry per known source (`founder-os`, `bank`, `ledger`),
+   always. A source that was actually backed up records: source name, source
+   path, snapshot filename, byte size, timestamp, SHA-256, and integrity
+   result (or the error, for a source that failed verification). The
+   founder-os.db entry additionally records row counts for
+   `agent_messages`, `agent_runs`, and `broadcasts`, the tables flagged as
+   unbounded-growth risks, so growth is visible in every run without needing
+   a separate query. An optional source that does not exist yet gets a
+   `not_present` entry instead: no filename, no byte size, no checksum, no
+   row counts. The overall run is `ok` only when `founder-os` is `ok` and
+   every optional source is either `ok` or `not_present` - never when any
+   entry recorded an actual failure.
+6. **Retention**: only when the run is `ok`, keeps the latest 3 successful
+   backup sets under `data/backups/` and deletes the snapshot and manifest
+   files of any older successful sets. A manifest is only trusted for
+   retention if it is structurally exact: its own filename matches its
+   declared run id, it lists exactly one entry per known source with no
+   duplicates and no unexpected sources, the founder-os entry is `ok` with
+   its exact owned filename, and each optional entry is either `ok` with its
+   exact owned filename or `not_present` with no filename and no file
+   metadata attached (a `not_present` entry carrying a filename or any
+   byte size/checksum/integrity/row-count data is rejected, along with the
+   whole manifest). Deletion additionally only ever unlinks a path whose
+   resolved parent directory is exactly the resolved backups directory, so a
+   source `.db`, a `-wal`/`-shm` sidecar, a file outside `data/backups/`, or
+   any manifest that fails validation is never a deletion candidate, and a
+   `not_present` entry never causes a file to be invented or deleted. A run
+   that fails verification skips retention entirely, so failed-run evidence
+   is never auto-deleted.
 
 `data/backups/` is gitignored (`.gitignore`); it must never be committed.
 

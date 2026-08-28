@@ -16,6 +16,10 @@ export async function runCli(overrides: RunBackupOptions = {}): Promise<boolean>
 
     console.log(`SQLite backup run ${result.manifest.runId}${result.ok ? '' : ', FAILED VERIFICATION'}`);
     for (const entry of result.manifest.entries) {
+      if (entry.status === 'not_present') {
+        console.log(`  ${entry.source.padEnd(10)} not_present - optional, not created yet (${entry.sourcePath})`);
+        continue;
+      }
       const size = entry.bytes != null ? `${(entry.bytes / 1024).toFixed(1)} KiB` : 'n/a';
       console.log(`  ${entry.source.padEnd(10)} ${entry.status.padEnd(19)} ${size.padEnd(10)} sha256=${entry.sha256 ?? 'n/a'}`);
       if (entry.rowCounts) console.log(`             rowCounts: ${JSON.stringify(entry.rowCounts)}`);
