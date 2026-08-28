@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { parseBankStatementSummary } from '@/lib/bank-statements';
 import { openBankStore } from '@/lib/bank';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { unexpectedError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -57,8 +58,11 @@ export async function POST(req: Request) {
   let text: string;
   try {
     text = await pdfToText(buf);
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+  } catch (error) {
+    // pdftotext's own error can carry local binary paths and command
+    // stderr — never forward it raw to the client. Logged server-side by
+    // unexpectedError(), same convention as every Backend V1 route.
+    return unexpectedError('POST /api/finances/bank-statement (pdftotext)', error);
   }
 
   const summary = parseBankStatementSummary(text);
@@ -70,6 +74,9 @@ export async function POST(req: Request) {
   // control (e.g. a fresh environment's data/ dir — see lib/bank.ts). Never
   // let that surface as an empty/non-JSON 500 — StatementUploader always
   // calls response.json(), so every path here must return a real JSON body.
+  // The user-facing message stays a fixed, static string (never the raw
+  // error) — logged server-side first so this failure is no longer silently
+  // swallowed.
   try {
     const store = openBankStore();
     try {
@@ -78,7 +85,8 @@ export async function POST(req: Request) {
       store.close();
     }
     return NextResponse.json({ summary });
-  } catch {
+  } catch (error) {
+    console.error('[api] POST /api/finances/bank-statement (bank store):', error);
     return NextResponse.json({ error: 'No se pudo procesar el extracto' }, { status: 500 });
   }
 }

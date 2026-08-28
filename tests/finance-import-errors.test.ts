@@ -108,4 +108,35 @@ describe('POST /api/finances/bank-statement — JSON error hardening', () => {
     expect(data.error.length).toBeGreaterThan(0);
     expect(data.error).not.toMatch(/[/\\]/);
   });
+
+  it('[F] never returns the raw pdftotext error message (Observability Phase 1 fix — was a confirmed leak)', async () => {
+    const secretDetail = '/very/secret/local/pdftotext/path: permission denied';
+    vi.doMock('node:child_process', () => ({
+      execFile: (
+        _cmd: string,
+        _args: string[],
+        _opts: unknown,
+        cb: (err: Error | null, stdout: string) => void,
+      ) => {
+        // A non-ENOENT error rejects immediately (no candidate-path retry) —
+        // see app/api/finances/bank-statement/route.ts's pdfToText().
+        cb(Object.assign(new Error(secretDetail), { code: 'EACCES' }), '');
+        return { stdin: { end: () => {} } };
+      },
+    }));
+
+    const { POST } = await import('@/app/api/finances/bank-statement/route');
+    const res = await POST(
+      new Request('http://x/api/finances/bank-statement', {
+        method: 'POST',
+        body: new Uint8Array([1, 2, 3]),
+      }),
+    );
+
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data).toEqual({ error: 'internal server error' }); // the shared unexpectedError() shape, not the raw message
+    expect(JSON.stringify(data)).not.toContain(secretDetail);
+    expect(JSON.stringify(data)).not.toContain('/very/secret');
+  });
 });
