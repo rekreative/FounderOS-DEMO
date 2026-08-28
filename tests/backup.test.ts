@@ -10,6 +10,7 @@ import { openBankStore, type BankStore } from '@/lib/bank';
 import {
   applyRetention,
   checksumFile,
+  cleanupSnapshotSidecars,
   CollisionError,
   filesystemSafeTimestamp,
   isOwnedManifestFile,
@@ -205,6 +206,78 @@ describe('verifyIntegrity', () => {
   });
 });
 
+describe('cleanupSnapshotSidecars', () => {
+  const filename = snapshotFilename('founder-os', VALID_RUN_ID);
+
+  it('refuses to run against a filename that has not passed isOwnedSnapshotFile', () => {
+    tmp = makeTmpRoot();
+    fs.mkdirSync(tmp, { recursive: true });
+    expect(() => cleanupSnapshotSidecars(tmp, '../evil.db')).toThrow();
+    expect(() => cleanupSnapshotSidecars(tmp, 'founder-os.db')).toThrow(); // real source name, not a snapshot name
+  });
+
+  it('is a no-op when neither sidecar exists', () => {
+    tmp = makeTmpRoot();
+    fs.writeFileSync(path.join(tmp, filename), 'snapshot bytes');
+    const result = cleanupSnapshotSidecars(tmp, filename);
+    expect(result).toEqual({ status: 'clean', deleted: [] });
+  });
+
+  it('deletes a zero-byte WAL and its SHM', () => {
+    tmp = makeTmpRoot();
+    fs.writeFileSync(path.join(tmp, filename), 'snapshot bytes');
+    fs.writeFileSync(path.join(tmp, `${filename}-wal`), Buffer.alloc(0));
+    fs.writeFileSync(path.join(tmp, `${filename}-shm`), Buffer.alloc(32768));
+
+    const result = cleanupSnapshotSidecars(tmp, filename);
+
+    expect(result.status).toBe('clean');
+    expect((result as { deleted: string[] }).deleted.sort()).toEqual([`${filename}-shm`, `${filename}-wal`].sort());
+    expect(fs.existsSync(path.join(tmp, `${filename}-wal`))).toBe(false);
+    expect(fs.existsSync(path.join(tmp, `${filename}-shm`))).toBe(false);
+    // The snapshot itself is never touched by sidecar cleanup.
+    expect(fs.readFileSync(path.join(tmp, filename), 'utf8')).toBe('snapshot bytes');
+  });
+
+  it('deletes a zero-byte WAL when no SHM is present', () => {
+    tmp = makeTmpRoot();
+    fs.writeFileSync(path.join(tmp, filename), 'snapshot bytes');
+    fs.writeFileSync(path.join(tmp, `${filename}-wal`), Buffer.alloc(0));
+
+    const result = cleanupSnapshotSidecars(tmp, filename);
+
+    expect(result).toEqual({ status: 'clean', deleted: [`${filename}-wal`] });
+    expect(fs.existsSync(path.join(tmp, `${filename}-wal`))).toBe(false);
+  });
+
+  it('deletes an orphaned SHM when no WAL exists at all', () => {
+    tmp = makeTmpRoot();
+    fs.writeFileSync(path.join(tmp, filename), 'snapshot bytes');
+    fs.writeFileSync(path.join(tmp, `${filename}-shm`), Buffer.alloc(32768));
+
+    const result = cleanupSnapshotSidecars(tmp, filename);
+
+    expect(result).toEqual({ status: 'clean', deleted: [`${filename}-shm`] });
+    expect(fs.existsSync(path.join(tmp, `${filename}-shm`))).toBe(false);
+  });
+
+  it('preserves a non-empty WAL and its SHM instead of deleting them', () => {
+    tmp = makeTmpRoot();
+    const walBytes = Buffer.from('committed frames that never made it into the .db file');
+    fs.writeFileSync(path.join(tmp, filename), 'snapshot bytes');
+    fs.writeFileSync(path.join(tmp, `${filename}-wal`), walBytes);
+    fs.writeFileSync(path.join(tmp, `${filename}-shm`), Buffer.alloc(32768));
+
+    const result = cleanupSnapshotSidecars(tmp, filename);
+
+    expect(result).toEqual({ status: 'wal_nonempty', walBytes: walBytes.length });
+    // Nothing was deleted: the snapshot, its WAL, and its SHM all survive as evidence.
+    expect(fs.existsSync(path.join(tmp, filename))).toBe(true);
+    expect(fs.readFileSync(path.join(tmp, `${filename}-wal`))).toEqual(walBytes);
+    expect(fs.existsSync(path.join(tmp, `${filename}-shm`))).toBe(true);
+  });
+});
+
 describe('runBackup, happy path', () => {
   it('creates a consistent snapshot and manifest for all three databases, all ok, with row counts', async () => {
     tmp = makeTmpRoot();
@@ -257,6 +330,58 @@ describe('runBackup, happy path', () => {
     await runBackup({ cwd: tmp, now: () => new Date('2026-08-28T00:00:00.000Z') });
     const after = fs.readFileSync(founderOs);
     expect(after.equals(before)).toBe(true);
+  });
+
+  it('finishes with only the three verified .db snapshots and one manifest - no -wal/-shm sidecars', async () => {
+    // Every source is opened with PRAGMA journal_mode = WAL (lib/db.ts,
+    // lib/bank.ts, lib/ledger.ts), and the Online Backup API copies that
+    // WAL-format page 1 verbatim into the destination snapshot. Reading the
+    // snapshot back during inspection (verifyIntegrity, growingTableCounts)
+    // then makes SQLite create real -wal/-shm sidecars for it, exactly as
+    // observed in production. A successful run must clean those up so only
+    // the owned .db snapshots and the manifest remain.
+    tmp = makeTmpRoot();
+    seedAllFixtures(tmp);
+    const fixedNow = new Date('2026-08-28T14:32:05.123Z');
+
+    const result = await runBackup({ cwd: tmp, now: () => fixedNow });
+    expect(result.ok).toBe(true);
+
+    const backupDir = path.join(tmp, 'data', 'backups');
+    const actual = fs.readdirSync(backupDir).sort();
+    const expected = [
+      ...result.manifest.entries.map((e) => e.filename as string),
+      manifestFilename(result.manifest.runId),
+    ].sort();
+    expect(actual).toEqual(expected);
+    for (const name of actual) {
+      expect(name.endsWith('.db') || name.startsWith('manifest-')).toBe(true);
+      expect(name).not.toMatch(/-wal$|-shm$/);
+    }
+  });
+
+  it('never deletes or modifies WAL/SHM sidecars sitting next to a source database', async () => {
+    // Note: openSourcesReadonly's own preflight open (WAL-format sources,
+    // same read-time side effect documented on cleanupSnapshotSidecars) can
+    // itself leave fresh -wal/-shm files next to every source .db - that is
+    // a real, separate, out-of-scope side effect, not this test's concern.
+    // What this test proves is that none of this module's sidecar-cleanup
+    // or retention logic - which only ever operates inside data/backups/ -
+    // ever deletes or modifies a source-side sidecar, planted here before
+    // preflight runs, no matter what preflight itself later does to it.
+    tmp = makeTmpRoot();
+    const { founderOs } = seedAllFixtures(tmp);
+
+    const staleWal = Buffer.from('pre-existing source wal, must never be deleted or modified');
+    fs.writeFileSync(`${founderOs}-wal`, staleWal);
+
+    const result = await runBackup({ cwd: tmp, now: () => new Date('2026-08-28T00:00:00.000Z') });
+
+    expect(result.ok).toBe(true);
+    // Still present, and its content is at least as long as what was
+    // planted (preflight's own read may append/replace WAL content, but
+    // this module's code must never be the thing deleting the file).
+    expect(fs.existsSync(`${founderOs}-wal`)).toBe(true);
   });
 });
 
@@ -486,6 +611,51 @@ describe('runBackup, post-snapshot verification failure', () => {
   });
 });
 
+describe('runBackup, non-empty WAL sidecar after inspection', () => {
+  it('marks that source verification_failed, preserves the snapshot/WAL/SHM as evidence, and skips retention', async () => {
+    tmp = makeTmpRoot();
+    seedAllFixtures(tmp);
+    const fixedNow = new Date('2026-08-28T00:00:00.000Z');
+
+    // Runs the real inspection (so integrity/hash/rowCounts all genuinely
+    // pass), then simulates the one failure mode cleanupSnapshotSidecars
+    // must refuse to paper over: a WAL sidecar that is not empty, meaning
+    // the .db file alone may not be the true final state.
+    const injectedWalBytes = Buffer.from('simulated committed frames never checkpointed into the .db');
+    const injectNonEmptyWal = async (destPath: string): Promise<SnapshotInspection> => {
+      const { inspectSnapshot } = await import('@/lib/backup');
+      const inspection = await inspectSnapshot(destPath);
+      if (destPath.includes('founder-os-')) {
+        fs.writeFileSync(`${destPath}-wal`, injectedWalBytes);
+      }
+      return inspection;
+    };
+
+    const result = await runBackup({ cwd: tmp, now: () => fixedNow, inspectSnapshot: injectNonEmptyWal });
+
+    expect(result.ok).toBe(false);
+    const founderEntry = result.manifest.entries.find((e) => e.source === 'founder-os')!;
+    expect(founderEntry.status).toBe('verification_failed');
+    expect(founderEntry.error).toMatch(/non-empty/);
+    expect(founderEntry.bytes).toBeNull();
+    expect(founderEntry.sha256).toBeNull();
+
+    const bankEntry = result.manifest.entries.find((e) => e.source === 'bank')!;
+    const ledgerEntry = result.manifest.entries.find((e) => e.source === 'ledger')!;
+    expect(bankEntry.status).toBe('ok');
+    expect(ledgerEntry.status).toBe('ok');
+
+    const backupDir = path.join(tmp, 'data', 'backups');
+    const founderSnapshotPath = path.join(backupDir, founderEntry.filename as string);
+    expect(fs.existsSync(founderSnapshotPath)).toBe(true);
+    expect(fs.readFileSync(`${founderSnapshotPath}-wal`)).toEqual(injectedWalBytes);
+
+    // Retention never runs for a failed set, so bank/ledger's own (real,
+    // zero-byte) sidecars from inspection are moot here - nothing is pruned.
+    expect(result.retention.applied).toBe(false);
+  });
+});
+
 describe('scripts/backup-sqlite.ts runCli', () => {
   it('returns true and writes a manifest for a valid fixture set', async () => {
     tmp = makeTmpRoot();
@@ -629,6 +799,46 @@ describe('applyRetention', () => {
         expect(fs.existsSync(path.join(backupDir, snapshotFilename(source, id)))).toBe(true);
       }
     }
+  });
+
+  it('deletes orphaned -wal/-shm sidecars for a pruned set, but only those derived from its own validated snapshot filenames', () => {
+    tmp = makeTmpRoot();
+    const backupDir = path.join(tmp, 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+
+    const ids = ['2026-08-01T00-00-00.000Z', '2026-08-02T00-00-00.000Z', '2026-08-03T00-00-00.000Z', '2026-08-04T00-00-00.000Z'];
+    for (const id of ids) writeFakeSet(backupDir, id, true);
+
+    // A leftover sidecar pair for the oldest (about-to-be-pruned) set's own
+    // founder-os snapshot - exactly what an older backup or a manual restore
+    // could leave behind, since a successful run now cleans its own via
+    // cleanupSnapshotSidecars.
+    const prunedFilename = snapshotFilename('founder-os', ids[0]);
+    fs.writeFileSync(path.join(backupDir, `${prunedFilename}-wal`), 'orphaned wal');
+    fs.writeFileSync(path.join(backupDir, `${prunedFilename}-shm`), 'orphaned shm');
+
+    // A sidecar pair for a KEPT set's snapshot - must survive untouched.
+    const keptFilename = snapshotFilename('founder-os', ids[ids.length - 1]);
+    fs.writeFileSync(path.join(backupDir, `${keptFilename}-wal`), 'kept wal');
+
+    // A sidecar-shaped file that does not belong to any validated snapshot
+    // at all (made-up timestamp, never part of any manifest) - must never be
+    // touched, since sidecar names are only ever derived from filenames
+    // validateManifestForRetention already proved own, never invented.
+    const unrelatedName = `${snapshotFilename('founder-os', '2099-01-01T00-00-00.000Z')}-wal`;
+    fs.writeFileSync(path.join(backupDir, unrelatedName), 'unrelated, unowned sidecar');
+
+    const result = applyRetention(backupDir, 3);
+
+    expect(result.keptRunIds).toEqual([ids[3], ids[2], ids[1]]);
+    expect(result.deletedFiles).toEqual(
+      expect.arrayContaining([`${prunedFilename}-wal`, `${prunedFilename}-shm`]),
+    );
+    expect(fs.existsSync(path.join(backupDir, `${prunedFilename}-wal`))).toBe(false);
+    expect(fs.existsSync(path.join(backupDir, `${prunedFilename}-shm`))).toBe(false);
+
+    expect(fs.readFileSync(path.join(backupDir, `${keptFilename}-wal`), 'utf8')).toBe('kept wal');
+    expect(fs.readFileSync(path.join(backupDir, unrelatedName), 'utf8')).toBe('unrelated, unowned sidecar');
   });
 
   it('never deletes a failed set evidence, even when older than every kept successful set', () => {
