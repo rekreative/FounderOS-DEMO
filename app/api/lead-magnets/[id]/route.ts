@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getDb } from '@/lib/data';
 import { LeadMagnetStatusSchema } from '@/lib/schemas';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { unexpectedError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,22 +33,30 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const parsed = PatchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const db = getDb();
-  const existing = db.leadMagnets.byId(params.id);
-  if (!existing) return NextResponse.json({ error: 'lead magnet not found' }, { status: 404 });
+  try {
+    const db = getDb();
+    const existing = db.leadMagnets.byId(params.id);
+    if (!existing) return NextResponse.json({ error: 'lead magnet not found' }, { status: 404 });
 
-  // id and origin are not editable: the id is referenced by whatever links to
-  // it, and origin is what protects an OS-made row from the seed.
-  const updated = { ...existing, ...parsed.data, id: existing.id, origin: existing.origin };
-  db.leadMagnets.insert(updated);
-  return NextResponse.json({ leadMagnet: updated });
+    // id and origin are not editable: the id is referenced by whatever links to
+    // it, and origin is what protects an OS-made row from the seed.
+    const updated = { ...existing, ...parsed.data, id: existing.id, origin: existing.origin };
+    db.leadMagnets.insert(updated);
+    return NextResponse.json({ leadMagnet: updated });
+  } catch (error) {
+    return unexpectedError('PATCH /api/lead-magnets/[id]', error);
+  }
 }
 
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   const auth = await requireInternalUserOrResponse();
   if ('response' in auth) return auth.response;
 
-  const removed = getDb().leadMagnets.remove(params.id);
-  if (!removed) return NextResponse.json({ error: 'lead magnet not found' }, { status: 404 });
-  return NextResponse.json({ ok: true, id: params.id });
+  try {
+    const removed = getDb().leadMagnets.remove(params.id);
+    if (!removed) return NextResponse.json({ error: 'lead magnet not found' }, { status: 404 });
+    return NextResponse.json({ ok: true, id: params.id });
+  } catch (error) {
+    return unexpectedError('DELETE /api/lead-magnets/[id]', error);
+  }
 }

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getDb } from '@/lib/data';
 import { LeadMagnetStatusSchema } from '@/lib/schemas';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { unexpectedError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,7 +43,11 @@ export async function GET() {
   const auth = await requireInternalUserOrResponse();
   if ('response' in auth) return auth.response;
 
-  return NextResponse.json({ leadMagnets: getDb().leadMagnets.all() });
+  try {
+    return NextResponse.json({ leadMagnets: getDb().leadMagnets.all() });
+  } catch (error) {
+    return unexpectedError('GET /api/lead-magnets', error);
+  }
 }
 
 export async function POST(req: Request) {
@@ -54,19 +59,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const input = parsed.data;
-  const db = getDb();
 
-  const base = slugify(input.name) || 'lead-magnet';
-  const taken = new Set(db.leadMagnets.all().map((m) => m.id));
-  let id = base;
-  for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+  try {
+    const db = getDb();
 
-  const row = {
-    ...input,
-    id,
-    launchedAt: input.launchedAt ?? new Date().toISOString().slice(0, 10),
-    origin: 'os' as const,
-  };
-  db.leadMagnets.insert(row);
-  return NextResponse.json({ leadMagnet: row }, { status: 201 });
+    const base = slugify(input.name) || 'lead-magnet';
+    const taken = new Set(db.leadMagnets.all().map((m) => m.id));
+    let id = base;
+    for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+
+    const row = {
+      ...input,
+      id,
+      launchedAt: input.launchedAt ?? new Date().toISOString().slice(0, 10),
+      origin: 'os' as const,
+    };
+    db.leadMagnets.insert(row);
+    return NextResponse.json({ leadMagnet: row }, { status: 201 });
+  } catch (error) {
+    return unexpectedError('POST /api/lead-magnets', error);
+  }
 }

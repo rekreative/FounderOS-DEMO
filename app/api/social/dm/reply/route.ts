@@ -4,6 +4,7 @@ import { getDb } from '@/lib/data';
 import { sendManyChatText } from '@/lib/connectors/manychat';
 import type { SocialDmMessage } from '@/lib/schemas';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { unexpectedError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,24 +34,30 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: result.detail }, { status: 502 });
   }
 
-  const db = getDb();
-  // Carry the display name/handle from the existing thread so the stored
-  // outbound message renders consistently.
-  const prior = db.social.dmMessages('instagram').find((m) => m.subscriberId === subscriberId);
-  const ts = new Date().toISOString();
-  const message: SocialDmMessage = {
-    id: `mc-out-${subscriberId}-${ts}`,
-    platform: 'instagram',
-    subscriberId,
-    name: prior?.name ?? subscriberId,
-    handle: prior?.handle ?? null,
-    text,
-    direction: 'out',
-    tag: null,
-    ts,
-    source: 'manychat',
-  };
-  db.social.upsertDmMessage(message);
+  try {
+    const db = getDb();
+    // Carry the display name/handle from the existing thread so the stored
+    // outbound message renders consistently.
+    const prior = db.social.dmMessages('instagram').find((m) => m.subscriberId === subscriberId);
+    const ts = new Date().toISOString();
+    const message: SocialDmMessage = {
+      id: `mc-out-${subscriberId}-${ts}`,
+      platform: 'instagram',
+      subscriberId,
+      name: prior?.name ?? subscriberId,
+      handle: prior?.handle ?? null,
+      text,
+      direction: 'out',
+      tag: null,
+      ts,
+      source: 'manychat',
+    };
+    db.social.upsertDmMessage(message);
 
-  return NextResponse.json({ ok: true, message });
+    return NextResponse.json({ ok: true, message });
+  } catch (error) {
+    // The ManyChat send above already succeeded at this point — only the
+    // local SQLite persistence step below can fail here.
+    return unexpectedError('POST /api/social/dm/reply', error);
+  }
 }

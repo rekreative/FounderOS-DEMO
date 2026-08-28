@@ -4,6 +4,7 @@ import { realAgents } from '@/lib/agents/real';
 import { chatWithAgent } from '@/lib/agents/chat';
 import { routeConductorMessage } from '@/lib/agents/conductor';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { unexpectedError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs'; // better-sqlite3 is native — keep off the edge runtime
@@ -38,7 +39,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       ? await routeConductorMessage(getDb(), realAgents, message, { screenContext })
       : await chatWithAgent(getDb(), realAgents, params.id, message, { screenContext });
     return NextResponse.json(result);
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  } catch (error) {
+    return unexpectedError('POST /api/agents/[id]/chat', error);
   }
 }

@@ -3,6 +3,7 @@ import { getDb } from '@/lib/data';
 import { platformDetail, syncFromZernioConfig } from '@/lib/social';
 import type { SocialPlatform } from '@/lib/schemas';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { unexpectedError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,11 +11,15 @@ export async function GET(_req: Request, { params }: { params: { platform: strin
   const auth = await requireInternalUserOrResponse();
   if ('response' in auth) return auth.response;
 
-  const db = getDb();
-  syncFromZernioConfig(db);
-  const detail = platformDetail(db, params.platform as SocialPlatform);
-  if (!detail) {
-    return NextResponse.json({ error: `unknown platform: ${params.platform}` }, { status: 404 });
+  try {
+    const db = getDb();
+    syncFromZernioConfig(db);
+    const detail = platformDetail(db, params.platform as SocialPlatform);
+    if (!detail) {
+      return NextResponse.json({ error: `unknown platform: ${params.platform}` }, { status: 404 });
+    }
+    return NextResponse.json(detail);
+  } catch (error) {
+    return unexpectedError('GET /api/social/[platform]', error);
   }
-  return NextResponse.json(detail);
 }
