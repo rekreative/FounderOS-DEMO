@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getDb } from '@/lib/data';
 import { SocialPlatformSchema, type SocialPost } from '@/lib/schemas';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { unexpectedError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +13,11 @@ export async function GET() {
   const auth = await requireInternalUserOrResponse();
   if ('response' in auth) return auth.response;
 
-  return NextResponse.json({ posts: getDb().socialPosts.all() });
+  try {
+    return NextResponse.json({ posts: getDb().socialPosts.all() });
+  } catch (error) {
+    return unexpectedError('GET /api/social/posts', error);
+  }
 }
 
 const CreateSchema = z.object({
@@ -34,15 +39,19 @@ export async function POST(request: Request) {
   const parsed = CreateSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const post: SocialPost = {
-    id: randomUUID(),
-    caption: parsed.data.caption,
-    mediaUrl: parsed.data.mediaUrl ?? null,
-    platforms: parsed.data.platforms,
-    status: 'queued',
-    scheduledFor: parsed.data.scheduledFor ?? null,
-    createdAt: new Date().toISOString(),
-  };
-  getDb().socialPosts.enqueue(post);
-  return NextResponse.json({ post }, { status: 201 });
+  try {
+    const post: SocialPost = {
+      id: randomUUID(),
+      caption: parsed.data.caption,
+      mediaUrl: parsed.data.mediaUrl ?? null,
+      platforms: parsed.data.platforms,
+      status: 'queued',
+      scheduledFor: parsed.data.scheduledFor ?? null,
+      createdAt: new Date().toISOString(),
+    };
+    getDb().socialPosts.enqueue(post);
+    return NextResponse.json({ post }, { status: 201 });
+  } catch (error) {
+    return unexpectedError('POST /api/social/posts', error);
+  }
 }

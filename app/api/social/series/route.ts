@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/data';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { unexpectedError } from '@/lib/server/http';
 import {
   audienceSeries,
   dmSeries,
@@ -22,21 +23,25 @@ export async function GET(request: Request) {
   if ('response' in auth) return auth.response;
 
   const metric = new URL(request.url).searchParams.get('metric');
-  const db = getDb();
-  syncFromZernioConfig(db);
-
-  if (metric === 'audience') {
-    const { channels, all } = audienceSeries(db);
-    return NextResponse.json({ metric, ranges: GROWTH_RANGES, series: [all, ...channels] });
+  if (metric !== 'audience' && metric !== 'dms') {
+    return NextResponse.json({ error: "metric must be 'audience' or 'dms'" }, { status: 400 });
   }
 
-  if (metric === 'dms') {
+  try {
+    const db = getDb();
+    syncFromZernioConfig(db);
+
+    if (metric === 'audience') {
+      const { channels, all } = audienceSeries(db);
+      return NextResponse.json({ metric, ranges: GROWTH_RANGES, series: [all, ...channels] });
+    }
+
     return NextResponse.json({
       metric,
       ranges: GROWTH_RANGES,
       series: [{ key: 'total', label: 'Total DMs', color: DM_COLOR, points: dmSeries(db) }],
     });
+  } catch (error) {
+    return unexpectedError('GET /api/social/series', error);
   }
-
-  return NextResponse.json({ error: "metric must be 'audience' or 'dms'" }, { status: 400 });
 }

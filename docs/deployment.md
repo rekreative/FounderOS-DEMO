@@ -143,13 +143,24 @@ otherwise-healthy Next.js process:
   (`railway.toml`) actually probes; if the DB is briefly unreachable, the
   process still reports healthy and Railway keeps the replica up.
 - `GET /api/ready` — **application/database readiness**. Unauthenticated,
-  pings Postgres via the same `SELECT 1` primitive `lib/server/ops-status.ts`
-  uses (`{ ok: true }` HTTP 200 when reachable, `{ ok: false }` HTTP 503
-  otherwise, no raw error detail in the body). Useful for diagnostics and
-  external monitoring, but **not** consulted by Railway to decide whether
-  to keep the process alive.
+  returns `{ ok, checks: { postgres, sqlite } }`, HTTP 200 when `ok` is true
+  and HTTP 503 otherwise. No raw error detail, path, or stack ever appears
+  in the body. Useful for diagnostics and external monitoring, but **not**
+  consulted by Railway to decide whether to keep the process alive.
+  - `checks.postgres` is `"ok"` or `"error"` - pings Postgres via the same
+    `SELECT 1` primitive `lib/server/ops-status.ts` uses. Always required.
+  - `checks.sqlite` is `"not_required"`, `"ok"`, or `"error"`. It is
+    `"not_required"` (and never affects the overall `ok`) unless
+    `FOUNDER_OS_REQUIRE_EXISTING_DB=true` is set - see "Production SQLite
+    recreation guard" below. When required, the check opens founder-os.db
+    read-only with `fileMustExist: true` and forces one cheap page read
+    (`PRAGMA schema_version`) - never a full `integrity_check` on a probe
+    path. `bank.db`/`ledger.db` stay optional and are never checked here.
+    Implemented in `lib/server/sqlite-ready.ts`, deliberately independent of
+    `lib/data.ts`'s `getDb()`, which would auto-create/seed a missing file
+    instead of reporting it as not ready.
 
-Both are exact-match public routes — see `middleware.ts`'s
+Both are exact-match public routes - see `middleware.ts`'s
 `PUBLIC_STATUS_PATHS` exception, which lets them bypass the optional legacy
 `FOUNDER_OS_ACCESS_TOKEN` gate and the Supabase session check.
 
@@ -325,17 +336,54 @@ touching the live database. Treat this as the first completed recovery
 drill for this project - repeat it periodically rather than trusting the
 mechanism to still work untested.
 
-### Known gap: missing-database detection (deferred)
+### Production SQLite recreation guard
 
-`getDb()` (`lib/data.ts`) cannot currently distinguish "this is a genuinely
+`getDb()` (`lib/data.ts`) cannot on its own distinguish "this is a genuinely
 new environment's first boot" from "the production volume was lost and
-recreated"; both look identical from inside the app, an empty database that
-gets auto-seeded. A marker row stored inside `founder-os.db` itself was
-considered and rejected: it disappears with the exact volume loss it would
-need to detect, so it cannot prove anything. No fix was found that is
-unambiguous without external state outside the SQLite volume. The
-recommended follow-up (not implemented here, requires its own explicit
-scope): record a small "last known SQLite install id / last-backup-seen"
-signal in Postgres, which is already durable and independent of the Railway
-volume, and compare against it at boot. That is a schema change and a
-product decision on its own, deliberately out of scope for this pass.
+recreated" - both look identical from inside the app: an empty database that
+gets auto-seeded. A marker row stored inside `founder-os.db` itself, or
+inside PostgreSQL, was considered and rejected for Phase 1: an in-SQLite
+marker disappears with the exact volume loss it would need to detect, and a
+Postgres-side marker adds a schema change, a new dependency between two
+otherwise-independent stores, and a product decision (what happens at boot
+when Postgres itself is unreachable) that is its own scope, not this one.
+
+The Phase 1 fix instead uses an explicit, non-secret environment flag:
+
+```
+FOUNDER_OS_REQUIRE_EXISTING_DB=true
+```
+
+When set to exactly `true`, `getDb()` refuses to auto-create or seed
+founder-os.db if the file configured by `FOUNDER_OS_DB` does not already
+exist on disk - it throws a dedicated error (`FounderDbMissingError`, no
+path or other detail in its message) instead. `GET /api/ready` also honors
+this flag: when set, it opens founder-os.db read-only and reports
+`checks.sqlite: "error"` (503 overall) if the file is missing or will not
+open, instead of silently reporting ready. See `lib/server/sqlite-ready.ts`.
+
+With the flag unset (the default for local dev, CI, and tests), behavior is
+completely unchanged: a missing founder-os.db is still auto-created and
+seeded on first touch, and `/api/ready` reports `checks.sqlite:
+"not_required"`.
+
+**Production rollout order** (do not skip or reorder these steps):
+
+1. Confirm `/app/data/founder-os.db` already exists on the Railway volume
+   (it does today, per the recovery drill above).
+2. Deploy the guard and readiness code (this change) with the flag still
+   unset - this is a no-op deploy for production behavior.
+3. Enable `FOUNDER_OS_REQUIRE_EXISTING_DB=true` as a Railway service
+   variable.
+4. Redeploy.
+5. Verify `GET /api/ready` returns `checks.sqlite: "ok"` and `ok: true`.
+
+**Rollback**: unset `FOUNDER_OS_REQUIRE_EXISTING_DB` (or set it to anything
+other than exactly `true`) and redeploy. This immediately restores today's
+auto-create-and-seed behavior with no other change required.
+
+This flag detects a missing file, not a restored-but-stale volume. A more
+precise check - recording a small "last known SQLite install id" in
+Postgres, which is durable and independent of the Railway volume, and
+comparing against it at boot - remains a deliberately deferred, separately
+scoped follow-up, not implemented here.

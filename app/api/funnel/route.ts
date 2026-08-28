@@ -6,6 +6,7 @@ import { ghlFunnelJourneys } from '@/lib/funnel-ghl';
 import { mergeTrakyoTouches, trakyoTouches } from '@/lib/funnel-trakyo';
 import { FunnelVentureSchema, type FunnelVenture } from '@/lib/schemas';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { unexpectedError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,30 +23,35 @@ export async function GET(req: Request) {
     }
     venture = parsed.data;
   }
-  const now = new Date();
-  // Live Attio ∪ GHL when available (Attio venture = deal-name heuristic,
-  // GHL is all LC); seeded funnel otherwise. Quiet >90d splits into `archived`.
-  const [attioLive, ghlLive] = await Promise.all([attioFunnelJourneys(now), ghlFunnelJourneys(now)]);
-  const liveJourneys = [...(attioLive?.journeys ?? []), ...(ghlLive?.journeys ?? [])];
-  const isLive = liveJourneys.length > 0;
-  const all = isLive
-    ? mergeTrakyoTouches(liveJourneys, await trakyoTouches()).filter((j) => !venture || j.venture === venture)
-    : getDb().funnel.journeys(venture);
-  const { active, archived } = splitFunnelJourneys(all, now);
-  return NextResponse.json({
-    summary: funnelSummary(active),
-    journeys: active,
-    archived,
-    source: isLive
-      ? [attioLive?.journeys.length ? 'attio' : null, ghlLive?.journeys.length ? 'ghl' : null]
-          .filter(Boolean)
-          .join('+')
-      : 'seed',
-    ...(isLive
-      ? {
-          excluded: (attioLive?.closedLost ?? 0) + (ghlLive?.excluded ?? 0),
-          total: (attioLive?.total ?? 0) + (ghlLive?.total ?? 0),
-        }
-      : {}),
-  });
+
+  try {
+    const now = new Date();
+    // Live Attio ∪ GHL when available (Attio venture = deal-name heuristic,
+    // GHL is all LC); seeded funnel otherwise. Quiet >90d splits into `archived`.
+    const [attioLive, ghlLive] = await Promise.all([attioFunnelJourneys(now), ghlFunnelJourneys(now)]);
+    const liveJourneys = [...(attioLive?.journeys ?? []), ...(ghlLive?.journeys ?? [])];
+    const isLive = liveJourneys.length > 0;
+    const all = isLive
+      ? mergeTrakyoTouches(liveJourneys, await trakyoTouches()).filter((j) => !venture || j.venture === venture)
+      : getDb().funnel.journeys(venture);
+    const { active, archived } = splitFunnelJourneys(all, now);
+    return NextResponse.json({
+      summary: funnelSummary(active),
+      journeys: active,
+      archived,
+      source: isLive
+        ? [attioLive?.journeys.length ? 'attio' : null, ghlLive?.journeys.length ? 'ghl' : null]
+            .filter(Boolean)
+            .join('+')
+        : 'seed',
+      ...(isLive
+        ? {
+            excluded: (attioLive?.closedLost ?? 0) + (ghlLive?.excluded ?? 0),
+            total: (attioLive?.total ?? 0) + (ghlLive?.total ?? 0),
+          }
+        : {}),
+    });
+  } catch (error) {
+    return unexpectedError('GET /api/funnel', error);
+  }
 }

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/data';
 import { parseManyChatWebhook } from '@/lib/connectors/manychat-webhook';
 import { checkManyChatAuth, type ManyChatAuthFailureReason } from '@/lib/server/manychat-auth';
-import { jsonError } from '@/lib/server/http';
+import { jsonError, unexpectedError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,8 +41,12 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: 'payload missing a subscriber id' }, { status: 400 });
   }
 
-  getDb().social.upsertDmMessage(message);
-  return NextResponse.json({ ok: true, id: message.id, subscriberId: message.subscriberId });
+  try {
+    getDb().social.upsertDmMessage(message);
+    return NextResponse.json({ ok: true, id: message.id, subscriberId: message.subscriberId });
+  } catch (error) {
+    return unexpectedError('POST /api/webhooks/manychat', error);
+  }
 }
 
 /**

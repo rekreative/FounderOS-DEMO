@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ingestBrainDump } from '@/lib/brain-dump';
 import { createGBrainProvider, type CaptureInput } from '@/lib/connectors/gbrain';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { unexpectedError } from '@/lib/server/http';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,10 +30,7 @@ export async function POST(request: Request) {
           : (input: CaptureInput) => createGBrainProvider().capture(input),
     });
     return NextResponse.json({ ok: true, ...result });
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'write failed' },
-      { status: 500 },
-    );
+  } catch (error) {
+    return unexpectedError('POST /api/brain/dump', error);
   }
 }
