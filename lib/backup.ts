@@ -241,6 +241,78 @@ export async function backupOne(opened: OpenedSource, destPath: string): Promise
   await opened.db.backup(destPath);
 }
 
+/**
+ * `<filename>-wal`/`<filename>-shm` sidecars a snapshot can end up with.
+ * Root cause: the Online Backup API copies the source's raw page 1
+ * verbatim, including the file-format-version bytes that mark a WAL-mode
+ * database (all three source stores run `PRAGMA journal_mode = WAL`, see
+ * lib/db.ts, lib/bank.ts, lib/ledger.ts). The destination snapshot inherits
+ * that "WAL format" flag even though no separate WAL file was ever written
+ * for it during the backup itself. Any subsequent open of the snapshot -
+ * verifyIntegrity or growingTableCounts during inspectSnapshot, or a future
+ * manual restore/verify - then makes SQLite create -wal/-shm sidecars just
+ * to satisfy a WAL-format read, purely as a read-time side effect.
+ */
+export type SidecarCleanupResult =
+  | { status: 'clean'; deleted: string[] }
+  | { status: 'wal_nonempty'; walBytes: number };
+
+/**
+ * Cleans up the -wal/-shm sidecars for one snapshot, called only after every
+ * handle opened against it (by inspectSnapshot's verifyIntegrity and
+ * growingTableCounts, both of which close in a finally block) has already
+ * closed. `filename` MUST already be a filename that has passed
+ * isOwnedSnapshotFile - this function refuses to run otherwise, since a
+ * sidecar path may only ever be derived from an already-validated owned
+ * snapshot filename, never from an arbitrary string. The sidecar paths are
+ * built by string-appending '-wal'/'-shm' to that exact filename and
+ * resolving the result against backupDir; there is no directory scan and no
+ * glob, so nothing other than this exact snapshot's own sidecars can ever be
+ * touched. A non-empty WAL means the on-disk .db alone is not the true final
+ * state - some committed data may exist only in the WAL - so it is never
+ * silently deleted: this returns 'wal_nonempty' and leaves the snapshot, its
+ * WAL, and any SHM completely untouched as evidence. A zero-byte WAL carries
+ * no data and is safe to delete; the SHM (a shared-memory index, meaningless
+ * without a WAL) is only deleted once no non-empty WAL remains.
+ */
+export function cleanupSnapshotSidecars(backupDir: string, filename: string): SidecarCleanupResult {
+  if (!isOwnedSnapshotFile(filename)) {
+    throw new Error(`refusing to derive sidecar paths from an unvalidated filename: ${filename}`);
+  }
+
+  const resolvedDir = path.resolve(backupDir);
+  const walName = `${filename}-wal`;
+  const shmName = `${filename}-shm`;
+  const walPath = path.resolve(backupDir, walName);
+  const shmPath = path.resolve(backupDir, shmName);
+
+  // filename is already proven separator-free by isOwnedSnapshotFile, so
+  // these resolve to direct children of backupDir by construction - this is
+  // a second, independent check of that fact, mirroring
+  // unlinkWithinBackupDir's own resolved-parent guard.
+  if (path.dirname(walPath) !== resolvedDir || path.dirname(shmPath) !== resolvedDir) {
+    throw new Error(`sidecar path escaped the backup directory for filename: ${filename}`);
+  }
+
+  const deleted: string[] = [];
+
+  if (fs.existsSync(walPath)) {
+    const walBytes = fs.statSync(walPath).size;
+    if (walBytes > 0) {
+      return { status: 'wal_nonempty', walBytes };
+    }
+    fs.unlinkSync(walPath);
+    deleted.push(walName);
+  }
+
+  if (fs.existsSync(shmPath)) {
+    fs.unlinkSync(shmPath);
+    deleted.push(shmName);
+  }
+
+  return { status: 'clean', deleted };
+}
+
 export type IntegrityResult = { ok: boolean; detail: string[] };
 
 export function verifyIntegrity(filePath: string): IntegrityResult {
@@ -442,12 +514,17 @@ function validateManifestForRetention(manifestFileOnDisk: string, parsed: unknow
  * Applies retention to an existing backups directory: keeps the `keep` most
  * recent successful sets (every manifest field validated by
  * validateManifestForRetention) and deletes the snapshot and manifest files
- * of any older successful sets beyond that count. A set whose manifest
- * records `ok: false`, or that fails structural validation for any reason,
- * is never a deletion candidate regardless of age; failed-run evidence and
- * unrecognized files are preserved until a human clears them. Every file
- * considered for deletion also passes unlinkWithinBackupDir's resolved-path
- * check immediately before unlinking.
+ * of any older successful sets beyond that count, plus any -wal/-shm
+ * sidecars still orphaned next to a deleted snapshot (a successful run
+ * already cleans its own via cleanupSnapshotSidecars, but this catches
+ * sidecars left by an older backup or a manual restore). A set whose
+ * manifest records `ok: false`, or that fails structural validation for any
+ * reason, is never a deletion candidate regardless of age; failed-run
+ * evidence and unrecognized files are preserved until a human clears them.
+ * Every file considered for deletion, sidecars included, also passes
+ * unlinkWithinBackupDir's resolved-path check immediately before unlinking,
+ * and every sidecar name is derived only by appending onto a filename
+ * validateManifestForRetention already proved passes isOwnedSnapshotFile.
  */
 export function applyRetention(backupDir: string, keep: number): RetentionResult {
   if (!Number.isInteger(keep) || keep < 1) {
@@ -484,6 +561,15 @@ export function applyRetention(backupDir: string, keep: number): RetentionResult
   for (const set of toDelete) {
     for (const filename of set.entryFilenames) {
       if (unlinkWithinBackupDir(backupDir, filename)) deletedFiles.push(filename);
+      // Orphaned sidecars belonging exactly to this validated owned
+      // snapshot (see cleanupSnapshotSidecars's doc for how they can arise).
+      // Derived only by string-appending onto `filename`, which
+      // validateManifestForRetention already proved passes
+      // isOwnedSnapshotFile - never a glob, never a directory scan.
+      const walName = `${filename}-wal`;
+      if (unlinkWithinBackupDir(backupDir, walName)) deletedFiles.push(walName);
+      const shmName = `${filename}-shm`;
+      if (unlinkWithinBackupDir(backupDir, shmName)) deletedFiles.push(shmName);
     }
     if (unlinkWithinBackupDir(backupDir, set.manifestFile)) deletedFiles.push(set.manifestFile);
   }
@@ -519,10 +605,15 @@ export type RunBackupOptions = {
  *      to be used already exists on disk, throws CollisionError and
  *      creates no files. A backup never overwrites a previous set.
  *   4. For each opened source: snapshot via the Online Backup API, then
- *      inspect the snapshot (integrity_check, SHA-256, size, row counts).
- *      Either step failing is caught per source and recorded in that entry
- *      rather than aborting the whole run. Each optional source that was
- *      absent at preflight gets a 'not_present' entry instead, with no
+ *      inspect the snapshot (integrity_check, SHA-256, size, row counts),
+ *      then clean up any -wal/-shm sidecars that inspection left behind
+ *      (see cleanupSnapshotSidecars's doc for why they can appear at all). A
+ *      zero-byte WAL/its SHM are deleted; a non-empty WAL overrides an
+ *      otherwise-successful entry to 'verification_failed' and leaves the
+ *      snapshot, WAL, and SHM in place as evidence. Either the snapshot or
+ *      inspection step failing is caught per source and recorded in that
+ *      entry rather than aborting the whole run. Each optional source that
+ *      was absent at preflight gets a 'not_present' entry instead, with no
  *      filename and no file metadata.
  *   5. Writes one manifest for the run, always with exactly one entry per
  *      known source. `ok` is true only when founder-os's entry is 'ok' AND
@@ -619,7 +710,7 @@ export async function runBackup(options: RunBackupOptions = {}): Promise<BackupR
 
       try {
         const inspection = await inspect(destPath);
-        entries.push({
+        let entry: ManifestEntry = {
           source: src.name,
           sourcePath: src.path,
           filename,
@@ -629,7 +720,32 @@ export async function runBackup(options: RunBackupOptions = {}): Promise<BackupR
           sha256: inspection.sha256,
           integrityDetail: inspection.integrity.detail,
           rowCounts: inspection.rowCounts,
-        });
+        };
+
+        // Sidecar cleanup only runs here, after inspect() has returned and
+        // every handle it opened is already closed: inspecting the snapshot
+        // is what can create -wal/-shm in the first place (see
+        // cleanupSnapshotSidecars's doc). A non-empty WAL overrides an
+        // otherwise-successful entry to verification_failed - a successful
+        // backup set must never report success while its .db alone omits
+        // data that only exists in a leftover WAL.
+        const sidecars = cleanupSnapshotSidecars(backupDir, filename);
+        if (sidecars.status === 'wal_nonempty') {
+          entry = {
+            source: src.name,
+            sourcePath: src.path,
+            filename,
+            timestamp,
+            status: 'verification_failed',
+            bytes: null,
+            sha256: null,
+            integrityDetail: null,
+            rowCounts: null,
+            error: `snapshot WAL sidecar is non-empty (${sidecars.walBytes} bytes) after inspection; preserving snapshot, WAL, and SHM as evidence instead of reporting success`,
+          };
+        }
+
+        entries.push(entry);
       } catch (err) {
         // The snapshot file already exists on disk at this point and is
         // preserved as failed-run evidence: it is never deleted here, and

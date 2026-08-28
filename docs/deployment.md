@@ -39,6 +39,34 @@ must be configured in the Railway UI/project settings — it is not something
 this repository's config-as-code can safely express (see
 [Railway config](#railway-config-as-code) below).
 
+### Mandatory Railway path variables
+
+Do not rely on the `process.cwd()/data` default (see `lib/data.ts`,
+`lib/bank.ts`, `lib/ledger.ts`) in production. It is unsafe under Next.js
+`output: 'standalone'`: the generated `server.js` changes its own process's
+working directory to the standalone output folder on startup, so by the time
+a route first touches `getDb()`, `process.cwd()` no longer points at the
+repository root Railway mounts the volume onto. This was observed directly
+in production - before these variables were set, `founder-os.db` was created
+under `/app/.next/standalone/data`, not the mounted volume at `/app/data`,
+so every write was silently going to the container's ephemeral filesystem
+instead of persistent storage.
+
+The fix is to set explicit absolute paths so no code path ever falls back to
+`process.cwd()`. Set all three as Railway service variables:
+
+```
+FOUNDER_OS_DB=/app/data/founder-os.db
+BANK_DB=/app/data/bank.db
+LEDGER_DB=/app/data/ledger.db
+```
+
+`/app/data` is the persistent volume mount point for this service - the
+directory the Railway volume must cover, per the mount requirement above.
+After setting these three variables and redeploying, `founder-os.db` was
+confirmed created under `/app/data` on first visit to `/agents` (`GET
+/agents` triggers `getDb()`'s first touch, per `lib/data.ts`).
+
 **Deploying this architecture to an ephemeral or serverless filesystem
 (e.g. Vercel's default) is unsafe today.** Each cold start would reseed
 `data/founder-os.db` from scratch and silently lose everything written since
@@ -174,6 +202,23 @@ What it does, in order:
    created, that failure is caught per source: the snapshot file is kept on
    disk as failed-run evidence, and the run is marked failed rather than
    crashing partway through.
+   - **Sidecar cleanup**: every source database runs `PRAGMA journal_mode =
+     WAL`, and the Online Backup API copies the source's raw page 1
+     verbatim, so the destination snapshot inherits the WAL-format flag even
+     though no separate WAL file was ever written for it during the backup
+     itself. Reading the snapshot back for integrity_check and row counts
+     then makes SQLite create real `-wal`/`-shm` sidecars for it, purely as a
+     read-time side effect - this is exactly what produced the
+     `founder-os-<timestamp>.db-shm` and zero-byte
+     `founder-os-<timestamp>.db-wal` seen in the first real backup's
+     downloaded directory. After inspection, a zero-byte WAL and its SHM are
+     deleted; a non-empty WAL means the `.db` file alone may not be the true
+     final state, so it is never silently deleted - that source's entry is
+     marked `verification_failed` instead, and the snapshot, WAL, and SHM
+     are all preserved as evidence. Sidecar paths are only ever derived by
+     appending onto an already-validated owned snapshot filename, never from
+     a directory scan or glob, and this step never touches the source
+     database's own WAL/SHM files.
 5. **Manifest**: writes one `data/backups/manifest-<timestamp>.json` with
    exactly one entry per known source (`founder-os`, `bank`, `ledger`),
    always. A source that was actually backed up records: source name, source
@@ -199,11 +244,16 @@ What it does, in order:
    byte size/checksum/integrity/row-count data is rejected, along with the
    whole manifest). Deletion additionally only ever unlinks a path whose
    resolved parent directory is exactly the resolved backups directory, so a
-   source `.db`, a `-wal`/`-shm` sidecar, a file outside `data/backups/`, or
-   any manifest that fails validation is never a deletion candidate, and a
-   `not_present` entry never causes a file to be invented or deleted. A run
-   that fails verification skips retention entirely, so failed-run evidence
-   is never auto-deleted.
+   source `.db`, an unowned `-wal`/`-shm` sidecar, a file outside
+   `data/backups/`, or any manifest that fails validation is never a
+   deletion candidate, and a `not_present` entry never causes a file to be
+   invented or deleted. Deleting an older set's snapshot also removes any
+   `-wal`/`-shm` sidecar still sitting next to it (a successful run already
+   cleans its own during step 4, but this catches sidecars left by an older
+   backup or a manual restore) - each sidecar name is derived only by
+   appending onto that set's own validated snapshot filename, never a glob.
+   A run that fails verification skips retention entirely, so failed-run
+   evidence is never auto-deleted.
 
 `data/backups/` is gitignored (`.gitignore`); it must never be committed.
 
@@ -253,6 +303,27 @@ a `npm run backup:sqlite` that reported success.
    `/content/lead-magnets`, or `/finances`, depending on which database was
    restored) against what the manifest's row counts and summaries would
    predict.
+
+### First recovery drill (verified)
+
+The first real backup on the production volume, run after the Railway path
+variables above were set and `founder-os.db` was confirmed created under
+`/app/data`:
+
+- run id: `2026-08-28T15-54-51.085Z`
+- founder-os snapshot SHA-256:
+  `d5908b223c93ae21d82ea55236bc083175376ee3660eac89393c785f539b48cb`
+- integrity check: ok
+- isolated restore (a separate, disposable copy - never the live
+  production database): 6 departments, 30 agents, 0 agent_messages,
+  integrity ok
+
+This confirms the full loop end to end on real production data: a manual
+backup run, a `railway.cmd service files download` off the volume, and an
+isolated restore that opens and reads the downloaded snapshot without ever
+touching the live database. Treat this as the first completed recovery
+drill for this project - repeat it periodically rather than trusting the
+mechanism to still work untested.
 
 ### Known gap: missing-database detection (deferred)
 
