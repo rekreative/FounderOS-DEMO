@@ -91,6 +91,9 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
     // Results Manual Revenue V1's revenue-records route is the same shape
     // once more (real PostgreSQL only, requires a clientId) — full coverage
     // lives in tests/api-revenue-records.test.ts.
+    // G-Brain Postgres V1's knowledge-entries route is the same shape again
+    // (real PostgreSQL only, internal-auth-gated) — full coverage lives in
+    // tests/api-knowledge-entries.test.ts.
     // ready (Deployment Health V1) is the same shape once more — it pings
     // real PostgreSQL and honestly returns 503 (not 200) when unreachable,
     // which this SQLite-only smoke net can't satisfy by design. Full
@@ -112,6 +115,7 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
       'meta-ads/campaigns',
       'ready',
       'revenue-records',
+      'knowledge-entries',
     ]);
     const discovered = discoverGetRoutes(path.join(process.cwd(), 'app', 'api')).filter((r) => !IGNORE.has(r)).sort();
     const covered = ROUTES.map((r) => r.route).sort();

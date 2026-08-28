@@ -1,21 +1,23 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useClientsRegistry } from '@/components/ClientsProvider';
+import { ApiError } from '@/lib/api/http';
+import {
+  archiveKnowledgeEntry,
+  createKnowledgeEntry,
+  getKnowledgeEntries,
+  restoreKnowledgeEntry,
+  updateKnowledgeEntry,
+} from '@/lib/api/knowledge-entries';
 import {
   KNOWLEDGE_SOURCE_OPTIONS,
   KNOWLEDGE_TYPE_OPTIONS,
-  archiveKnowledgeEntry,
-  createKnowledgeEntry,
   getClientNameForKnowledgeEntry,
-  getKnowledgeEntries,
   getKnowledgeSourceLabel,
   getKnowledgeTypeLabel,
-  initializeKnowledgeStoreIfNeeded,
-  restoreKnowledgeEntry,
   searchKnowledgeEntries,
   summarizeKnowledgeEntries,
-  updateKnowledgeEntry,
   type KnowledgeEntry,
   type KnowledgeScope,
   type KnowledgeSource,
@@ -23,13 +25,13 @@ import {
 } from '@/lib/knowledge-entries';
 
 // G-Brain V1 — REKREATIVE's structured institutional memory. Global board:
-// every KnowledgeEntry, internal AND client, one store
-// (lib/knowledge-entries.ts). Client-scoped browsing/CRUD from inside a
-// client workspace goes through components/ClientKnowledgePanel.tsx instead
-// — same store, filtered by clientId, scope/client locked. This board is
-// intentionally plain: search + filters + a list + a detail/edit panel, no
-// graph, no fake AI. "Feels like a brain because it's structured and
-// retrievable" — see CLAUDE.md.
+// every KnowledgeEntry, internal AND client, one PostgreSQL-backed store
+// (lib/server/knowledge-entries-repo.ts, reached through lib/api/knowledge-entries.ts).
+// Client-scoped browsing/CRUD from inside a client workspace goes through
+// components/ClientKnowledgePanel.tsx instead — same store, filtered by
+// clientId, scope/client locked. This board is intentionally plain: search +
+// filters + a list + a detail/edit panel, no graph, no fake AI. "Feels like a
+// brain because it's structured and retrievable" — see CLAUDE.md.
 
 type StatusView = 'active' | 'archived';
 type ScopeFilter = 'all' | 'internal' | 'client';
@@ -139,8 +141,11 @@ function KnowledgeCard({
 
 export function KnowledgeBoard() {
   const [entries, setEntries] = useState<KnowledgeEntry[]>([]);
-  // Canonical PostgreSQL Client registry — Knowledge entries themselves stay
-  // localStorage; only client identity/selection moved.
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  // Canonical PostgreSQL Client registry — Knowledge entries are now the
+  // same PostgreSQL-backed source (G-Brain Postgres V1).
   const { clients } = useClientsRegistry();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -161,12 +166,26 @@ export function KnowledgeBoard() {
   // explicitly opted into. Off on every load.
   const [showDemo, setShowDemo] = useState(false);
 
-  useEffect(() => {
-    initializeKnowledgeStoreIfNeeded();
-    setEntries(getKnowledgeEntries());
+  const refresh = useCallback(async () => {
+    try {
+      const result = await getKnowledgeEntries();
+      setEntries(result);
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(error instanceof ApiError ? error.message : 'No se pudo cargar el conocimiento.');
+    }
   }, []);
 
-  const refresh = () => setEntries(getKnowledgeEntries());
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    refresh().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh]);
 
   const visibleEntries = useMemo(
     () => entries.filter((entry) => showDemo || entry.dataSource === 'manual'),
@@ -231,7 +250,7 @@ export function KnowledgeBoard() {
     setDraft(emptyDraft());
   };
 
-  const submit = () => {
+  const submit = async () => {
     const title = draft.title.trim();
     if (!title) return;
     if (draft.scope === 'client' && !draft.clientId) return;
@@ -248,41 +267,50 @@ export function KnowledgeBoard() {
       sourceLabel: draft.sourceLabel || null,
     };
 
+    setIsSaving(true);
     try {
       if (panelMode === 'edit' && activeEntry) {
-        const updated = updateKnowledgeEntry(activeEntry.id, payload);
-        refresh();
-        if (updated) openView(updated);
+        const updated = await updateKnowledgeEntry(activeEntry.id, payload);
+        await refresh();
+        openView(updated);
         return;
       }
 
-      createKnowledgeEntry({ ...payload, dataSource: 'manual' });
+      await createKnowledgeEntry(payload);
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'No se pudo guardar la entrada de conocimiento.');
+      setSaveError(error instanceof ApiError ? error.message : 'No se pudo guardar la entrada de conocimiento.');
       return;
+    } finally {
+      setIsSaving(false);
     }
 
-    refresh();
+    await refresh();
     closePanel();
   };
 
-  const handleArchive = (id: string) => {
+  const handleArchive = async (id: string) => {
+    setIsSaving(true);
     try {
-      const updated = archiveKnowledgeEntry(id);
-      refresh();
-      if (updated) openView(updated);
+      const updated = await archiveKnowledgeEntry(id);
+      await refresh();
+      openView(updated);
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'No se pudo archivar la entrada.');
+      setSaveError(error instanceof ApiError ? error.message : 'No se pudo archivar la entrada.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const handleRestore = (id: string) => {
+  const handleRestore = async (id: string) => {
+    setIsSaving(true);
     try {
-      const updated = restoreKnowledgeEntry(id);
-      refresh();
-      if (updated) openView(updated);
+      const updated = await restoreKnowledgeEntry(id);
+      await refresh();
+      openView(updated);
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'No se pudo restaurar la entrada.');
+      setSaveError(error instanceof ApiError ? error.message : 'No se pudo restaurar la entrada.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -301,6 +329,10 @@ export function KnowledgeBoard() {
           Nueva entrada
         </button>
       </div>
+
+      {loadError && (
+        <div className="mb-4 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{loadError}</div>
+      )}
 
       {/* Search — the primary way to find something, deliberately large */}
       <div className="mb-6">
@@ -419,7 +451,11 @@ export function KnowledgeBoard() {
         </div>
       </div>
 
-      {entries.length === 0 ? (
+      {loading ? (
+        <div className="border border-dashed border-os-border px-3 py-10 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+          Cargando conocimiento…
+        </div>
+      ) : entries.length === 0 ? (
         <div className="border border-dashed border-os-border px-3 py-10 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
           No hay conocimiento registrado todavía.
         </div>
@@ -514,23 +550,26 @@ export function KnowledgeBoard() {
                       <button
                         type="button"
                         onClick={() => handleArchive(activeEntry.id)}
-                        className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim hover:border-os-warn hover:text-os-warn"
+                        disabled={isSaving}
+                        className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim hover:border-os-warn hover:text-os-warn disabled:opacity-50"
                       >
-                        Archivar
+                        {isSaving ? 'Archivando…' : 'Archivar'}
                       </button>
                     ) : (
                       <button
                         type="button"
                         onClick={() => handleRestore(activeEntry.id)}
-                        className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim hover:border-os-ok hover:text-os-ok"
+                        disabled={isSaving}
+                        className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim hover:border-os-ok hover:text-os-ok disabled:opacity-50"
                       >
-                        Restaurar
+                        {isSaving ? 'Restaurando…' : 'Restaurar'}
                       </button>
                     )}
                     <button
                       type="button"
                       onClick={() => openEdit(activeEntry)}
-                      className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface"
+                      disabled={isSaving}
+                      className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface disabled:opacity-50"
                     >
                       Editar
                     </button>
@@ -653,15 +692,21 @@ export function KnowledgeBoard() {
                 </label>
 
                 <div className="mt-2 flex justify-end gap-2">
-                  <button type="button" onClick={closePanel} className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim">
+                  <button
+                    type="button"
+                    onClick={closePanel}
+                    disabled={isSaving}
+                    className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim disabled:opacity-50"
+                  >
                     Cancelar
                   </button>
                   <button
                     type="button"
                     onClick={submit}
-                    className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface"
+                    disabled={isSaving}
+                    className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface disabled:opacity-50"
                   >
-                    {panelMode === 'edit' ? 'Guardar cambios' : 'Crear entrada'}
+                    {isSaving ? 'Guardando…' : panelMode === 'edit' ? 'Guardar cambios' : 'Crear entrada'}
                   </button>
                 </div>
               </div>

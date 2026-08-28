@@ -15,6 +15,7 @@ describe('migration file discovery', () => {
       '0004_meta_ads_real_v1.sql',
       '0005_auth_foundation.sql',
       '0006_revenue_records.sql',
+      '0007_knowledge_entries.sql',
     ]);
   });
 });
@@ -166,6 +167,54 @@ describe('0004_meta_ads_real_v1.sql contains the Meta Ads Real V1 additions', ()
     expect(sql).not.toMatch(/CREATE TABLE[^;]*meta_adset/is);
     expect(sql).not.toMatch(/CREATE TABLE[^;]*meta_ad_daily/is);
     expect(sql).not.toMatch(/CREATE TABLE[^;]*creative/is);
+  });
+});
+
+describe('0007_knowledge_entries.sql contains the G-Brain Postgres V1 additions', () => {
+  const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, '0007_knowledge_entries.sql'), 'utf8');
+
+  it('creates the knowledge_entries table', () => {
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS knowledge_entries/);
+  });
+
+  it('references clients with ON DELETE RESTRICT, never CASCADE', () => {
+    expect(sql).toMatch(/client_id\s+TEXT NULL REFERENCES clients\(id\) ON DELETE RESTRICT/);
+    expect(sql).not.toMatch(/ON DELETE CASCADE/);
+  });
+
+  it('enforces the scope invariant: internal → client_id NULL, client → client_id required', () => {
+    expect(sql).toMatch(/scope = 'internal' AND client_id IS NULL/);
+    expect(sql).toMatch(/scope = 'client' AND client_id IS NOT NULL/);
+  });
+
+  it('preserves the exact current KnowledgeType/KnowledgeSource enums from lib/knowledge-entries.ts', () => {
+    const types = ['decision', 'learning', 'sop', 'strategy', 'client_context', 'technical_note', 'other'];
+    for (const type of types) expect(sql).toContain(`'${type}'`);
+
+    const sources = ['manual', 'client', 'campaign', 'meeting', 'analysis', 'document', 'system', 'other'];
+    for (const source of sources) expect(sql).toContain(`'${source}'`);
+  });
+
+  it('constrains status to active/archived — no workflow states', () => {
+    expect(sql).toMatch(/status IN \('active', 'archived'\)/);
+  });
+
+  it('constrains data_source to demo/manual, defaulting to manual', () => {
+    expect(sql).toMatch(/data_source\s+TEXT NOT NULL DEFAULT 'manual' CHECK \(data_source IN \('demo', 'manual'\)\)/);
+  });
+
+  it('tags is a plain TEXT[] with no GIN index in this pass — Phase 1 tag/search filtering stays client-side', () => {
+    expect(sql).toMatch(/tags\s+TEXT\[\] NOT NULL DEFAULT '\{\}'/);
+    expect(sql).not.toMatch(/USING GIN/);
+  });
+
+  it('does NOT seed any demo rows — production starts empty', () => {
+    expect(sql).not.toMatch(/INSERT INTO knowledge_entries/i);
+  });
+
+  it('enables RLS with no policies — defensive posture only', () => {
+    expect(sql).toMatch(/ALTER TABLE knowledge_entries ENABLE ROW LEVEL SECURITY/);
+    expect(sql).not.toMatch(/CREATE POLICY/i);
   });
 });
 
