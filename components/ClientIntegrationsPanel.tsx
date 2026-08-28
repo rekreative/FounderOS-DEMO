@@ -49,6 +49,8 @@ export function ClientIntegrationsPanel({
   clientId,
   requirements,
   allConnections,
+  loading,
+  error,
 }: {
   clientId: string;
   requirements: ClientIntegrationRequirement[];
@@ -56,6 +58,15 @@ export function ClientIntegrationsPanel({
    *  component derives the client-plus-internal subset itself, matching
    *  buildClientRequirementRows' documented contract. */
   allConnections: IntegrationConnection[];
+  /** True while the parent's integration-connections fetch is in flight —
+   *  gates the requirement table so a client mid-load never reads as "no
+   *  integrations configured" (allConnections is [] during loading exactly
+   *  like it would be for a client with genuinely zero connections). */
+  loading: boolean;
+  /** Set when the parent's integration-connections fetch failed — this tab
+   *  gets its own controlled error, independent of the rest of the client
+   *  workspace (other tabs must keep working). */
+  error: string | null;
 }) {
   const relevantConnections = allConnections.filter(
     (connection) => connection.clientId === clientId || connection.scope === 'internal',
@@ -78,7 +89,13 @@ export function ClientIntegrationsPanel({
         </Link>
       </div>
 
-      {requirements.length === 0 ? (
+      {error ? (
+        <div className="border border-os-err/40 bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{error}</div>
+      ) : loading ? (
+        <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+          Cargando integraciones…
+        </div>
+      ) : requirements.length === 0 ? (
         <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
           Sin plan de onboarding definido para este cliente.
         </div>

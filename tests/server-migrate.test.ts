@@ -16,6 +16,7 @@ describe('migration file discovery', () => {
       '0005_auth_foundation.sql',
       '0006_revenue_records.sql',
       '0007_knowledge_entries.sql',
+      '0008_integration_connections.sql',
     ]);
   });
 });

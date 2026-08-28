@@ -65,9 +65,6 @@ export const IntegrationSchema = z.object({
   // when set, the catalog entry reflects this real connector's live state
   connectorId: z.string().min(1).optional(),
   popular: z.boolean().optional(),
-  // env var names the connect flow may write to .env.local for this entry.
-  // Omitted = a generic <SLUG>_API_KEY; [] = not key-connectable (guidance only).
-  envKeys: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/)).optional(),
 });
 export type Integration = z.infer<typeof IntegrationSchema>;
 export type IntegrationCategory = z.infer<typeof IntegrationCategorySchema>;

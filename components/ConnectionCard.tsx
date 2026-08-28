@@ -1,12 +1,13 @@
 import { BrandLogo } from '@/lib/brand-logos';
-import { connectKeysFor, type CatalogEntry } from '@/lib/integrations-catalog';
-import { ConnectFlow } from '@/components/ConnectFlow';
+import type { CatalogEntry } from '@/lib/integrations-catalog';
 
 /**
- * One integration tile in the connections marketplace: rounded card, brand
- * logo, name + blurb, and a LIVE footer — Connect opens a paste-a-key form
- * that writes .env.local through /api/connections/connect; connected state
- * always comes from the real connector, never the stored key alone.
+ * One integration tile in the read-only connections marketplace: rounded
+ * card, brand logo, name + blurb, and a status line — `connected` always
+ * comes from the real connector, never a stored key. No Connect/Disconnect/
+ * Save affordance exists anywhere on this card (Legacy secret-write
+ * shutdown, Connections/Secrets V1) — secrets are configured outside
+ * REKREOS (Railway Variables in production, .env.local locally).
  */
 export function ConnectionCard({ entry, guidance }: { entry: CatalogEntry; guidance?: string }) {
   return (
@@ -19,13 +20,17 @@ export function ConnectionCard({ entry, guidance }: { entry: CatalogEntry; guida
         </div>
       </div>
 
-      <ConnectFlow
-        slug={entry.slug}
-        connected={entry.connected}
-        keySaved={entry.keySaved}
-        keys={connectKeysFor(entry)}
-        guidance={guidance}
-      />
+      <div className="mt-3 flex items-center justify-between">
+        {entry.connected ? (
+          <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-os-ok">
+            <span className="h-1.5 w-1.5 rounded-full bg-os-ok" />
+            Connected
+          </span>
+        ) : (
+          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-os-dim">Not connected</span>
+        )}
+        {guidance && <span className="truncate pl-2 text-right text-[10px] text-os-dim" title={guidance}>{guidance}</span>}
+      </div>
     </div>
   );
 }

@@ -17,7 +17,6 @@ import {
   Filter,
   Workflow,
   Map,
-  Plug,
   PlugZap,
   BarChart3,
   LayoutGrid,
@@ -67,12 +66,10 @@ export const NAV_INTELLIGENCE: NavItem[] = [{ href: '/brain', label: 'G-Brain', 
 
 export const NAV_SYSTEM: NavItem[] = [
   // Keep less-frequent system views reachable but out of the primary operate list.
-  // '/integrations' is FounderOS's legacy machine-bound connector board
-  // (lib/connectors/*) — unrelated to REKREATIVE's real lead-gen stack, and
-  // NOT the same thing as '/connections' (REKREATIVE_PRIMARY's "Integraciones",
-  // the canonical Real V1 board). Labeled explicitly as legacy so the two can
-  // never be confused for one another.
-  { href: '/integrations', label: 'Conectores (legacy)', icon: Plug },
+  // '/integrations' (FounderOS's legacy machine-bound connector board) is
+  // deliberately absent here — it now redirects to '/connections'
+  // (REKREATIVE_PRIMARY's "Integraciones", the canonical Real V1 board) and
+  // must not be independently discoverable (Visual QA correction, 2026-08-28).
   { href: '/roadmap', label: 'Roadmap', icon: Map },
   { href: '/reference', label: 'Reference Model', icon: LayoutGrid },
 ];

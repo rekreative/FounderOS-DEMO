@@ -6,24 +6,27 @@ import {
 } from '@/lib/schemas';
 
 /**
- * The connections marketplace catalog. Larp-first: a rich, honest catalog of
- * popular tools. `connectorId` ties an entry to a real connector so its live
- * "connected" state is never faked; everything else reads as "not connected"
- * with a Connect affordance. Logos resolve from `slug` via lib/brand-logos
- * (simple-icons + a few hand-authored marks + intentional lettermarks).
+ * The connections marketplace catalog — read-only status display. Larp-first:
+ * a rich, honest catalog of popular tools. `connectorId` ties an entry to a
+ * real connector so its live "connected" state is never faked; everything
+ * else reads as "not connected", with no affordance to change that from this
+ * page (Legacy secret-write shutdown, Connections/Secrets V1 — secrets are
+ * configured outside REKREOS). Logos resolve from `slug` via
+ * lib/brand-logos (simple-icons + a few hand-authored marks + intentional
+ * lettermarks).
  */
 export const INTEGRATIONS: Integration[] = [
   // Communication
-  { slug: 'slack', name: 'Slack', tagline: 'Channels & DMs', category: 'Communication', connectorId: 'slack', popular: true, envKeys: ['SLACK_BOT_TOKEN'] },
-  { slug: 'gmail', name: 'Gmail', tagline: 'Send & read email', category: 'Communication', connectorId: 'email', popular: true, envKeys: [] },
-  { slug: 'whatsapp', name: 'WhatsApp', tagline: 'Messages & broadcasts', category: 'Communication', connectorId: 'whatsapp', envKeys: [] },
+  { slug: 'slack', name: 'Slack', tagline: 'Channels & DMs', category: 'Communication', connectorId: 'slack', popular: true },
+  { slug: 'gmail', name: 'Gmail', tagline: 'Send & read email', category: 'Communication', connectorId: 'email', popular: true },
+  { slug: 'whatsapp', name: 'WhatsApp', tagline: 'Messages & broadcasts', category: 'Communication', connectorId: 'whatsapp' },
   { slug: 'discord', name: 'Discord', tagline: 'Servers & channels', category: 'Communication' },
   { slug: 'telegram', name: 'Telegram', tagline: 'Chats & bots', category: 'Communication' },
   { slug: 'zoom', name: 'Zoom', tagline: 'Meetings & recordings', category: 'Communication', popular: true },
-  { slug: 'manychat', name: 'ManyChat', tagline: 'IG DM automation', category: 'Communication', connectorId: 'manychat', envKeys: ['MANYCHAT_API_KEY'] },
+  { slug: 'manychat', name: 'ManyChat', tagline: 'IG DM automation', category: 'Communication', connectorId: 'manychat' },
 
   // Productivity
-  { slug: 'notion', name: 'Notion', tagline: 'Docs & databases', category: 'Productivity', connectorId: 'notion', popular: true, envKeys: ['NOTION_API_KEY'] },
+  { slug: 'notion', name: 'Notion', tagline: 'Docs & databases', category: 'Productivity', connectorId: 'notion', popular: true },
   { slug: 'airtable', name: 'Airtable', tagline: 'Bases & records', category: 'Productivity', popular: true },
   { slug: 'googlesheets', name: 'Google Sheets', tagline: 'Read & write spreadsheets', category: 'Productivity' },
   { slug: 'googledocs', name: 'Google Docs', tagline: 'Create & edit documents', category: 'Productivity' },
@@ -34,10 +37,10 @@ export const INTEGRATIONS: Integration[] = [
   // CRM & Sales
   { slug: 'hubspot', name: 'HubSpot', tagline: 'Contacts & deals', category: 'CRM & Sales', popular: true },
   { slug: 'salesforce', name: 'Salesforce', tagline: 'Accounts & pipeline', category: 'CRM & Sales' },
-  { slug: 'attio', name: 'Attio', tagline: 'CRM built on data', category: 'CRM & Sales', connectorId: 'attio', envKeys: ['ATTIO_API_KEY'] },
+  { slug: 'attio', name: 'Attio', tagline: 'CRM built on data', category: 'CRM & Sales', connectorId: 'attio' },
   { slug: 'zendesk', name: 'Zendesk', tagline: 'Tickets & support', category: 'CRM & Sales' },
   { slug: 'intercom', name: 'Intercom', tagline: 'Chat & lifecycle', category: 'CRM & Sales' },
-  { slug: 'gohighlevel', name: 'GoHighLevel', tagline: 'LC pipeline & contacts', category: 'CRM & Sales', connectorId: 'ghl', envKeys: ['GHL_API_KEY', 'GHL_LOCATION_ID'] },
+  { slug: 'gohighlevel', name: 'GoHighLevel', tagline: 'LC pipeline & contacts', category: 'CRM & Sales', connectorId: 'ghl' },
 
   // Developer
   { slug: 'github', name: 'GitHub', tagline: 'Repos, issues & PRs', category: 'Developer', popular: true },
@@ -48,36 +51,36 @@ export const INTEGRATIONS: Integration[] = [
   { slug: 'gitlab', name: 'GitLab', tagline: 'Repos & pipelines', category: 'Developer' },
 
   // Scheduling
-  { slug: 'googlecalendar', name: 'Google Calendar', tagline: 'Events & availability', category: 'Scheduling', connectorId: 'calendar', popular: true, envKeys: [] },
+  { slug: 'googlecalendar', name: 'Google Calendar', tagline: 'Events & availability', category: 'Scheduling', connectorId: 'calendar', popular: true },
   { slug: 'calendly', name: 'Calendly', tagline: 'Booking links', category: 'Scheduling' },
   { slug: 'caldotcom', name: 'Cal.com', tagline: 'Open scheduling', category: 'Scheduling' },
   { slug: 'googlemeet', name: 'Google Meet', tagline: 'Video calls', category: 'Scheduling' },
 
   // Finance
-  { slug: 'stripe', name: 'Stripe', tagline: 'Payments & invoices', category: 'Finance', connectorId: 'payments', popular: true, envKeys: ['STRIPE_SECRET_KEY'] },
+  { slug: 'stripe', name: 'Stripe', tagline: 'Payments & invoices', category: 'Finance', connectorId: 'payments', popular: true },
   { slug: 'quickbooks', name: 'QuickBooks', tagline: 'Bookkeeping & P&L', category: 'Finance' },
   { slug: 'xero', name: 'Xero', tagline: 'Accounting & bills', category: 'Finance' },
-  { slug: 'paypal', name: 'PayPal', tagline: 'Payments & payouts', category: 'Finance', envKeys: ['PAYPAL_CLIENT_ID', 'PAYPAL_CLIENT_SECRET'] },
+  { slug: 'paypal', name: 'PayPal', tagline: 'Payments & payouts', category: 'Finance' },
   { slug: 'wise', name: 'Wise', tagline: 'Multi-currency balances', category: 'Finance' },
   { slug: 'plaid', name: 'Plaid', tagline: 'Bank connections', category: 'Finance' },
 
   // Marketing
   { slug: 'mailchimp', name: 'Mailchimp', tagline: 'Email campaigns', category: 'Marketing' },
   { slug: 'googleanalytics', name: 'Google Analytics', tagline: 'Traffic & conversions', category: 'Marketing' },
-  { slug: 'meta', name: 'Meta Ads', tagline: 'Campaigns & audiences', category: 'Marketing', connectorId: 'meta-ads', envKeys: ['META_ADS_ACCESS_TOKEN'] },
-  { slug: 'beehiiv', name: 'beehiiv', tagline: 'Newsletter & subscribers', category: 'Marketing', connectorId: 'beehiiv', envKeys: ['BEEHIIV_API_KEY'] },
+  { slug: 'meta', name: 'Meta Ads', tagline: 'Campaigns & audiences', category: 'Marketing', connectorId: 'meta-ads' },
+  { slug: 'beehiiv', name: 'beehiiv', tagline: 'Newsletter & subscribers', category: 'Marketing', connectorId: 'beehiiv' },
   { slug: 'buffer', name: 'Buffer', tagline: 'Schedule social posts', category: 'Marketing' },
   { slug: 'hootsuite', name: 'Hootsuite', tagline: 'Social management', category: 'Marketing' },
-  { slug: 'zernio', name: 'Zernio', tagline: 'Cross-platform posting', category: 'Marketing', connectorId: 'zernio', envKeys: ['ZERNIO_API_KEY'] },
-  { slug: 'webinarjam', name: 'WebinarJam', tagline: 'Webinar registrants', category: 'Marketing', connectorId: 'webinarjam', envKeys: ['WEBINARJAM_API_KEY'] },
-  { slug: 'trakyo', name: 'Trakyo', tagline: 'Organic attribution', category: 'Marketing', connectorId: 'trakyo', envKeys: ['TRAKYO_API_KEY'] },
+  { slug: 'zernio', name: 'Zernio', tagline: 'Cross-platform posting', category: 'Marketing', connectorId: 'zernio' },
+  { slug: 'webinarjam', name: 'WebinarJam', tagline: 'Webinar registrants', category: 'Marketing', connectorId: 'webinarjam' },
+  { slug: 'trakyo', name: 'Trakyo', tagline: 'Organic attribution', category: 'Marketing', connectorId: 'trakyo' },
 
   // Storage
   { slug: 'googledrive', name: 'Google Drive', tagline: 'Files & folders', category: 'Storage' },
   { slug: 'dropbox', name: 'Dropbox', tagline: 'Sync & share', category: 'Storage' },
   { slug: 'box', name: 'Box', tagline: 'Content cloud', category: 'Storage' },
   { slug: 'onedrive', name: 'OneDrive', tagline: 'Microsoft files', category: 'Storage' },
-  { slug: 'obsidian', name: 'Notes', tagline: 'Markdown vault', category: 'Storage', connectorId: 'obsidian', envKeys: [] },
+  { slug: 'obsidian', name: 'Notes', tagline: 'Markdown vault', category: 'Storage', connectorId: 'obsidian' },
 
   // AI & Automation
   { slug: 'openai', name: 'OpenAI', tagline: 'GPT models & embeddings', category: 'AI & Automation' },
@@ -89,40 +92,25 @@ export const INTEGRATIONS: Integration[] = [
   // Creative
   { slug: 'figma', name: 'Figma', tagline: 'Design & prototypes', category: 'Creative', popular: true },
   { slug: 'canva', name: 'Canva', tagline: 'Templates & graphics', category: 'Creative' },
-  { slug: 'miro', name: 'Miro', tagline: 'Whiteboards & maps', category: 'Creative', connectorId: 'miro', envKeys: ['MIRO_ACCESS_TOKEN'] },
+  { slug: 'miro', name: 'Miro', tagline: 'Whiteboards & maps', category: 'Creative', connectorId: 'miro' },
   { slug: 'loom', name: 'Loom', tagline: 'Screen recordings', category: 'Creative' },
   { slug: 'typeform', name: 'Typeform', tagline: 'Forms & surveys', category: 'Creative' },
-  { slug: 'arcads', name: 'Arcads', tagline: 'AI video ads', category: 'Creative', connectorId: 'arcads', envKeys: ['ARCADS_BASIC_AUTH'] },
+  { slug: 'arcads', name: 'Arcads', tagline: 'AI video ads', category: 'Creative', connectorId: 'arcads' },
 ];
 
-export type CatalogEntry = Integration & { connected: boolean; keySaved: boolean };
+export type CatalogEntry = Integration & { connected: boolean };
 
-/** The env var names the connect flow may write for an entry. Explicit
- *  envKeys win; no envKeys = a generic <SLUG>_API_KEY; [] = guidance only
- *  (the tool connects through something other than a pasted key). */
-export function connectKeysFor(entry: Integration): string[] {
-  if (entry.envKeys) return entry.envKeys;
-  return [`${entry.slug.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_API_KEY`];
-}
-
-/** Merge live connector state onto the catalog. `connected` is true only when a
- *  linked connector actually reports 'connected' — never faked. `keySaved`
- *  means every connect-flow key for the entry sits in .env.local (pass a fresh
- *  readEnvLocal()); a saved key on a connector-less tile shows as stored, not
- *  connected. */
-export function connectionCatalog(
-  statuses: ConnectorStatus[],
-  savedEnv: Record<string, string> = {},
-): CatalogEntry[] {
+/** Merge live connector state onto the catalog. `connected` is true only when
+ *  a linked connector actually reports 'connected' — never faked. Read-only:
+ *  this app has no browser-facing secret-write path (Legacy secret-write
+ *  shutdown, Connections/Secrets V1) — there is no `keySaved`/pasted-key
+ *  concept left to merge in. */
+export function connectionCatalog(statuses: ConnectorStatus[]): CatalogEntry[] {
   const byId = new Map(statuses.map((s) => [s.id, s]));
-  return INTEGRATIONS.map((i) => {
-    const keys = connectKeysFor(i);
-    return {
-      ...i,
-      connected: i.connectorId ? byId.get(i.connectorId)?.state === 'connected' : false,
-      keySaved: keys.length > 0 && keys.every((k) => Boolean(savedEnv[k])),
-    };
-  });
+  return INTEGRATIONS.map((i) => ({
+    ...i,
+    connected: i.connectorId ? byId.get(i.connectorId)?.state === 'connected' : false,
+  }));
 }
 
 /** Catalog grouped by category, in the canonical category order, skipping any

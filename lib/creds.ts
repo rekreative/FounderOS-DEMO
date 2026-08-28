@@ -55,12 +55,17 @@ function readEnvFileSafe(filePath: string): Record<string, string> {
   }
 }
 
-/* ---- .env.local as a live store (the Connections board's connect flow) ----
- * Next only loads .env.local into process.env at boot; the connect flow needs
- * a paste to take effect immediately. So .env.local is ALSO read fresh at
- * call time, and it outranks process.env (the file is what booted the process,
- * so a fresh read is never staler than boot). FOUNDER_OS_ENV_LOCAL overrides
- * the path for tests. */
+/* ---- .env.local as a read-only live source (local development only) ----
+ * Next only loads .env.local into process.env at boot; connectors that
+ * resolve credentials at call time (resolveCred/runtimeEnv below) read the
+ * file fresh instead, so a manually-edited value takes effect without a
+ * restart. FOUNDER_OS_ENV_LOCAL overrides the path for tests.
+ *
+ * REKREOS does not write to this file from any request handler — Railway
+ * Variables are the only production source of truth for secrets, and
+ * .env.local is local-development-only. There is no browser-facing
+ * secret-write path in this app (Legacy secret-write shutdown, Connections/
+ * Secrets V1). */
 
 export function envLocalPath(): string {
   return process.env.FOUNDER_OS_ENV_LOCAL ?? path.join(process.cwd(), '.env.local');
@@ -68,47 +73,6 @@ export function envLocalPath(): string {
 
 export function readEnvLocal(): Record<string, string> {
   return readEnvFileSafe(envLocalPath());
-}
-
-/** Update or append KEY=value lines, preserving every unrelated line verbatim. */
-export function upsertEnvLocal(values: Record<string, string>): void {
-  const file = envLocalPath();
-  let raw = '';
-  try {
-    raw = fs.readFileSync(file, 'utf8');
-  } catch {
-    raw = '';
-  }
-  const lines = raw.length > 0 ? raw.split('\n') : [];
-  const pending = new Map(Object.entries(values));
-  const next = lines.map((line) => {
-    const key = line.trim().replace(/^export /, '').split('=')[0]?.trim();
-    if (key && pending.has(key)) {
-      const v = pending.get(key)!;
-      pending.delete(key);
-      return `${key}=${v}`;
-    }
-    return line;
-  });
-  while (next.length > 0 && next[next.length - 1] === '') next.pop();
-  for (const [key, v] of pending) next.push(`${key}=${v}`);
-  fs.writeFileSync(file, next.join('\n') + '\n', { mode: 0o600 });
-}
-
-/** Drop the named keys; every other line stays byte-identical. */
-export function removeEnvLocal(keys: string[]): void {
-  const file = envLocalPath();
-  let raw = '';
-  try {
-    raw = fs.readFileSync(file, 'utf8');
-  } catch {
-    return;
-  }
-  const drop = new Set(keys);
-  const next = raw
-    .split('\n')
-    .filter((line) => !drop.has(line.trim().replace(/^export /, '').split('=')[0]?.trim() ?? ''));
-  fs.writeFileSync(file, next.join('\n'), { mode: 0o600 });
 }
 
 /** process.env with a fresh .env.local overlay — hand this to connectors that

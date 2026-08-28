@@ -1,10 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import {
-  INTEGRATIONS,
-  integrationsByCategory,
-  connectionCatalog,
-  connectKeysFor,
-} from '@/lib/integrations-catalog';
+import { INTEGRATIONS, integrationsByCategory, connectionCatalog } from '@/lib/integrations-catalog';
 import { IntegrationSchema, INTEGRATION_CATEGORIES } from '@/lib/schemas';
 import { hasBrandMark } from '@/lib/brand-logos';
 import type { ConnectorStatus } from '@/lib/connectors/types';
@@ -77,17 +72,6 @@ describe('connectionCatalog — merges live connector state onto the catalog', (
   test('every catalog row survives the merge (count preserved)', () => {
     expect(connectionCatalog(statuses)).toHaveLength(INTEGRATIONS.length);
   });
-});
-
-describe('connect flow (paste a key on the board)', () => {
-  test('connectKeysFor: explicit envKeys win, generic falls back, [] means guidance-only', () => {
-    const notion = INTEGRATIONS.find((i) => i.slug === 'notion')!;
-    expect(connectKeysFor(notion)).toEqual(['NOTION_API_KEY']);
-    const discord = INTEGRATIONS.find((i) => i.slug === 'discord')!;
-    expect(connectKeysFor(discord)).toEqual(['DISCORD_API_KEY']);
-    const whatsapp = INTEGRATIONS.find((i) => i.slug === 'whatsapp')!;
-    expect(connectKeysFor(whatsapp)).toEqual([]);
-  });
 
   test("Alex's real stack is listed and tied to its connectors", () => {
     const bySlug = new Map(INTEGRATIONS.map((i) => [i.slug, i]));
@@ -99,13 +83,11 @@ describe('connect flow (paste a key on the board)', () => {
     expect(bySlug.get('arcads')?.connectorId).toBe('arcads');
   });
 
-  test('keySaved reflects env.local coverage of the entry keys, never fakes connected', () => {
-    const catalog = connectionCatalog([], { NOTION_API_KEY: 'x', PAYPAL_CLIENT_ID: 'a' });
-    const bySlug = new Map(catalog.map((c) => [c.slug, c]));
-    expect(bySlug.get('notion')?.keySaved).toBe(true);
-    expect(bySlug.get('notion')?.connected).toBe(false);
-    // multi-key entries need every key before keySaved
-    expect(bySlug.get('paypal')?.keySaved).toBe(false);
-    expect(bySlug.get('discord')?.keySaved).toBe(false);
+  test('no catalog row exposes a key-saved/pasted-secret concept — the marketplace is read-only', () => {
+    const catalog = connectionCatalog(statuses);
+    for (const entry of catalog) {
+      expect(entry).not.toHaveProperty('keySaved');
+      expect(entry).not.toHaveProperty('envKeys');
+    }
   });
 });
