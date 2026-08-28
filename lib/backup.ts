@@ -12,18 +12,35 @@ import path from 'node:path';
  * (`Database#backup()`), which produces a transactionally consistent copy of
  * a live WAL-mode database without stopping writers or requiring a manual
  * checkpoint.
+ *
+ * founder-os.db is required: it must exist and open cleanly, or the whole
+ * run aborts at preflight before any file is written. bank.db and ledger.db
+ * are optional: both are separate, independently-created stores (see
+ * lib/bank.ts and lib/ledger.ts) that legitimately do not exist until a
+ * finance statement has been viewed or uploaded in the app. A missing
+ * optional source is not a failure - it is recorded in the manifest as
+ * 'not_present' and the run continues. A source that exists but fails to
+ * open or validate is always a failure, required or not.
  */
 
 export type SourceDbName = 'founder-os' | 'bank' | 'ledger';
 
-/** The exact, exhaustive set of sources every successful backup set must
- *  contain, no more and no fewer. Used both to build a run's snapshots and
- *  to validate an on-disk manifest before trusting it for retention. */
-const REQUIRED_SOURCES: readonly SourceDbName[] = ['founder-os', 'bank', 'ledger'];
+/** The exact, exhaustive set of sources every successful backup manifest
+ *  must name exactly once, no more and no fewer - independent of whether
+ *  each one was actually backed up ('ok') or legitimately absent
+ *  ('not_present'). Used both to build a run's entries and to validate an
+ *  on-disk manifest before trusting it for retention. */
+const KNOWN_SOURCES: readonly SourceDbName[] = ['founder-os', 'bank', 'ledger'];
+
+/** The only source a backup run cannot proceed without. */
+const REQUIRED_SOURCE: SourceDbName = 'founder-os';
 
 export type SourceDbSpec = {
   name: SourceDbName;
   path: string;
+  /** true only for founder-os.db. A missing required source aborts the run
+   *  at preflight; a missing optional source is skipped, not a failure. */
+  required: boolean;
 };
 
 /** Deliberately a plain string map, not NodeJS.ProcessEnv: this is the only
@@ -41,9 +58,9 @@ export function resolveSourceDatabases(
   cwd: string = process.cwd(),
 ): SourceDbSpec[] {
   return [
-    { name: 'founder-os', path: env.FOUNDER_OS_DB ?? path.join(cwd, 'data', 'founder-os.db') },
-    { name: 'bank', path: env.BANK_DB ?? path.join(cwd, 'data', 'bank.db') },
-    { name: 'ledger', path: env.LEDGER_DB ?? path.join(cwd, 'data', 'ledger.db') },
+    { name: 'founder-os', path: env.FOUNDER_OS_DB ?? path.join(cwd, 'data', 'founder-os.db'), required: true },
+    { name: 'bank', path: env.BANK_DB ?? path.join(cwd, 'data', 'bank.db'), required: false },
+    { name: 'ledger', path: env.LEDGER_DB ?? path.join(cwd, 'data', 'ledger.db'), required: false },
   ];
 }
 
@@ -161,13 +178,21 @@ export class CollisionError extends Error {
 export type OpenedSource = SourceDbSpec & { db: InstanceType<typeof Database> };
 
 /**
- * Opens all three source databases read-only with `fileMustExist: true`, so
- * a missing path throws instead of better-sqlite3's default behavior of
- * silently creating an empty database in its place. All-or-nothing: if any
- * source is missing or unreadable, every already-opened connection is
- * closed and a single PreflightError is thrown naming every failing
- * source. Never a partial open, never a backup attempt for only some of
- * the three databases.
+ * Opens each source database read-only with `fileMustExist: true`, so an
+ * existing-but-unreadable/corrupt path throws instead of better-sqlite3's
+ * default behavior of silently creating an empty database in its place.
+ *
+ * A missing REQUIRED source (founder-os.db) is a preflight problem. A
+ * missing OPTIONAL source (bank.db, ledger.db) is silently skipped - it is
+ * simply absent from the returned array, not a problem - because both are
+ * legitimately created only after a specific in-app action and may not
+ * exist yet. A source that exists but fails to open or validate is always
+ * a problem, required or not: optional means "may be absent", never
+ * "may be corrupt".
+ *
+ * All-or-nothing with respect to problems: if any problem is found, every
+ * already-opened connection is closed and a single PreflightError is
+ * thrown naming every failing source. Never a partial open on failure.
  */
 export function openSourcesReadonly(specs: SourceDbSpec[]): OpenedSource[] {
   const opened: OpenedSource[] = [];
@@ -175,7 +200,9 @@ export function openSourcesReadonly(specs: SourceDbSpec[]): OpenedSource[] {
 
   for (const spec of specs) {
     if (!fs.existsSync(spec.path)) {
-      problems.push({ name: spec.name, path: spec.path, reason: 'file does not exist' });
+      if (spec.required) {
+        problems.push({ name: spec.name, path: spec.path, reason: 'file does not exist' });
+      }
       continue;
     }
     try {
@@ -286,12 +313,15 @@ export async function inspectSnapshot(destPath: string): Promise<SnapshotInspect
   return { integrity, sha256, bytes, rowCounts };
 }
 
-export type ManifestEntryStatus = 'ok' | 'integrity_failed' | 'snapshot_failed' | 'verification_failed';
+/** 'not_present' is not a failure: it marks an optional source (bank,
+ *  ledger) that does not exist on disk yet and was cleanly skipped. */
+export type ManifestEntryStatus = 'ok' | 'not_present' | 'integrity_failed' | 'snapshot_failed' | 'verification_failed';
 
 export type ManifestEntry = {
   source: SourceDbName;
   sourcePath: string;
-  filename: string;
+  /** null only when status is 'not_present' - no snapshot file was ever created for this entry. */
+  filename: string | null;
   timestamp: string;
   status: ManifestEntryStatus;
   bytes: number | null;
@@ -335,13 +365,23 @@ type ValidatedSet = { runId: string; manifestFile: string; entryFilenames: strin
  *   - ok is exactly true;
  *   - runId is a string matching the exact filesystemSafeTimestamp shape;
  *   - the manifest's own filename on disk equals manifestFilename(runId);
- *   - entries is an array with exactly one entry per required source
- *     (REQUIRED_SOURCES), no duplicates, no unexpected or missing sources;
- *   - every entry's filename equals snapshotFilename(entry.source, runId)
- *     exactly, and independently passes isOwnedSnapshotFile.
+ *   - entries is an array with exactly one entry per known source
+ *     (KNOWN_SOURCES), no duplicates, no unexpected or missing sources;
+ *   - the founder-os entry has status 'ok' with filename equal to
+ *     snapshotFilename('founder-os', runId), and independently passes
+ *     isOwnedSnapshotFile - founder-os can never be 'not_present' in a
+ *     trustworthy manifest;
+ *   - each optional entry (bank, ledger) has EITHER status 'ok' with a
+ *     filename equal to snapshotFilename(source, runId) that independently
+ *     passes isOwnedSnapshotFile, OR status 'not_present' with filename,
+ *     bytes, sha256, integrityDetail and rowCounts all null/absent - never
+ *     a filename or file metadata attached to a 'not_present' entry.
  * A manifest that fails any of these checks (including one crafted with a
- * path-traversal filename, a mismatched runId, or a tampered source list)
- * is left alone: never deleted, never counted toward retention.
+ * path-traversal filename, a mismatched runId, a tampered source list, or a
+ * 'not_present' entry smuggling a filename) is left alone: never deleted,
+ * never counted toward retention. Only entries that were actually verified
+ * 'ok' contribute a filename to entryFilenames - retention never invents or
+ * deletes a file for a 'not_present' entry.
  */
 function validateManifestForRetention(manifestFileOnDisk: string, parsed: unknown): ValidatedSet | null {
   if (typeof parsed !== 'object' || parsed === null) return null;
@@ -351,26 +391,49 @@ function validateManifestForRetention(manifestFileOnDisk: string, parsed: unknow
   if (typeof p.runId !== 'string' || !TIMESTAMP_RE.test(p.runId)) return null;
   if (manifestFileOnDisk !== manifestFilename(p.runId)) return null;
   if (!Array.isArray(p.entries)) return null;
-  if (p.entries.length !== REQUIRED_SOURCES.length) return null;
+  if (p.entries.length !== KNOWN_SOURCES.length) return null;
 
   const seenSources = new Set<string>();
   const entryFilenames: string[] = [];
 
   for (const raw of p.entries) {
     if (typeof raw !== 'object' || raw === null) return null;
-    const entry = raw as { source?: unknown; filename?: unknown };
+    const entry = raw as {
+      source?: unknown;
+      status?: unknown;
+      filename?: unknown;
+      bytes?: unknown;
+      sha256?: unknown;
+      integrityDetail?: unknown;
+      rowCounts?: unknown;
+    };
     if (typeof entry.source !== 'string') return null;
-    if (!REQUIRED_SOURCES.includes(entry.source as SourceDbName)) return null;
+    if (!KNOWN_SOURCES.includes(entry.source as SourceDbName)) return null;
     if (seenSources.has(entry.source)) return null;
     seenSources.add(entry.source);
 
+    const isRequired = entry.source === REQUIRED_SOURCE;
+
+    if (entry.status === 'not_present') {
+      // Absence is only ever legitimate for an optional source, and only
+      // when nothing that looks like a real snapshot is attached to it.
+      if (isRequired) return null;
+      if (entry.filename !== null) return null;
+      if (entry.bytes !== undefined && entry.bytes !== null) return null;
+      if (entry.sha256 !== undefined && entry.sha256 !== null) return null;
+      if (entry.integrityDetail !== undefined && entry.integrityDetail !== null) return null;
+      if (entry.rowCounts !== undefined && entry.rowCounts !== null) return null;
+      continue;
+    }
+
+    if (entry.status !== 'ok') return null;
     const expectedFilename = snapshotFilename(entry.source as SourceDbName, p.runId);
     if (entry.filename !== expectedFilename) return null;
     if (!isOwnedSnapshotFile(expectedFilename)) return null;
     entryFilenames.push(expectedFilename);
   }
 
-  if (seenSources.size !== REQUIRED_SOURCES.length) return null;
+  if (seenSources.size !== KNOWN_SOURCES.length) return null;
 
   return { runId: p.runId, manifestFile: manifestFileOnDisk, entryFilenames };
 }
@@ -445,17 +508,25 @@ export type RunBackupOptions = {
 /**
  * Runs one full manual backup:
  *   1. Validates `keep`.
- *   2. Preflight: opens all three sources read-only. Throws PreflightError
- *      and creates no files at all if any source is missing or unreadable.
- *   3. Collision check: if a snapshot or manifest filename for the run id
- *      about to be used already exists on disk, throws CollisionError and
+ *   2. Preflight: opens every source read-only. founder-os.db is required -
+ *      missing or unreadable throws PreflightError and creates no files at
+ *      all. bank.db/ledger.db are optional - missing is not a problem and
+ *      is recorded later as 'not_present', but existing-and-unreadable
+ *      still throws PreflightError, same as a required source.
+ *   3. Collision check: only for sources that will actually produce a
+ *      snapshot this run (i.e. the ones preflight opened) plus the
+ *      manifest. If a snapshot or manifest filename for the run id about
+ *      to be used already exists on disk, throws CollisionError and
  *      creates no files. A backup never overwrites a previous set.
- *   4. For each source: snapshot via the Online Backup API, then inspect
- *      the snapshot (integrity_check, SHA-256, size, row counts). Either
- *      step failing is caught per source and recorded in that entry rather
- *      than aborting the whole run.
- *   5. Writes one manifest for the run. `ok` is true only if every source's
- *      entry status is 'ok'.
+ *   4. For each opened source: snapshot via the Online Backup API, then
+ *      inspect the snapshot (integrity_check, SHA-256, size, row counts).
+ *      Either step failing is caught per source and recorded in that entry
+ *      rather than aborting the whole run. Each optional source that was
+ *      absent at preflight gets a 'not_present' entry instead, with no
+ *      filename and no file metadata.
+ *   5. Writes one manifest for the run, always with exactly one entry per
+ *      known source. `ok` is true only when founder-os's entry is 'ok' AND
+ *      every optional source's entry is either 'ok' or 'not_present'.
  *   6. Retention runs only when `ok` is true; a failed or partial run never
  *      triggers cleanup, so its evidence, including any snapshot files that
  *      were created before a later step failed, stays on disk for inspection.
@@ -476,9 +547,10 @@ export async function runBackup(options: RunBackupOptions = {}): Promise<BackupR
   const specs = resolveSourceDatabases(env, cwd);
   const backupDir = path.join(cwd, 'data', BACKUP_SUBDIR);
 
-  // All-or-nothing preflight. Throws before any directory or file is
-  // created if a source is missing or unreadable, never a misleading
-  // partial backup.
+  // Preflight. Throws before any directory or file is created if the
+  // required source (founder-os) is missing, or if ANY source that does
+  // exist is unreadable/corrupt. A missing OPTIONAL source (bank, ledger)
+  // is not a problem here - it simply will not appear in `opened`.
   const opened = openSourcesReadonly(specs);
 
   try {
@@ -488,7 +560,10 @@ export async function runBackup(options: RunBackupOptions = {}): Promise<BackupR
     const timestamp = filesystemSafeTimestamp(startedAt);
 
     // Collision protection: refuse to overwrite a previous set. Checked
-    // before any file for this run id is written.
+    // before any file for this run id is written. Only sources that will
+    // actually produce a snapshot this run (`opened`) are checked - an
+    // absent optional source has no destination file, so nothing to collide
+    // with.
     const expectedFilenames = [
       ...opened.map((src) => snapshotFilename(src.name, timestamp)),
       manifestFilename(timestamp),
@@ -500,7 +575,27 @@ export async function runBackup(options: RunBackupOptions = {}): Promise<BackupR
 
     const entries: ManifestEntry[] = [];
 
-    for (const src of opened) {
+    for (const spec of specs) {
+      const src = opened.find((o) => o.name === spec.name);
+      if (!src) {
+        // openSourcesReadonly guarantees this can only be an optional
+        // source that was cleanly absent - a missing required source, or
+        // any corrupt source, would already have thrown PreflightError
+        // above. No file is created and none is expected to exist.
+        entries.push({
+          source: spec.name,
+          sourcePath: spec.path,
+          filename: null,
+          timestamp,
+          status: 'not_present',
+          bytes: null,
+          sha256: null,
+          integrityDetail: null,
+          rowCounts: null,
+        });
+        continue;
+      }
+
       const filename = snapshotFilename(src.name, timestamp);
       const destPath = path.join(backupDir, filename);
 
@@ -554,7 +649,17 @@ export async function runBackup(options: RunBackupOptions = {}): Promise<BackupR
       }
     }
 
-    const ok = entries.length === specs.length && entries.every((e) => e.status === 'ok');
+    // ok requires the required source (founder-os) to have actually
+    // succeeded, and every optional source to be either verified 'ok' or
+    // cleanly 'not_present' - never a failure status for any of them.
+    // `entries` and `specs` are built in the same order (one entry per
+    // spec, no skips), so a same-index zip is exact.
+    const ok =
+      entries.length === specs.length &&
+      specs.every((spec, i) => {
+        const status = entries[i].status;
+        return spec.required ? status === 'ok' : status === 'ok' || status === 'not_present';
+      });
     const manifest: BackupManifest = {
       runId: timestamp,
       createdAt: startedAt.toISOString(),

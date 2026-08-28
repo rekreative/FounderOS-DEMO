@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -103,6 +103,11 @@ describe('resolveSourceDatabases', () => {
     expect(specs[0].path).toBe(path.join('C:', 'app', 'data', 'founder-os.db'));
   });
 
+  it('marks founder-os required and bank/ledger optional', () => {
+    const specs = resolveSourceDatabases({}, path.join('C:', 'app'));
+    expect(specs.map((s) => s.required)).toEqual([true, false, false]);
+  });
+
   it('honors FOUNDER_OS_DB/BANK_DB/LEDGER_DB overrides', () => {
     const specs = resolveSourceDatabases(
       { FOUNDER_OS_DB: '/x/f.db', BANK_DB: '/x/b.db', LEDGER_DB: '/x/l.db' },
@@ -132,13 +137,13 @@ describe('openSourcesReadonly, preflight', () => {
     for (const o of opened) o.db.close();
   });
 
-  it('throws PreflightError naming a missing source, and never creates it', () => {
+  it('throws PreflightError naming the missing required source (founder-os), and never creates it', () => {
     tmp = makeTmpRoot();
     const dataDir = path.join(tmp, 'data');
     fs.mkdirSync(dataDir, { recursive: true });
-    seedFounderOs(path.join(dataDir, 'founder-os.db'));
     seedBank(path.join(dataDir, 'bank.db'));
-    // ledger.db intentionally never created
+    seedLedger(path.join(dataDir, 'ledger.db'));
+    // founder-os.db intentionally never created
 
     const specs = resolveSourceDatabases({}, tmp);
     let caught: unknown;
@@ -149,14 +154,28 @@ describe('openSourcesReadonly, preflight', () => {
     }
     expect(caught).toBeInstanceOf(PreflightError);
     expect((caught as PreflightError).problems).toEqual([
-      { name: 'ledger', path: path.join(dataDir, 'ledger.db'), reason: 'file does not exist' },
+      { name: 'founder-os', path: path.join(dataDir, 'founder-os.db'), reason: 'file does not exist' },
     ]);
     // The missing source must still not exist: a readonly/fileMustExist
     // open must never silently create a replacement production database.
+    expect(fs.existsSync(path.join(dataDir, 'founder-os.db'))).toBe(false);
+  });
+
+  it('does not throw when only optional sources are missing, and returns just the sources that exist', () => {
+    tmp = makeTmpRoot();
+    const dataDir = path.join(tmp, 'data');
+    fs.mkdirSync(dataDir, { recursive: true });
+    seedFounderOs(path.join(dataDir, 'founder-os.db'));
+    // bank.db and ledger.db intentionally never created (optional)
+
+    const opened = openSourcesReadonly(resolveSourceDatabases({}, tmp));
+    expect(opened.map((o) => o.name)).toEqual(['founder-os']);
+    for (const o of opened) o.db.close();
+    expect(fs.existsSync(path.join(dataDir, 'bank.db'))).toBe(false);
     expect(fs.existsSync(path.join(dataDir, 'ledger.db'))).toBe(false);
   });
 
-  it('throws PreflightError naming an unreadable/corrupt source', () => {
+  it('throws PreflightError naming an unreadable/corrupt source, even when it is optional', () => {
     tmp = makeTmpRoot();
     const dataDir = path.join(tmp, 'data');
     fs.mkdirSync(dataDir, { recursive: true });
@@ -202,9 +221,11 @@ describe('runBackup, happy path', () => {
 
     const backupDir = path.join(tmp, 'data', 'backups');
     for (const entry of result.manifest.entries) {
-      expect(entry.filename).not.toMatch(/:/);
-      expect(entry.filename).toBe(snapshotFilename(entry.source, result.manifest.runId));
-      const full = path.join(backupDir, entry.filename);
+      // Already asserted every entry is 'ok' above, so filename is real here.
+      const filename = entry.filename as string;
+      expect(filename).not.toMatch(/:/);
+      expect(filename).toBe(snapshotFilename(entry.source, result.manifest.runId));
+      const full = path.join(backupDir, filename);
       expect(fs.existsSync(full)).toBe(true);
       expect(entry.bytes).toBe(fs.statSync(full).size);
       const expectedSha = await checksumFile(full);
@@ -240,16 +261,117 @@ describe('runBackup, happy path', () => {
 });
 
 describe('runBackup, preflight abort', () => {
-  it('rejects with PreflightError and creates no backups/ directory at all when a source is missing', async () => {
+  it('rejects with PreflightError and creates no backups/ directory at all when founder-os is missing', async () => {
+    tmp = makeTmpRoot();
+    const dataDir = path.join(tmp, 'data');
+    fs.mkdirSync(dataDir, { recursive: true });
+    seedBank(path.join(dataDir, 'bank.db'));
+    seedLedger(path.join(dataDir, 'ledger.db'));
+    // founder-os.db missing
+
+    await expect(runBackup({ cwd: tmp })).rejects.toBeInstanceOf(PreflightError);
+    expect(fs.existsSync(path.join(dataDir, 'backups'))).toBe(false);
+  });
+
+  it('rejects with PreflightError when founder-os is missing even though both optional sources are also absent', async () => {
+    tmp = makeTmpRoot();
+    const dataDir = path.join(tmp, 'data');
+    fs.mkdirSync(dataDir, { recursive: true });
+    // Nothing exists yet at all - the exact fresh/empty-volume shape a
+    // freshly deployed production environment has before its first request.
+
+    await expect(runBackup({ cwd: tmp })).rejects.toBeInstanceOf(PreflightError);
+    expect(fs.existsSync(path.join(dataDir, 'backups'))).toBe(false);
+  });
+});
+
+describe('runBackup, optional sources', () => {
+  it('succeeds with founder-os ok and both optional sources not_present when only founder-os exists', async () => {
+    tmp = makeTmpRoot();
+    const dataDir = path.join(tmp, 'data');
+    fs.mkdirSync(dataDir, { recursive: true });
+    seedFounderOs(path.join(dataDir, 'founder-os.db'));
+    // bank.db and ledger.db intentionally never created
+
+    const fixedNow = new Date('2026-08-28T00:00:00.000Z');
+    const result = await runBackup({ cwd: tmp, now: () => fixedNow });
+
+    expect(result.ok).toBe(true);
+    expect(result.manifest.entries).toHaveLength(3);
+    expect(result.manifest.entries.map((e) => e.source)).toEqual(['founder-os', 'bank', 'ledger']);
+
+    const founderEntry = result.manifest.entries.find((e) => e.source === 'founder-os')!;
+    expect(founderEntry.status).toBe('ok');
+    expect(founderEntry.filename).toBe(snapshotFilename('founder-os', filesystemSafeTimestamp(fixedNow)));
+
+    for (const source of ['bank', 'ledger'] as const) {
+      const entry = result.manifest.entries.find((e) => e.source === source)!;
+      expect(entry.status).toBe('not_present');
+      expect(entry.filename).toBeNull();
+      expect(entry.bytes).toBeNull();
+      expect(entry.sha256).toBeNull();
+      expect(entry.integrityDetail).toBeNull();
+      expect(entry.rowCounts).toBeNull();
+      expect(entry.error).toBeUndefined();
+    }
+
+    // No snapshot file was ever created for either absent optional source.
+    const backupDir = path.join(dataDir, 'backups');
+    const timestamp = filesystemSafeTimestamp(fixedNow);
+    expect(fs.existsSync(path.join(backupDir, snapshotFilename('bank', timestamp)))).toBe(false);
+    expect(fs.existsSync(path.join(backupDir, snapshotFilename('ledger', timestamp)))).toBe(false);
+
+    // An all-ok/not_present run is still eligible for retention.
+    expect(result.retention.applied).toBe(true);
+  });
+
+  it('records one optional source ok and the other not_present when only one optional source is present', async () => {
     tmp = makeTmpRoot();
     const dataDir = path.join(tmp, 'data');
     fs.mkdirSync(dataDir, { recursive: true });
     seedFounderOs(path.join(dataDir, 'founder-os.db'));
     seedBank(path.join(dataDir, 'bank.db'));
-    // ledger.db missing
+    // ledger.db intentionally never created
 
-    await expect(runBackup({ cwd: tmp })).rejects.toBeInstanceOf(PreflightError);
-    expect(fs.existsSync(path.join(dataDir, 'backups'))).toBe(false);
+    const result = await runBackup({ cwd: tmp, now: () => new Date('2026-08-28T00:00:00.000Z') });
+
+    expect(result.ok).toBe(true);
+
+    const bankEntry = result.manifest.entries.find((e) => e.source === 'bank')!;
+    expect(bankEntry.status).toBe('ok');
+    expect(bankEntry.filename).not.toBeNull();
+    expect(fs.existsSync(path.join(dataDir, 'backups', bankEntry.filename as string))).toBe(true);
+
+    const ledgerEntry = result.manifest.entries.find((e) => e.source === 'ledger')!;
+    expect(ledgerEntry.status).toBe('not_present');
+    expect(ledgerEntry.filename).toBeNull();
+  });
+});
+
+describe('runBackup, collision protection ignores absent optional destinations', () => {
+  it('does not treat a stray file at an absent optional snapshot path as a collision', async () => {
+    tmp = makeTmpRoot();
+    const dataDir = path.join(tmp, 'data');
+    fs.mkdirSync(dataDir, { recursive: true });
+    seedFounderOs(path.join(dataDir, 'founder-os.db'));
+    // bank.db intentionally never created (optional, absent)
+
+    const fixedNow = new Date('2026-08-28T00:00:00.000Z');
+    const backupDir = path.join(dataDir, 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+    // A file already sits exactly where bank's snapshot would land this run,
+    // even though bank.db does not exist. Since bank is not_present this
+    // run, no snapshot will ever be attempted for it, so this must not be
+    // treated as a collision.
+    const strayFile = path.join(backupDir, snapshotFilename('bank', filesystemSafeTimestamp(fixedNow)));
+    fs.writeFileSync(strayFile, 'unrelated leftover file, not produced by this run');
+
+    const result = await runBackup({ cwd: tmp, now: () => fixedNow });
+
+    expect(result.ok).toBe(true);
+    const bankEntry = result.manifest.entries.find((e) => e.source === 'bank')!;
+    expect(bankEntry.status).toBe('not_present');
+    expect(fs.readFileSync(strayFile, 'utf8')).toBe('unrelated leftover file, not produced by this run');
   });
 });
 
@@ -356,7 +478,7 @@ describe('runBackup, post-snapshot verification failure', () => {
     // The ledger snapshot file itself was created by backupOne before
     // inspection failed, and must be preserved as failed-run evidence.
     const backupDir = path.join(tmp, 'data', 'backups');
-    const ledgerSnapshotPath = path.join(backupDir, ledgerEntry.filename);
+    const ledgerSnapshotPath = path.join(backupDir, ledgerEntry.filename as string);
     expect(fs.existsSync(ledgerSnapshotPath)).toBe(true);
 
     // Retention never runs for a failed set.
@@ -373,16 +495,36 @@ describe('scripts/backup-sqlite.ts runCli', () => {
     expect(fs.existsSync(path.join(tmp, 'data', 'backups', 'manifest-2026-08-28T00-00-00.000Z.json'))).toBe(true);
   });
 
-  it('returns false (never throws) when preflight fails, and creates no files', async () => {
+  it('returns false (never throws) when the required founder-os source is missing, and creates no files', async () => {
     tmp = makeTmpRoot();
     const dataDir = path.join(tmp, 'data');
     fs.mkdirSync(dataDir, { recursive: true });
-    seedFounderOs(path.join(dataDir, 'founder-os.db'));
-    // bank.db and ledger.db both missing
+    seedBank(path.join(dataDir, 'bank.db'));
+    seedLedger(path.join(dataDir, 'ledger.db'));
+    // founder-os.db missing
 
     const ok = await runCli({ cwd: tmp });
     expect(ok).toBe(false);
     expect(fs.existsSync(path.join(dataDir, 'backups'))).toBe(false);
+  });
+
+  it('returns true and clearly prints not_present for each absent optional source when only founder-os exists', async () => {
+    tmp = makeTmpRoot();
+    const dataDir = path.join(tmp, 'data');
+    fs.mkdirSync(dataDir, { recursive: true });
+    seedFounderOs(path.join(dataDir, 'founder-os.db'));
+    // bank.db and ledger.db both missing (optional)
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const ok = await runCli({ cwd: tmp, now: () => new Date('2026-08-28T00:00:00.000Z') });
+      expect(ok).toBe(true);
+      const output = logSpy.mock.calls.map((args) => args.join(' ')).join('\n');
+      expect(output).toMatch(/bank\s+not_present/);
+      expect(output).toMatch(/ledger\s+not_present/);
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 
   it('returns false (never throws) when a collision is detected', async () => {
@@ -425,9 +567,40 @@ describe('applyRetention', () => {
     const entries = sources.map((source) => {
       const filename = snapshotFilename(source, runId);
       fs.writeFileSync(path.join(backupDir, filename), 'fixture-bytes');
-      return { source, filename };
+      return { source, filename, status: 'ok' };
     });
     const manifest = { runId, createdAt: runId, ok, backupDir, entries };
+    fs.writeFileSync(path.join(backupDir, manifestFilename(runId)), JSON.stringify(manifest));
+  }
+
+  /** Same shape as writeFakeSet, but each source in `absentOptional` (bank
+   *  and/or ledger only - founder-os is always required and 'ok') gets a
+   *  clean 'not_present' entry instead: no snapshot file is written for it,
+   *  and its entry carries filename/bytes/sha256/integrityDetail/rowCounts
+   *  all null, matching exactly what a real runBackup() produces. */
+  function writeFakeSetWithOptionalAbsent(
+    backupDir: string,
+    runId: string,
+    absentOptional: Array<'bank' | 'ledger'>,
+  ): void {
+    const sources: Array<'founder-os' | 'bank' | 'ledger'> = ['founder-os', 'bank', 'ledger'];
+    const entries = sources.map((source) => {
+      if (source !== 'founder-os' && absentOptional.includes(source)) {
+        return {
+          source,
+          status: 'not_present',
+          filename: null,
+          bytes: null,
+          sha256: null,
+          integrityDetail: null,
+          rowCounts: null,
+        };
+      }
+      const filename = snapshotFilename(source, runId);
+      fs.writeFileSync(path.join(backupDir, filename), 'fixture-bytes');
+      return { source, filename, status: 'ok' };
+    });
+    const manifest = { runId, createdAt: runId, ok: true, backupDir, entries };
     fs.writeFileSync(path.join(backupDir, manifestFilename(runId)), JSON.stringify(manifest));
   }
 
@@ -532,6 +705,122 @@ describe('applyRetention', () => {
     const result = applyRetention(path.join(tmp, 'does-not-exist'), 3);
     expect(result).toEqual({ applied: false, reason: 'backup directory not found', keptRunIds: [], deletedFiles: [] });
   });
+
+  it('accepts a manifest whose optional entries are cleanly not_present, and never invents a file to delete for them', () => {
+    tmp = makeTmpRoot();
+    const backupDir = path.join(tmp, 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+
+    const ids = [
+      '2026-08-01T00-00-00.000Z',
+      '2026-08-02T00-00-00.000Z',
+      '2026-08-03T00-00-00.000Z',
+      '2026-08-04T00-00-00.000Z',
+    ];
+    for (const id of ids) writeFakeSetWithOptionalAbsent(backupDir, id, ['bank', 'ledger']);
+
+    const result = applyRetention(backupDir, 3);
+
+    expect(result.applied).toBe(true);
+    expect(result.keptRunIds).toEqual([ids[3], ids[2], ids[1]]);
+    // Only the oldest set's founder-os snapshot and manifest ever existed to
+    // delete; bank/ledger were never present for any of these sets, so
+    // retention never tries to delete a file for them.
+    expect(result.deletedFiles.sort()).toEqual(
+      [snapshotFilename('founder-os', ids[0]), manifestFilename(ids[0])].sort(),
+    );
+    expect(fs.existsSync(path.join(backupDir, snapshotFilename('founder-os', ids[0])))).toBe(false);
+  });
+
+  it('accepts a set where one optional source is ok and the other is not_present', () => {
+    tmp = makeTmpRoot();
+    const backupDir = path.join(tmp, 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+    writeFakeSetWithOptionalAbsent(backupDir, VALID_RUN_ID, ['ledger']);
+
+    const result = applyRetention(backupDir, 1);
+    expect(result.keptRunIds).toEqual([VALID_RUN_ID]);
+    expect(result.deletedFiles).toEqual([]);
+  });
+});
+
+describe('applyRetention, malformed not_present entries', () => {
+  it('rejects a not_present entry that smuggles a real filename', () => {
+    tmp = makeTmpRoot();
+    const backupDir = path.join(tmp, 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+    fs.writeFileSync(path.join(backupDir, snapshotFilename('founder-os', VALID_RUN_ID)), 'legit');
+    fs.writeFileSync(path.join(backupDir, snapshotFilename('ledger', VALID_RUN_ID)), 'legit');
+    const sneaky = snapshotFilename('bank', VALID_RUN_ID);
+    fs.writeFileSync(path.join(backupDir, sneaky), 'must never be deleted via a fake not_present entry');
+    fs.writeFileSync(
+      path.join(backupDir, manifestFilename(VALID_RUN_ID)),
+      JSON.stringify({
+        runId: VALID_RUN_ID,
+        ok: true,
+        entries: [
+          { source: 'founder-os', status: 'ok', filename: snapshotFilename('founder-os', VALID_RUN_ID) },
+          { source: 'bank', status: 'not_present', filename: sneaky },
+          { source: 'ledger', status: 'ok', filename: snapshotFilename('ledger', VALID_RUN_ID) },
+        ],
+      }),
+    );
+
+    const result = applyRetention(backupDir, 1);
+    expect(result.deletedFiles).toEqual([]);
+    expect(result.keptRunIds).toEqual([]);
+    expect(fs.readFileSync(path.join(backupDir, sneaky), 'utf8')).toBe(
+      'must never be deleted via a fake not_present entry',
+    );
+  });
+
+  it('rejects a not_present entry that carries file metadata even with filename null', () => {
+    tmp = makeTmpRoot();
+    const backupDir = path.join(tmp, 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+    fs.writeFileSync(path.join(backupDir, snapshotFilename('founder-os', VALID_RUN_ID)), 'legit');
+    fs.writeFileSync(path.join(backupDir, snapshotFilename('ledger', VALID_RUN_ID)), 'legit');
+    fs.writeFileSync(
+      path.join(backupDir, manifestFilename(VALID_RUN_ID)),
+      JSON.stringify({
+        runId: VALID_RUN_ID,
+        ok: true,
+        entries: [
+          { source: 'founder-os', status: 'ok', filename: snapshotFilename('founder-os', VALID_RUN_ID) },
+          { source: 'bank', status: 'not_present', filename: null, bytes: 999, sha256: 'not-really-null' },
+          { source: 'ledger', status: 'ok', filename: snapshotFilename('ledger', VALID_RUN_ID) },
+        ],
+      }),
+    );
+
+    const result = applyRetention(backupDir, 1);
+    expect(result.deletedFiles).toEqual([]);
+    expect(result.keptRunIds).toEqual([]);
+  });
+
+  it('rejects founder-os declared as not_present, which can never be legitimate', () => {
+    tmp = makeTmpRoot();
+    const backupDir = path.join(tmp, 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+    fs.writeFileSync(path.join(backupDir, snapshotFilename('bank', VALID_RUN_ID)), 'legit');
+    fs.writeFileSync(path.join(backupDir, snapshotFilename('ledger', VALID_RUN_ID)), 'legit');
+    fs.writeFileSync(
+      path.join(backupDir, manifestFilename(VALID_RUN_ID)),
+      JSON.stringify({
+        runId: VALID_RUN_ID,
+        ok: true,
+        entries: [
+          { source: 'founder-os', status: 'not_present', filename: null },
+          { source: 'bank', status: 'ok', filename: snapshotFilename('bank', VALID_RUN_ID) },
+          { source: 'ledger', status: 'ok', filename: snapshotFilename('ledger', VALID_RUN_ID) },
+        ],
+      }),
+    );
+
+    const result = applyRetention(backupDir, 1);
+    expect(result.deletedFiles).toEqual([]);
+    expect(result.keptRunIds).toEqual([]);
+  });
 });
 
 describe('isOwnedSnapshotFile / isOwnedManifestFile naming contract', () => {
@@ -585,9 +874,9 @@ describe('applyRetention, adversarial manifest contents', () => {
       runId: VALID_RUN_ID,
       ok: true,
       entries: [
-        { source: 'founder-os', filename: '../evil-outside.db' },
-        { source: 'bank', filename: snapshotFilename('bank', VALID_RUN_ID) },
-        { source: 'ledger', filename: snapshotFilename('ledger', VALID_RUN_ID) },
+        { source: 'founder-os', status: 'ok', filename: '../evil-outside.db' },
+        { source: 'bank', status: 'ok', filename: snapshotFilename('bank', VALID_RUN_ID) },
+        { source: 'ledger', status: 'ok', filename: snapshotFilename('ledger', VALID_RUN_ID) },
       ],
     });
     const outsideFile = path.join(tmp, 'evil-outside.db');
@@ -612,9 +901,9 @@ describe('applyRetention, adversarial manifest contents', () => {
       runId: VALID_RUN_ID,
       ok: true,
       entries: [
-        { source: 'founder-os', filename: '..\\evil-outside.db' },
-        { source: 'bank', filename: snapshotFilename('bank', VALID_RUN_ID) },
-        { source: 'ledger', filename: snapshotFilename('ledger', VALID_RUN_ID) },
+        { source: 'founder-os', status: 'ok', filename: '..\\evil-outside.db' },
+        { source: 'bank', status: 'ok', filename: snapshotFilename('bank', VALID_RUN_ID) },
+        { source: 'ledger', status: 'ok', filename: snapshotFilename('ledger', VALID_RUN_ID) },
       ],
     });
     const outsideFile = path.join(tmp, 'evil-outside.db');
@@ -635,9 +924,9 @@ describe('applyRetention, adversarial manifest contents', () => {
       runId: VALID_RUN_ID,
       ok: true,
       entries: [
-        { source: 'founder-os', filename: 'founder-os-2026-08-28.db' }, // not the exact timestamp shape
-        { source: 'bank', filename: snapshotFilename('bank', VALID_RUN_ID) },
-        { source: 'ledger', filename: snapshotFilename('ledger', VALID_RUN_ID) },
+        { source: 'founder-os', status: 'ok', filename: 'founder-os-2026-08-28.db' }, // not the exact timestamp shape
+        { source: 'bank', status: 'ok', filename: snapshotFilename('bank', VALID_RUN_ID) },
+        { source: 'ledger', status: 'ok', filename: snapshotFilename('ledger', VALID_RUN_ID) },
       ],
     });
 
@@ -654,9 +943,9 @@ describe('applyRetention, adversarial manifest contents', () => {
       runId: VALID_RUN_ID,
       ok: true,
       entries: [
-        { source: 'founder-os', filename: snapshotFilename('founder-os', VALID_RUN_ID) },
-        { source: 'founder-os', filename: snapshotFilename('founder-os', VALID_RUN_ID) },
-        { source: 'bank', filename: snapshotFilename('bank', VALID_RUN_ID) },
+        { source: 'founder-os', status: 'ok', filename: snapshotFilename('founder-os', VALID_RUN_ID) },
+        { source: 'founder-os', status: 'ok', filename: snapshotFilename('founder-os', VALID_RUN_ID) },
+        { source: 'bank', status: 'ok', filename: snapshotFilename('bank', VALID_RUN_ID) },
       ],
     });
 
@@ -674,8 +963,8 @@ describe('applyRetention, adversarial manifest contents', () => {
       runId: VALID_RUN_ID,
       ok: true,
       entries: [
-        { source: 'founder-os', filename: snapshotFilename('founder-os', VALID_RUN_ID) },
-        { source: 'bank', filename: snapshotFilename('bank', VALID_RUN_ID) },
+        { source: 'founder-os', status: 'ok', filename: snapshotFilename('founder-os', VALID_RUN_ID) },
+        { source: 'bank', status: 'ok', filename: snapshotFilename('bank', VALID_RUN_ID) },
         // ledger missing entirely
       ],
     });
@@ -693,9 +982,9 @@ describe('applyRetention, adversarial manifest contents', () => {
       runId: VALID_RUN_ID,
       ok: true,
       entries: [
-        { source: 'founder-os', filename: snapshotFilename('founder-os', VALID_RUN_ID) },
-        { source: 'bank', filename: snapshotFilename('bank', VALID_RUN_ID) },
-        { source: 'not-a-real-source', filename: 'not-a-real-source-' + VALID_RUN_ID + '.db' },
+        { source: 'founder-os', status: 'ok', filename: snapshotFilename('founder-os', VALID_RUN_ID) },
+        { source: 'bank', status: 'ok', filename: snapshotFilename('bank', VALID_RUN_ID) },
+        { source: 'not-a-real-source', status: 'ok', filename: 'not-a-real-source-' + VALID_RUN_ID + '.db' },
       ],
     });
 
@@ -714,9 +1003,9 @@ describe('applyRetention, adversarial manifest contents', () => {
       runId: VALID_RUN_ID,
       ok: true,
       entries: [
-        { source: 'founder-os', filename: snapshotFilename('founder-os', otherRunId) }, // wrong run id
-        { source: 'bank', filename: snapshotFilename('bank', VALID_RUN_ID) },
-        { source: 'ledger', filename: snapshotFilename('ledger', VALID_RUN_ID) },
+        { source: 'founder-os', status: 'ok', filename: snapshotFilename('founder-os', otherRunId) }, // wrong run id
+        { source: 'bank', status: 'ok', filename: snapshotFilename('bank', VALID_RUN_ID) },
+        { source: 'ledger', status: 'ok', filename: snapshotFilename('ledger', VALID_RUN_ID) },
       ],
     });
 
@@ -737,9 +1026,9 @@ describe('applyRetention, adversarial manifest contents', () => {
       runId: VALID_RUN_ID,
       ok: true,
       entries: [
-        { source: 'founder-os', filename: snapshotFilename('founder-os', VALID_RUN_ID) },
-        { source: 'bank', filename: snapshotFilename('bank', VALID_RUN_ID) },
-        { source: 'ledger', filename: snapshotFilename('ledger', VALID_RUN_ID) },
+        { source: 'founder-os', status: 'ok', filename: snapshotFilename('founder-os', VALID_RUN_ID) },
+        { source: 'bank', status: 'ok', filename: snapshotFilename('bank', VALID_RUN_ID) },
+        { source: 'ledger', status: 'ok', filename: snapshotFilename('ledger', VALID_RUN_ID) },
       ],
     });
 
@@ -755,7 +1044,8 @@ describe('runBackup, direct sanity check against a real Database handle', () => 
     seedAllFixtures(tmp);
     const result = await runBackup({ cwd: tmp, now: () => new Date('2026-08-28T00:00:00.000Z') });
     const founderEntry = result.manifest.entries.find((e) => e.source === 'founder-os')!;
-    const destPath = path.join(tmp, 'data', 'backups', founderEntry.filename);
+    // founder-os is required, so a successful run's entry always has a real filename.
+    const destPath = path.join(tmp, 'data', 'backups', founderEntry.filename as string);
 
     const db = new Database(destPath, { readonly: true, fileMustExist: true });
     try {
