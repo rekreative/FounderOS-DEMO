@@ -6,8 +6,10 @@ import { getProfileRole, hasClientAccess } from '@/lib/server/profiles-repo';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
 /**
- * Integration tests against the real dev PostgreSQL (REKREOS DEV / whatever
- * DATABASE_URL points at). Skips cleanly when no DATABASE_URL is configured.
+ * Integration tests against a real Postgres test database (see
+ * tests/helpers/pg-test-env.ts - requires an explicit TEST_DATABASE_URL,
+ * never DATABASE_URL/.env.local, which may be production). Skips cleanly
+ * when no TEST_DATABASE_URL is configured.
  *
  * Positive-path fixtures insert a minimal, disposable row directly into
  * auth.users (id, is_sso_user, is_anonymous — the only NOT NULL columns on

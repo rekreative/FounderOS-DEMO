@@ -20,7 +20,9 @@ describe('checkMetaIngestAuth (route-level sanity)', () => {
   });
 });
 
-// ── Integration tests against the real local dev PostgreSQL ────────────
+// ── Integration tests against a real Postgres test database ─────────────
+// Requires an explicit TEST_DATABASE_URL (see tests/helpers/pg-test-env.ts)
+// - never DATABASE_URL/.env.local, which may be production.
 const TEST_DATABASE_URL = installTestDatabaseUrl();
 const TEST_META_INGEST_KEY = 'test-meta-ingest-key-for-vitest';
 

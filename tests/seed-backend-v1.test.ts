@@ -4,10 +4,12 @@ import { closePool, withTransaction } from '@/lib/server/db';
 import { seedClients, seedLeadEvents, seedLeads } from '../scripts/seed-backend-v1';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
-// Integration test against the real local dev PostgreSQL. Runs the actual
+// Integration test against a real Postgres test database (see
+// tests/helpers/pg-test-env.ts - requires an explicit TEST_DATABASE_URL,
+// never DATABASE_URL/.env.local, which may be production). Runs the actual
 // seed functions (not a re-implementation) so this genuinely proves
 // db:seed's idempotency contract: a second run inserts nothing new and
-// never touches unrelated rows. Skips cleanly without DATABASE_URL.
+// never touches unrelated rows. Skips cleanly without TEST_DATABASE_URL.
 const TEST_DATABASE_URL = installTestDatabaseUrl();
 
 describe.runIf(Boolean(TEST_DATABASE_URL))('scripts/seed-backend-v1 (real PostgreSQL)', () => {

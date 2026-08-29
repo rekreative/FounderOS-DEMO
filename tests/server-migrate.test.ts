@@ -610,13 +610,16 @@ describe('0009_sqlite_installations.sql contains the REKREOS Phase 2 installatio
   });
 });
 
-// Real-database integration coverage. Skips cleanly - never with a confusing
-// failure - when no DATABASE_URL is configured. Applying migrations here is
-// safe to run repeatedly: schema_migrations tracks what already ran, and
-// every DDL statement in 0001_init.sql is idempotent (IF NOT EXISTS).
+// Real-database integration coverage against a real Postgres test database
+// (see tests/helpers/pg-test-env.ts - requires an explicit
+// TEST_DATABASE_URL, never DATABASE_URL/.env.local, which may be
+// production). Skips cleanly - never with a confusing failure - when no
+// TEST_DATABASE_URL is configured. Applying migrations here is safe to run
+// repeatedly: schema_migrations tracks what already ran, and every DDL
+// statement in 0001_init.sql is idempotent (IF NOT EXISTS).
 const TEST_DATABASE_URL = resolveTestDatabaseUrl();
 
-describe.runIf(Boolean(TEST_DATABASE_URL))('migrations applied against a real PostgreSQL (DATABASE_URL configured)', () => {
+describe.runIf(Boolean(TEST_DATABASE_URL))('migrations applied against a real PostgreSQL (TEST_DATABASE_URL configured)', () => {
   it('applies 0001_init.sql and leaves the expected tables, constraints, and indexes in place', async () => {
     const client = new Client({ connectionString: TEST_DATABASE_URL });
     await client.connect();

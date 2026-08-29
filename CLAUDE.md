@@ -95,6 +95,14 @@ provider status.
 
 - TDD: failing test first, then implementation. Tests live in `tests/`,
   one file per module; use `FOUNDER_OS_DB=:memory:` pattern (see `tests/db.test.ts`).
+- Real-Postgres integration tests (`describe.runIf(Boolean(...))` blocks
+  gated via `tests/helpers/pg-test-env.ts`) run only against an explicit
+  `TEST_DATABASE_URL` - never `DATABASE_URL` or `.env.local`. In this
+  installation, `.env.local`'s `DATABASE_URL` is byte-for-byte identical to
+  Railway's production `DATABASE_URL`; the helper refuses (throws a fixed
+  safe error) if `TEST_DATABASE_URL` ever matches either. See
+  `.env.example`'s `TEST_DATABASE_URL`/`ALLOW_REMOTE_TEST_DATABASE` entries
+  before running any integration test against a real database.
 - Zod-validate anything that crosses the DB or API boundary.
 - THEME: **Monolith Signal (`mono`) is the default** (2026-07-12,
   `DEFAULT_THEME` in `lib/theme.ts`; bare `:root` in `app/globals.css` carries
