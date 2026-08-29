@@ -5,16 +5,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  * lib/supabase/middleware-session.ts's cookie-transfer mechanics — mocked
  * @supabase/ssr, no real network. Proves: getAll reads request cookies,
  * setAll's refreshed cookies land on the RETURNED response (not just some
- * internal state), and an error/no-user result is treated as no session.
+ * internal state), getClaims verifies identity without getUser's per-request
+ * Auth-server round trip, and an error/no-claims result is treated as no
+ * session.
  */
 
 let capturedCookieMethods: { getAll: () => unknown; setAll: (cookies: unknown[], headers: Record<string, string>) => void } | null = null;
+const getClaims = vi.fn();
 const getUser = vi.fn();
 
 vi.mock('@supabase/ssr', () => ({
   createServerClient: (_url: string, _key: string, options: { cookies: typeof capturedCookieMethods }) => {
     capturedCookieMethods = options.cookies;
-    return { auth: { getUser } };
+    return { auth: { getClaims, getUser } };
   },
 }));
 
@@ -28,6 +31,7 @@ afterEach(() => {
   else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
   if (originalKey === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   else process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = originalKey;
+  getClaims.mockReset();
   getUser.mockReset();
   capturedCookieMethods = null;
 });
@@ -42,11 +46,13 @@ describe('refreshMiddlewareSession', () => {
   it('reads incoming cookies via getAll and returns the resolved user', async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'test-key';
-    getUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null });
+    getClaims.mockResolvedValue({ data: { claims: { sub: 'user-1' } }, error: null });
 
     const result = await refreshMiddlewareSession(req('sb-access-token=abc'));
 
     expect(result.user).toEqual({ id: 'user-1' });
+    expect(getClaims).toHaveBeenCalledTimes(1);
+    expect(getUser).not.toHaveBeenCalled();
     expect(capturedCookieMethods).toBeTruthy();
     // getAll must genuinely read from the request's own cookie jar, not a
     // hardcoded/empty stand-in.
@@ -57,15 +63,15 @@ describe('refreshMiddlewareSession', () => {
   it('refreshed cookies written via setAll land on the RETURNED response, not just internal state', async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'test-key';
-    getUser.mockImplementation(async () => {
+    getClaims.mockImplementation(async () => {
       // Simulate @supabase/ssr refreshing the session mid-call, exactly as
-      // its own JSDoc describes — setAll must be invoked before getUser()
+      // its own JSDoc describes - setAll must be invoked before getClaims()
       // resolves.
       capturedCookieMethods!.setAll(
         [{ name: 'sb-access-token', value: 'refreshed-value', options: { path: '/' } }],
         {},
       );
-      return { data: { user: { id: 'user-1' } }, error: null };
+      return { data: { claims: { sub: 'user-1' } }, error: null };
     });
 
     const result = await refreshMiddlewareSession(req());
@@ -77,7 +83,7 @@ describe('refreshMiddlewareSession', () => {
   it('an auth error is treated as no session (user: null), never surfaced as a thrown error', async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'test-key';
-    getUser.mockResolvedValue({ data: { user: null }, error: { message: 'invalid token' } });
+    getClaims.mockResolvedValue({ data: null, error: { message: 'invalid token' } });
 
     const result = await refreshMiddlewareSession(req('sb-access-token=garbage'));
 
@@ -87,12 +93,23 @@ describe('refreshMiddlewareSession', () => {
   it('no cookies at all resolves to user: null without throwing', async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'test-key';
-    getUser.mockResolvedValue({ data: { user: null }, error: null });
+    getClaims.mockResolvedValue({ data: null, error: null });
 
     const result = await refreshMiddlewareSession(req());
 
     expect(result.user).toBeNull();
     expect(result.response).toBeTruthy();
+  });
+
+  it('verified claims without a subject are rejected as no identity', async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co';
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'test-key';
+    getClaims.mockResolvedValue({ data: { claims: { exp: 4_102_444_800 } }, error: null });
+
+    const result = await refreshMiddlewareSession(req('sb-access-token=missing-sub'));
+
+    expect(result.user).toBeNull();
+    expect(getUser).not.toHaveBeenCalled();
   });
 
   it('missing NEXT_PUBLIC_SUPABASE_URL throws a clear, explicit error naming the variable', async () => {

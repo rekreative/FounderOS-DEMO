@@ -1,6 +1,5 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import type { User } from '@supabase/supabase-js';
 
 /**
  * Middleware-only Supabase session refresh — identity/session plumbing,
@@ -11,15 +10,14 @@ import type { User } from '@supabase/supabase-js';
  * only the first one (see lib/server/auth.ts / lib/server/api-auth.ts for
  * the second, applied in the internal layout and API routes).
  *
- * getUser() — never getSession() — is the only safe check: getSession()
- * would trust the JWT already sitting in the cookie without revalidating
- * it against Supabase's Auth server. Calling getUser() is also what
- * triggers @supabase/ssr's lazy session load and, if the access token is
- * near/past expiry, the refresh — the refreshed tokens are written back via
- * setAll below, which is why getUser() must be called BEFORE this
- * function's response is returned (a refresh completing after the response
- * is committed can't be persisted — see createServerClient's own JSDoc in
- * the installed @supabase/ssr package).
+ * getClaims() verifies the JWT signature and expiry instead of trusting the
+ * cookie via getSession(). With this installation's asymmetric ES256 key,
+ * verification uses the project's cached public JWKS and avoids getUser()'s
+ * Auth-server request on every middleware invocation. getClaims() still
+ * loads the session first, so an expired token can be refreshed and the new
+ * cookies are written through setAll below before the response is returned.
+ * Authoritative authorization remains in lib/server/auth.ts, which still
+ * calls getUser() and reads the profile role from Postgres.
  *
  * setAll's response reconstruction: cookies must be set on BOTH the
  * request (so this same invocation's downstream reads see them) and a
@@ -44,7 +42,7 @@ export type MiddlewareSessionResult = {
   response: NextResponse;
   /** null for both "no session" and "session invalid/error" — callers never
    *  need to distinguish those two for a presence-only check. */
-  user: User | null;
+  user: { id: string } | null;
 };
 
 export async function refreshMiddlewareSession(request: NextRequest): Promise<MiddlewareSessionResult> {
@@ -69,7 +67,8 @@ export async function refreshMiddlewareSession(request: NextRequest): Promise<Mi
   );
 
   // Called before `response` is returned, per the module comment above.
-  const { data, error } = await supabase.auth.getUser();
+  const { data, error } = await supabase.auth.getClaims();
+  const subject = data?.claims.sub;
 
-  return { response, user: error ? null : data.user };
+  return { response, user: error || !subject ? null : { id: subject } };
 }
