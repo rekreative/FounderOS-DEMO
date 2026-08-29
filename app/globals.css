@@ -12,12 +12,6 @@
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-@media (max-width: 1023px) {
-  .os-shell {
-    margin-right: 0 !important;
-  }
-}
-
 /* Dark (phosphor terminal). */
 :root[data-theme='dark'] {
   color-scheme: dark;
@@ -742,13 +736,4 @@ body {
   .brain-core-pulse {
     animation: none;
   }
-}
-
-/* The content column glides aside for the Conductor dock (same ease as the
-   panel slide); while the panel is being drag-resized both move 1:1. */
-.os-shell {
-  transition: margin-right 420ms var(--ease);
-}
-html.conductor-dragging .os-shell {
-  transition: none;
 }

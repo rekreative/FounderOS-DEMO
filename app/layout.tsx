@@ -5,7 +5,7 @@ import { THEME_INIT_SCRIPT } from '@/lib/theme';
 
 /**
  * Root layout — ONLY truly global, public-safe structure. No data-fetching
- * consumer (ClientsProvider, Sidebar, Topbar, CommandPalette, ConductorPanel)
+ * consumer (ClientsProvider, Sidebar, Topbar, CommandPalette)
  * lives here — those are internal-only and moved into
  * app/(internal)/layout.tsx, which gates them behind requireInternalUser().
  * This is what makes opening /login (app/(auth)/login) NOT trigger any

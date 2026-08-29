@@ -2,7 +2,6 @@ import { redirect } from 'next/navigation';
 import { Sidebar } from '@/components/Sidebar';
 import { Topbar } from '@/components/Topbar';
 import { CommandPalette } from '@/components/CommandPalette';
-import { ConductorPanel } from '@/components/ConductorPanel';
 import { ClientsProvider } from '@/components/ClientsProvider';
 import { MobileNav } from '@/components/MobileNav';
 import type { Command } from '@/lib/palette';
@@ -79,9 +78,7 @@ export default async function InternalLayout({ children }: { children: React.Rea
     // components/ClientsProvider.tsx for why).
     <ClientsProvider>
       <Sidebar />
-      {/* os-shell yields to the Conductor dock: the panel sets --conductor-w
-          and the whole content column glides left instead of being covered */}
-      <div className="os-shell flex min-h-screen min-w-0 flex-col lg:ml-[var(--sidebar-w,232px)]" style={{ marginRight: 'var(--conductor-w, 0px)' }}>
+      <div className="flex min-h-screen min-w-0 flex-col lg:ml-[var(--sidebar-w,232px)]">
         <Topbar />
         <main className="min-w-0 flex-1 px-4 pb-20 pt-5 sm:px-6 lg:px-8 lg:pb-16 lg:pt-7 wide:px-10 ultra:px-12">
           {/* Width tiers: 1280 on laptops · 1760 on large monitors ·
@@ -93,8 +90,6 @@ export default async function InternalLayout({ children }: { children: React.Rea
       </div>
       <CommandPalette commands={buildCommands()} />
       <MobileNav />
-      {/* Notion-style agent dock — the Conductor, aware of the current screen */}
-      <ConductorPanel />
     </ClientsProvider>
   );
 }

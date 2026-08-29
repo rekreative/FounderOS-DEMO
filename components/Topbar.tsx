@@ -1,9 +1,8 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { Bot, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { CONDUCTOR_OPEN_EVENT } from '@/components/ConductorPanel';
 import { LogoutButton } from '@/components/LogoutButton';
 
 const SEGMENT_LABELS: Record<string, string> = {
@@ -50,16 +49,6 @@ export function Topbar() {
           className="grid h-[30px] w-[30px] place-items-center rounded-sm-t border border-os-border bg-os-surface text-os-muted transition-colors hover:border-os-border-strong hover:text-os-text"
         >
           <Search className="h-3.5 w-3.5" />
-        </button>
-        {/* the agent dock, on the far right where ⌘K used to sit — the
-            Conductor answers about whatever screen you're on */}
-        <button
-          onClick={() => window.dispatchEvent(new CustomEvent(CONDUCTOR_OPEN_EVENT))}
-          title="Ask the Conductor about this screen"
-          aria-label="Open the Conductor agent panel"
-          className="grid h-[30px] w-[30px] place-items-center rounded-sm-t border border-os-border bg-os-surface text-os-muted transition-colors hover:border-os-border-strong hover:text-os-accent"
-        >
-          <Bot className="h-3.5 w-3.5" />
         </button>
         <LogoutButton />
       </div>
