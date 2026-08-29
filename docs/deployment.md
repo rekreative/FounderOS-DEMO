@@ -200,13 +200,15 @@ Both are exact-match public routes - see `middleware.ts`'s
 `PUBLIC_STATUS_PATHS` exception, which lets them bypass the optional legacy
 `FOUNDER_OS_ACCESS_TOKEN` gate and the Supabase session check.
 
-## Manual SQLite backups
+## SQLite backups and off-volume archives
 
 Railway's native volume backups are **not** purchased for this project.
 `data/founder-os.db`, `data/bank.db`, and `data/ledger.db` are backed up
-**manually**, by a human running one command. There is no scheduler, no API
-route, and nothing runs this automatically on boot or deploy. See
-`lib/backup.ts` and `scripts/backup-sqlite.ts`.
+with the application-level snapshot tool below. Nothing runs on boot or
+deploy. A local scheduled automation can run the full off-volume cycle with
+`scripts/archive-production-backup.ps1`; it uses the operator's existing
+Railway CLI login and never stores a Railway token in this repository. See
+`lib/backup.ts`, `lib/backup-archive.ts`, and the scripts under `scripts/`.
 
 ### Running a backup
 
@@ -324,6 +326,46 @@ password-protected archive location, or wherever your own off-volume backup
 habit lives). This downloads the entire `data/backups/` directory (every
 kept snapshot and manifest) for that run's manual archival. Run this after
 a `npm run backup:sqlite` that reported success.
+
+### Automated off-volume archive on Windows
+
+The supported zero-additional-service-cost automation is:
+
+```
+npm run backup:production -- -DestinationRoot C:\Users\Kilian\REKREOS-Backups
+```
+
+It performs the complete production cycle in one command:
+
+1. Runs `npm run backup:sqlite` inside the linked Railway service.
+2. Extracts exactly one successful run id from the remote command.
+3. Downloads that run's manifest into a temporary local directory.
+4. Treats the manifest as untrusted and validates its run id, exact source
+   set, statuses, owned filenames, sizes, integrity result, and SHA-256 shape
+   before using any filename from it.
+5. Downloads only the validated snapshots from that manifest.
+6. Recomputes size and SHA-256 and runs `PRAGMA integrity_check` locally.
+7. Renames the temporary directory to its final run id only after every
+   verification passes. A failed partial download is preserved with a
+   `.failed-<run-id>` name for diagnosis.
+8. Writes `latest-status.json` in the destination root. `ok: true` means a
+   complete verified off-volume archive exists; a failure writes `ok: false`
+   and a fixed non-secret category and exits non-zero, allowing a scheduler
+   to alert the operator.
+
+The destination must be outside this Git checkout and should itself be
+backed up or synced to another device. The command never deletes local
+archives automatically.
+
+This automation depends on the Windows machine being powered on, connected,
+and still authenticated with the Railway CLI. A missed run does not execute
+inside Railway. For a client installation that needs 24/7 recovery without
+operator-machine dependency, enable Railway's native scheduled volume
+backups or add a separately managed object-storage archive. Railway's native
+backups can be scheduled daily, weekly, or monthly, but wiping a volume also
+deletes its Railway backups and they restore only within the same project
+and environment. Keep at least one independently downloaded archive even
+when native backups are enabled.
 
 ### Restoring a snapshot
 
