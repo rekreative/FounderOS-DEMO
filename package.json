@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
     "backup:sqlite": "tsx scripts/backup-sqlite.ts",
+    "backup:production": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/archive-production-backup.ps1",
     "brain:docs": "tsx scripts/generate-brain-docs.ts",
     "db:migrate": "tsx lib/server/migrate.ts",
     "register:installation": "tsx scripts/register-installation.ts",

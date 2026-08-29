@@ -7,8 +7,8 @@ import path from 'node:path';
  * Manual, CLI-only SQLite backup for the three production stores
  * (data/founder-os.db, data/bank.db, data/ledger.db). Deliberately NOT wired
  * into any API route, page, or scheduler; see scripts/backup-sqlite.ts for
- * the only invocation path, run by hand (`npm run backup:sqlite`) or from a
- * Railway shell. Uses better-sqlite3's wrapped SQLite Online Backup API
+ * the only on-volume invocation path, run by hand (`npm run backup:sqlite`)
+ * or by the off-volume archival wrapper. Uses better-sqlite3's wrapped SQLite Online Backup API
  * (`Database#backup()`), which produces a transactionally consistent copy of
  * a live WAL-mode database without stopping writers or requiring a manual
  * checkpoint.

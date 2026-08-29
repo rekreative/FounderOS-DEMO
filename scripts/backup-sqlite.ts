@@ -3,8 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { CollisionError, PreflightError, runBackup, type RunBackupOptions } from '../lib/backup';
 
 /**
- * Manual-only SQLite backup CLI (`npm run backup:sqlite`). Never imported by
- * app/route code and never run automatically on boot or deploy; see
+ * SQLite backup CLI (`npm run backup:sqlite`). Never imported by app/route
+ * code and never run automatically on boot or deploy. It can be invoked by
+ * a human or by scripts/archive-production-backup.ps1; see
  * lib/server/migrate.ts for the same guarded-direct-run pattern this file
  * copies. `runCli` accepts the same overrides as `runBackup` purely so
  * tests can point it at a fixture directory; the direct-run invocation below
