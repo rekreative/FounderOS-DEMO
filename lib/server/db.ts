@@ -25,9 +25,9 @@ const globalForPg = globalThis as unknown as { __rekreativePgPool?: Pool };
 
 /**
  * Explicit TLS for the Supabase Session Pooler (Supabase TLS V1). Only used
- * when SUPABASE_CA_PEM (the public Supabase Root CA cert — not a secret) is
- * set; when it's absent, `ssl` is omitted entirely so pg-connection-string's
- * own parsing of DATABASE_URL's sslmode (local dev, or any deployment that
+ * when a CA is available (the public Supabase Root CA cert - not a secret);
+ * when it's absent, `ssl` is omitted entirely so pg-connection-string's own
+ * parsing of DATABASE_URL's sslmode (local dev, or any deployment that
  * hasn't opted in yet) keeps working exactly as before.
  *
  * Passing an explicit `ssl` object here only takes effect because
@@ -37,9 +37,19 @@ const globalForPg = globalThis as unknown as { __rekreativePgPool?: Pool };
  * (pg/lib/connection-parameters.js), so any sslmode/sslcert/sslkey/
  * sslrootcert left in the URL would silently overwrite `ssl` here. Never
  * reintroduce those query params alongside SUPABASE_CA_PEM.
+ *
+ * `ca` defaults to `process.env.SUPABASE_CA_PEM` - this app's own pool
+ * (createPool() below) always calls this with zero arguments, so its
+ * behavior is completely unchanged by the parameter's existence. It exists
+ * so lib/server/migrate.ts and scripts/register-installation.ts can reuse
+ * this exact shape-construction logic for their own one-off `pg.Client`
+ * connections while resolving the CA through their own standalone-CLI
+ * fallback (`.env.local`, since those scripts run outside Next's own
+ * dev/build env loading) - see `resolveSupabaseCaPem()` in migrate.ts.
  */
-function getSslConfig(): { ca: string; rejectUnauthorized: true } | undefined {
-  const ca = process.env.SUPABASE_CA_PEM;
+export function getSslConfig(
+  ca: string | undefined = process.env.SUPABASE_CA_PEM,
+): { ca: string; rejectUnauthorized: true } | undefined {
   if (!ca) return undefined;
   return { ca, rejectUnauthorized: true };
 }

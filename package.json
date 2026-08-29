@@ -17,6 +17,7 @@
     "backup:sqlite": "tsx scripts/backup-sqlite.ts",
     "brain:docs": "tsx scripts/generate-brain-docs.ts",
     "db:migrate": "tsx lib/server/migrate.ts",
+    "register:installation": "tsx scripts/register-installation.ts",
     "db:seed": "tsx scripts/seed-backend-v1.ts",
     "db:seed-admin": "tsx scripts/seed-admin.ts"
   },

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/server/db';
 import { checkFounderDbReady } from '@/lib/server/sqlite-ready';
+import { checkInstallationReady } from '@/lib/server/installation-ready';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,11 @@ export const dynamic = 'force-dynamic';
  * and docs/deployment.md); when that flag is off, its check reports
  * 'not_required' and never affects `ok`, so local/dev/CI behavior here is
  * unchanged. bank.db/ledger.db stay optional and are never checked.
+ * `checks.installation` (REKREOS Phase 2, see
+ * lib/server/installation-ready.ts and docs/deployment.md) reports whether
+ * founder-os.db's stable installation UUID still matches the one registered
+ * in Postgres - additive, and 'not_required' (never affecting `ok`) unless
+ * FOUNDER_OS_VERIFY_INSTALLATION=true.
  *
  * Diagnostic/monitoring signal only: Railway's healthcheck points at
  * /api/health (process liveness), not this route, so a transient DB outage
@@ -50,8 +56,9 @@ async function checkPostgres(): Promise<CheckStatus> {
 export async function GET(): Promise<Response> {
   const postgres = await checkPostgres();
   const sqlite = checkFounderDbReady();
+  const installation = await checkInstallationReady();
 
-  const ok = postgres === 'ok' && sqlite.status !== 'error';
-  const body = { ok, checks: { postgres, sqlite: sqlite.status } };
+  const ok = postgres === 'ok' && sqlite.status !== 'error' && installation !== 'error';
+  const body = { ok, checks: { postgres, sqlite: sqlite.status, installation } };
   return NextResponse.json(body, { status: ok ? 200 : 503 });
 }

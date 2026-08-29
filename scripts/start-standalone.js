@@ -17,30 +17,55 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { verifyInstallationBeforeStart } = require('./verify-installation');
 
 const distDir = process.env.NEXT_DIST_DIR || '.next';
 const standaloneDir = path.join(distDir, 'standalone');
 const serverFile = path.join(standaloneDir, 'server.js');
 
-if (!fs.existsSync(serverFile)) {
-  console.error(`Standalone server not found at ${serverFile}. Run "npm run build" first.`);
+async function main() {
+  if (!fs.existsSync(serverFile)) {
+    console.error(`Standalone server not found at ${serverFile}. Run "npm run build" first.`);
+    process.exit(1);
+  }
+
+  // REKREOS Phase 2: when FOUNDER_OS_VERIFY_INSTALLATION=true, confirm the
+  // SQLite and Postgres installation markers exist and match BEFORE
+  // server.js is ever spawned - a mismatch means founder-os.db was
+  // replaced or recreated, and the process must never come up against it.
+  // Flag off (the default) is a no-op: verifyInstallationBeforeStart()
+  // returns { ok: true, skipped: true } without touching SQLite or
+  // Postgres, so local/dev/CI behavior here is unchanged.
+  const verification = await verifyInstallationBeforeStart(process.env, process.cwd());
+  if (!verification.ok) {
+    console.error(`Installation verification failed: ${verification.reason}`);
+    process.exit(1);
+  }
+
+  if (fs.existsSync('public')) {
+    fs.cpSync('public', path.join(standaloneDir, 'public'), { recursive: true });
+  }
+
+  const staticDir = path.join(distDir, 'static');
+  if (fs.existsSync(staticDir)) {
+    fs.cpSync(staticDir, path.join(standaloneDir, distDir, 'static'), { recursive: true });
+  }
+
+  const child = spawn(process.execPath, [serverFile], {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      HOSTNAME: '0.0.0.0',
+    },
+  });
+  child.on('exit', (code) => process.exit(code ?? 0));
+}
+
+main().catch(() => {
+  // Fixed, generic message only - main() can fail from many places (a
+  // blocked static-file copy, a spawn failure, ...) and the underlying
+  // error's own message can carry a filesystem path or other local detail.
+  // Never print the underlying error itself here.
+  console.error('start-standalone.js failed to start.');
   process.exit(1);
-}
-
-if (fs.existsSync('public')) {
-  fs.cpSync('public', path.join(standaloneDir, 'public'), { recursive: true });
-}
-
-const staticDir = path.join(distDir, 'static');
-if (fs.existsSync(staticDir)) {
-  fs.cpSync(staticDir, path.join(standaloneDir, distDir, 'static'), { recursive: true });
-}
-
-const child = spawn(process.execPath, [serverFile], {
-  stdio: 'inherit',
-  env: {
-    ...process.env,
-    HOSTNAME: '0.0.0.0',
-  },
 });
-child.on('exit', (code) => process.exit(code ?? 0));
