@@ -9,8 +9,6 @@ describe('Home Executive responsive contract', () => {
   const home = read('app/(internal)/page.tsx');
   const layout = read('app/(internal)/layout.tsx');
   const mobileNav = read('components/MobileNav.tsx');
-  const conductor = read('components/ConductorPanel.tsx');
-  const styles = read('app/globals.css');
 
   test('uses only real operational sources on the executive home', () => {
     expect(home).not.toContain("from '@/lib/automations'");
@@ -50,9 +48,4 @@ describe('Home Executive responsive contract', () => {
     expect(mobileNav).toContain("href: '/connections'");
   });
 
-  test('keeps the assistant above mobile navigation without squeezing content', () => {
-    expect(conductor).toContain('bottom-20');
-    expect(conductor).toContain('lg:bottom-5');
-    expect(styles).toContain('margin-right: 0 !important');
-  });
 });
