@@ -15,10 +15,12 @@ import {
 } from '@/lib/server/results-repo';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
-// Integration tests against the operator's real local dev PostgreSQL —
-// exercises Results V1's acquisition-cohort semantics and Home's
-// operational (event-time) semantics end to end. Skips cleanly when no
-// DATABASE_URL is configured (see tests/helpers/pg-test-env.ts).
+// Integration tests against a real Postgres test database (see
+// tests/helpers/pg-test-env.ts - requires an explicit TEST_DATABASE_URL,
+// never DATABASE_URL/.env.local, which may be production) - exercises
+// Results V1's acquisition-cohort semantics and Home's operational
+// (event-time) semantics end to end. Skips cleanly when no
+// TEST_DATABASE_URL is configured.
 const TEST_DATABASE_URL = installTestDatabaseUrl();
 
 describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/results-repo (real PostgreSQL)', () => {

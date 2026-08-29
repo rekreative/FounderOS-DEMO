@@ -16,9 +16,11 @@ import {
 } from '@/lib/server/integration-connections-repo';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
-// Integration tests against the operator's real local dev PostgreSQL —
-// exercises Connections/Secrets V1's repository layer end to end. Skips
-// cleanly when no DATABASE_URL is configured (see tests/helpers/pg-test-env.ts).
+// Integration tests against a real Postgres test database (see
+// tests/helpers/pg-test-env.ts - requires an explicit TEST_DATABASE_URL,
+// never DATABASE_URL/.env.local, which may be production) - exercises
+// Connections/Secrets V1's repository layer end to end. Skips cleanly
+// when no TEST_DATABASE_URL is configured.
 // Requires migration 0008_integration_connections.sql to already be applied.
 const TEST_DATABASE_URL = installTestDatabaseUrl();
 

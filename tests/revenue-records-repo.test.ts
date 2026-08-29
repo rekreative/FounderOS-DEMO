@@ -10,9 +10,11 @@ import {
 } from '@/lib/server/revenue-records-repo';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
-// Integration tests against the operator's real local dev PostgreSQL —
-// exercises Results Manual Revenue V1's repository layer end to end. Skips
-// cleanly when no DATABASE_URL is configured (see tests/helpers/pg-test-env.ts).
+// Integration tests against a real Postgres test database (see
+// tests/helpers/pg-test-env.ts - requires an explicit TEST_DATABASE_URL,
+// never DATABASE_URL/.env.local, which may be production) - exercises
+// Results Manual Revenue V1's repository layer end to end. Skips cleanly
+// when no TEST_DATABASE_URL is configured.
 const TEST_DATABASE_URL = installTestDatabaseUrl();
 
 describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/revenue-records-repo (real PostgreSQL)', () => {

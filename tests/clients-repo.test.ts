@@ -4,11 +4,13 @@ import { createClient, deleteClient, getClientById, listClients, updateClient } 
 import { createLead } from '@/lib/server/leads-repo';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
-// Integration tests against the operator's real local dev PostgreSQL
-// (rekreative_os_dev). Every row this file creates is tracked by id and
-// deleted in afterEach, in FK-safe order (lead_events → leads → clients) —
-// never a blanket DELETE, so the operator's own seeded/manual data is never
-// touched. Skips cleanly when no DATABASE_URL is configured.
+// Integration tests against a real Postgres test database (see
+// tests/helpers/pg-test-env.ts - requires an explicit TEST_DATABASE_URL,
+// never DATABASE_URL/.env.local, which may be production). Every row this
+// file creates is tracked by id and deleted in afterEach, in FK-safe order
+// (lead_events → leads → clients) - never a blanket DELETE, so any other
+// data already in the test database is never touched. Skips cleanly when
+// no TEST_DATABASE_URL is configured.
 const TEST_DATABASE_URL = installTestDatabaseUrl();
 
 describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/clients-repo (real PostgreSQL)', () => {

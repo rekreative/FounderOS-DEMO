@@ -17,10 +17,12 @@ import {
 } from '@/lib/server/leads-repo';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
-// Integration tests against the operator's real local dev PostgreSQL. Every
+// Integration tests against a real Postgres test database (see
+// tests/helpers/pg-test-env.ts - requires an explicit TEST_DATABASE_URL,
+// never DATABASE_URL/.env.local, which may be production). Every
 // client/lead this file creates is tracked by id and deleted in afterEach,
 // in FK-safe order (lead_events → leads → clients) — never a blanket
-// DELETE. Skips cleanly when no DATABASE_URL is configured.
+// DELETE. Skips cleanly when no TEST_DATABASE_URL is configured.
 const TEST_DATABASE_URL = installTestDatabaseUrl();
 
 describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/leads-repo (real PostgreSQL)', () => {

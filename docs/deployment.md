@@ -102,6 +102,42 @@ larger architectural change explicitly out of scope for this milestone.
   a schema change; rely on Supabase's own automated backups / point-in-time
   restore as the rollback safety net.
 
+### Real-Postgres integration tests must never target DATABASE_URL
+
+`DATABASE_URL` (from `process.env` or `.env.local`) is this application's
+own connection string - production or local dev, whichever this
+installation points it at. It is **not** a safe target for the
+real-Postgres integration test suite (`describe.runIf(Boolean(...))` blocks
+across `tests/*.test.ts`, gated through `tests/helpers/pg-test-env.ts`):
+those tests apply real migrations and freely create/drop/mutate rows. In at
+least one known installation, `.env.local`'s `DATABASE_URL` was confirmed
+byte-for-byte identical to Railway's production `DATABASE_URL` - a helper
+that fell back to either would let a routine test run mutate production.
+
+`tests/helpers/pg-test-env.ts`'s `resolveTestDatabaseUrl()`/
+`installTestDatabaseUrl()` enforce this:
+
+- The only source ever trusted is the explicit `TEST_DATABASE_URL`
+  environment variable - never `process.env.DATABASE_URL`, never
+  `.env.local`'s `DATABASE_URL`, never any other application credential
+  fallback.
+- Missing `TEST_DATABASE_URL` is not an error - every real-Postgres
+  integration test skips cleanly and only mocked/unit tests run.
+- If `TEST_DATABASE_URL` ever equals `DATABASE_URL` (from `process.env` or
+  `.env.local`), the helper throws a fixed, safe configuration error
+  instead of running - this is a misconfiguration to fix, not something to
+  silently skip past.
+- `TEST_DATABASE_URL` must point at a `localhost`/`127.0.0.1`/`::1` host by
+  default. A remote test database additionally requires the explicit
+  `ALLOW_REMOTE_TEST_DATABASE=true` opt-in.
+- Nothing this helper does ever prints a URL, username, password, host,
+  path, or stack - every failure is a fixed, generic message.
+
+See `.env.example`'s `TEST_DATABASE_URL`/`ALLOW_REMOTE_TEST_DATABASE`
+entries for the exact setup. `TEST_DATABASE_URL` must name a separate,
+disposable database you are fine wiping - never production, and never
+whatever `DATABASE_URL` already points at.
+
 ## Domain
 
 No canonical `BASE_URL`/`APP_URL` exists in this app today, and none is

@@ -6,9 +6,11 @@ import { createClientMetaAccount, recordSyncRun } from '@/lib/server/meta-repo';
 import { getClientOpsSnapshot, getOpsSnapshot } from '@/lib/server/ops-status';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
-// Integration tests against the operator's real local dev PostgreSQL —
-// exercises the Real V1 passive-evidence layer end to end. Skips cleanly
-// when no DATABASE_URL is configured (see tests/helpers/pg-test-env.ts).
+// Integration tests against a real Postgres test database (see
+// tests/helpers/pg-test-env.ts - requires an explicit TEST_DATABASE_URL,
+// never DATABASE_URL/.env.local, which may be production) - exercises the
+// Real V1 passive-evidence layer end to end. Skips cleanly when no
+// TEST_DATABASE_URL is configured.
 const TEST_DATABASE_URL = installTestDatabaseUrl();
 
 describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/ops-status (real PostgreSQL)', () => {
