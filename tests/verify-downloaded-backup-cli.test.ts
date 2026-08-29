@@ -44,7 +44,8 @@ describe('verify-downloaded-backup CLI', () => {
     const filename = await writeArchive();
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     await expect(runCli(['--manifest-only', tmp, RUN_ID])).resolves.toBe(true);
-    expect(log).toHaveBeenCalledWith(JSON.stringify([filename]));
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(filename);
   });
 
   it('fully verifies the downloaded snapshot', async () => {

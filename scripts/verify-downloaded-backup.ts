@@ -20,7 +20,7 @@ export async function runCli(args: string[] = process.argv.slice(2)): Promise<bo
     const snapshots = validateArchiveManifest(manifestFile, parsed, runId);
 
     if (manifestOnly) {
-      console.log(JSON.stringify(snapshots.map((entry) => entry.filename)));
+      for (const snapshot of snapshots) console.log(snapshot.filename);
       return true;
     }
 
