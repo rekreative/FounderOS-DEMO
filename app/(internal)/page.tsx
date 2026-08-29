@@ -1,205 +1,141 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, CalendarDays, CircleDollarSign, Megaphone, Target, Users, type LucideIcon } from 'lucide-react';
+import { useClientsRegistry } from '@/components/ClientsProvider';
 import { PageHeader } from '@/components/PageHeader';
-import { Badge, Dot, Kbd, Label, SectionHead } from '@/components/terminal';
-import { REKREATIVE_PRIMARY } from '@/lib/nav';
+import { Badge, Dot, Kbd, SectionHead } from '@/components/terminal';
+import { getMetaAdsCampaigns } from '@/lib/api/meta-ads';
+import { getLeads, type Lead } from '@/lib/api/leads';
+import { getOpsSnapshot as fetchOpsSnapshot } from '@/lib/api/ops-status';
+import { getResultsHomeSnapshot, type ClientOperationalSnapshot, type ResultsHomeResponse } from '@/lib/api/results';
 import { getClientStatusLabel } from '@/lib/clients';
 import { getClientNameForLead, getStageLabel, type LeadEvent, type LeadStage } from '@/lib/leads';
-import { useClientsRegistry } from '@/components/ClientsProvider';
-import { getLeads, type Lead } from '@/lib/api/leads';
-import {
-  getResultsHomeSnapshot,
-  type ClientOperationalSnapshot,
-  type ResultsHomeResponse,
-} from '@/lib/api/results';
-import { formatEUR } from '@/lib/results';
-import { getMetaAdsCampaigns } from '@/lib/api/meta-ads';
-import { getAutomations, initializeAutomationsStoreIfNeeded, summarizeAutomations, type Automation } from '@/lib/automations';
-import { getContentItems, initializeContentStoreIfNeeded, isContentOverdue, type ContentItem } from '@/lib/content-items';
-import { getOpsSnapshot as fetchOpsSnapshot } from '@/lib/api/ops-status';
 import type { OpsSnapshot } from '@/lib/ops-status';
-
-// REKREATIVE OS internal command center — "what's happening right now" and
-// "what needs my attention". Clients, Leads, every Results-derived number
-// (high-priority/awaiting-contact leads, upcoming appointments, recent
-// conversions/activity, value generated, per-client snapshot), and — since
-// Meta Ads Real V1 — the "Campañas activas" tile (GET /api/meta-ads/campaigns)
-// are real PostgreSQL. Automations/AI Agents/Integrations/Content stay the
-// existing localStorage demo stores — unchanged this pass, explicitly marked
-// DEMO on their tiles so real and demo data are never visually ambiguous.
+import { formatEUR } from '@/lib/results';
 
 type AttentionItem = {
   id: string;
-  text: string;
+  title: string;
+  detail: string;
   href: string;
   clientId?: string | null;
-  /** True for the four still-localStorage sources (Automations/Integrations/
-   * AI Agents/Content) — tags the row DEMO and excludes it from the header's
-   * real-attention count (see realAttentionCount below). Real, PostgreSQL
-   * items (high-priority/awaiting-contact leads) omit this. */
-  demo?: boolean;
+  priority: 'critica' | 'alta' | 'media';
 };
 
-// Home-only presentation translation for the "Actividad reciente" feed —
-// event-type-aware Spanish labels. Never mutates the stored LeadEvent
-// (summary stays whatever lib/server/leads-repo.ts wrote); this only decides
-// what text renders for it. manual_note keeps the operator's own note as-is.
 function translateActivitySummary(event: LeadEvent): string {
   switch (event.type) {
     case 'stage_changed': {
       const to = (event.details as { to?: string } | null | undefined)?.to;
       return to ? `Etapa cambiada a ${getStageLabel(to as LeadStage)}` : event.summary;
     }
-    case 'converted':
-      return 'Lead convertido';
-    case 'disqualified':
-      return 'Lead descartado';
-    case 'appointment_completed':
-      return 'Cita completada';
-    case 'appointment_booked':
-      return 'Cita reservada';
-    case 'whatsapp_sent':
-      return 'WhatsApp enviado';
-    case 'whatsapp_delivered':
-      return 'WhatsApp entregado';
-    case 'lead_replied':
-      return 'Lead respondió';
-    case 'commercial_contacted':
-      return 'Contacto comercial registrado';
-    case 'ai_analyzed':
-      return 'Analizado por IA';
-    case 'lead_received':
-      return 'Lead recibido';
-    case 'manual_note':
-      return event.summary;
-    default:
-      return event.summary;
+    case 'converted': return 'Lead convertido';
+    case 'disqualified': return 'Lead descartado';
+    case 'appointment_completed': return 'Cita completada';
+    case 'appointment_booked': return 'Cita reservada';
+    case 'whatsapp_sent': return 'WhatsApp enviado';
+    case 'whatsapp_delivered': return 'WhatsApp entregado';
+    case 'lead_replied': return 'Lead respondió';
+    case 'commercial_contacted': return 'Contacto comercial registrado';
+    case 'ai_analyzed': return 'Analizado por IA';
+    case 'lead_received': return 'Lead recibido';
+    default: return event.summary;
   }
 }
 
 function formatDateShort(value: string | null): string {
-  if (!value) return '—';
+  if (!value) return 'Sin fecha';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
+  if (Number.isNaN(date.getTime())) return 'Sin fecha';
   return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
 }
 
-function StatTile({
-  href,
-  label,
-  value,
-  unit,
-  demo = false,
-}: {
-  href: string;
-  label: string;
-  value: React.ReactNode;
-  unit: string;
-  /** Marks a tile as sourced from a localStorage demo store, never a live
-   * PostgreSQL number — see the Home Demo Data Policy in the project docs. */
-  demo?: boolean;
+function StatTile({ href, label, value, unit, icon: Icon }: {
+  href: string; label: string; value: ReactNode; unit: string; icon: LucideIcon;
 }) {
   return (
-    <Link
-      href={href}
-      className="hoverable group flex flex-col gap-2 rounded-lg-t border border-os-border bg-os-surface px-[18px] py-4"
-    >
-      <div className="flex items-center justify-between">
-        <span className="flex items-center gap-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.26em] text-os-dim">
-          {label}
-          {demo && (
-            <span className="rounded-sm-t border border-os-border px-1 py-[1px] text-[8px] font-bold tracking-[0.1em] text-os-dim">
-              DEMO
-            </span>
-          )}
+    <Link href={href} className="hoverable group min-w-0 border border-os-border bg-os-surface px-4 py-4 sm:px-[18px]">
+      <div className="flex items-start justify-between gap-3">
+        <span className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-os-dim sm:text-[10px]">{label}</span>
+        <span className="grid h-8 w-8 shrink-0 place-items-center border border-os-border text-os-dim">
+          <Icon className="h-4 w-4" strokeWidth={1.6} />
         </span>
-        <ArrowUpRight className="h-3.5 w-3.5 text-os-dim opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
-      <div className="flex items-baseline gap-[7px] font-mono text-[26px] font-semibold tracking-[-0.02em] text-os-text">
-        {value}
-        <small className="whitespace-nowrap text-xs font-normal text-os-dim">{unit}</small>
+      <div className="mt-3 flex min-w-0 items-baseline gap-2 font-mono text-[24px] font-semibold tracking-[-0.03em] text-os-text sm:text-[27px]">
+        <span className="truncate">{value}</span>
+        <small className="truncate text-[10px] font-normal text-os-dim sm:text-[11px]">{unit}</small>
       </div>
     </Link>
   );
 }
 
-function ActivityRow({
-  href,
-  state,
-  text,
-  demo = false,
-}: {
-  href: string;
-  state: 'ok' | 'warn';
-  text: string;
-  /** Same DEMO tag as StatTile — marks a row sourced from a localStorage
-   * demo store rather than live PostgreSQL. */
-  demo?: boolean;
-}) {
+function PriorityRow({ item, compact = false }: { item: AttentionItem; compact?: boolean }) {
+  const tone = item.priority === 'critica' ? 'err' : 'warn';
   return (
-    <Link href={href} className="hoverable flex items-center gap-3 rounded-lg-t border border-os-border bg-os-surface px-3.5 py-[10px]">
-      <Dot state={state} />
-      <span className="min-w-0 flex-1 truncate text-[12.5px] text-os-muted">{text}</span>
-      {demo && (
-        <span className="shrink-0 rounded-sm-t border border-os-border px-1 py-[1px] text-[8px] font-bold uppercase tracking-[0.1em] text-os-dim">
-          DEMO
-        </span>
-      )}
+    <Link href={item.href} className="hoverable group flex min-w-0 items-center gap-3 border border-os-border bg-os-surface px-3.5 py-3">
+      <Dot state={tone} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-[12px] font-semibold text-os-text sm:text-[12.5px]">{item.title}</span>
+          {!compact && <Badge tone={tone}>{item.priority}</Badge>}
+        </div>
+        <p className="mt-1 truncate font-mono text-[10px] text-os-dim">{item.detail}</p>
+      </div>
+      <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-os-dim transition-colors group-hover:text-os-accent" />
+    </Link>
+  );
+}
+
+function FeedRow({ href, title, detail }: { href: string; title: string; detail?: string }) {
+  return (
+    <Link href={href} className="hoverable flex min-w-0 items-center gap-3 border border-os-border bg-os-surface px-3.5 py-3">
+      <Dot state="ok" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[12px] text-os-muted">{title}</p>
+        {detail && <p className="mt-1 truncate font-mono text-[10px] text-os-dim">{detail}</p>}
+      </div>
       <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-os-dim" />
     </Link>
   );
 }
 
+function EmptyState({ children }: { children: ReactNode }) {
+  return <div className="border border-dashed border-os-border bg-os-surface2 px-4 py-7 text-center font-mono text-[10.5px] text-os-dim">{children}</div>;
+}
+
+function FunnelStep({ label, value, detail, last = false }: { label: string; value: number; detail: string; last?: boolean }) {
+  return (
+    <div className="relative min-w-0 border border-os-border bg-os-surface px-4 py-4 sm:border-r-0 sm:last:border-r">
+      <p className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-os-dim">{label}</p>
+      <p className="mt-2 font-mono text-[25px] font-semibold text-os-text">{value}</p>
+      <p className="mt-1 font-mono text-[10px] text-os-dim">{detail}</p>
+      {!last && <ArrowRight className="absolute -right-2.5 top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 bg-os-bg p-1 text-os-dim sm:block" />}
+    </div>
+  );
+}
+
 export default function HomePage() {
-  // Canonical PostgreSQL registry — same source /clients and /leads read.
   const { clients, error: clientsError } = useClientsRegistry();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [leadsError, setLeadsError] = useState<string | null>(null);
   const [homeSnapshot, setHomeSnapshot] = useState<ResultsHomeResponse | null>(null);
   const [homeSnapshotError, setHomeSnapshotError] = useState<string | null>(null);
-  // Meta Ads Real V1 — real PostgreSQL counts, not the demo/localStorage
-  // MetaCampaign store this tile used to read.
   const [metaAdsCampaignCounts, setMetaAdsCampaignCounts] = useState({ active: 0, total: 0 });
-  const [automations, setAutomations] = useState<Automation[]>([]);
-  const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [opsSnapshot, setOpsSnapshot] = useState<OpsSnapshot | null>(null);
-  const [attentionExpanded, setAttentionExpanded] = useState(true);
 
-  // Leads (total count) + the real operational snapshot: both PostgreSQL,
-  // async, cancellation-guarded.
   useEffect(() => {
     let cancelled = false;
-    getLeads()
-      .then((result) => {
-        if (!cancelled) setLeads(result);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setLeadsError(error instanceof Error ? error.message : 'No se pudieron cargar los leads.');
-      });
-    getResultsHomeSnapshot()
-      .then((result) => {
-        if (!cancelled) setHomeSnapshot(result);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setHomeSnapshotError(error instanceof Error ? error.message : 'No se pudo cargar la actividad operativa.');
-      });
-    fetchOpsSnapshot()
-      .then((result) => {
-        if (!cancelled) setOpsSnapshot(result);
-      })
-      .catch(() => {
-        // Real attention silently degrades to "no real ops signal yet"
-        // rather than surfacing a fetch error banner — Home already shows
-        // the leads/results errors above; a second banner for this would be
-        // noise, and an empty real-attention list is itself honest (no
-        // fabricated alerts).
-      });
-    return () => {
-      cancelled = true;
-    };
+    Promise.allSettled([getLeads(), getResultsHomeSnapshot(), fetchOpsSnapshot()]).then((results) => {
+      if (cancelled) return;
+      const [leadResult, homeResult, opsResult] = results;
+      if (leadResult.status === 'fulfilled') setLeads(leadResult.value);
+      else setLeadsError('No se pudieron cargar los leads.');
+      if (homeResult.status === 'fulfilled') setHomeSnapshot(homeResult.value);
+      else setHomeSnapshotError('No se pudo cargar la actividad operativa.');
+      if (opsResult.status === 'fulfilled') setOpsSnapshot(opsResult.value);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -212,21 +148,8 @@ export default function HomePage() {
           total: response.campaigns.length,
         });
       })
-      .catch(() => {
-        // Honest degrade — the tile simply shows 0/0 rather than throwing.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Everything else stays localStorage in this pass — unchanged, synchronous.
-  useEffect(() => {
-    initializeAutomationsStoreIfNeeded();
-    initializeContentStoreIfNeeded();
-
-    setAutomations(getAutomations());
-    setContentItems(getContentItems());
+      .catch(() => undefined);
+    return () => { cancelled = true; };
   }, []);
 
   const clientSnapshotByClientId = useMemo(() => {
@@ -235,309 +158,150 @@ export default function HomePage() {
     return map;
   }, [homeSnapshot]);
 
-  // ── Executive summary — honest counts only, no invented periods/rates ──
-  const activeClients = clients.filter((c) => c.status === 'active').length;
-  const automationsSummary = useMemo(() => summarizeAutomations(automations), [automations]);
-  const valueGeneratedRecently = homeSnapshot?.valueGenerated ?? null;
+  const highPriorityItems: AttentionItem[] = useMemo(() =>
+    (homeSnapshot?.highPriorityLeads ?? []).map((lead) => ({
+      id: `priority-${lead.id}`,
+      title: `${getClientNameForLead(lead.clientId, clients)}: ${lead.name}`,
+      detail: 'Lead de prioridad alta que requiere seguimiento',
+      href: '/leads', clientId: lead.clientId, priority: 'alta',
+    })), [homeSnapshot, clients]);
 
-  // ── Needs attention — deterministic state only, no fake AI insights or
-  // invented severity scores. Every source is an existing derivation, plus
-  // (real, PostgreSQL) high-priority/awaiting-first-contact leads. ──
-  const attentionHighPriorityLeads: AttentionItem[] = useMemo(
-    () =>
-      (homeSnapshot?.highPriorityLeads ?? []).map((lead) => ({
-        id: `lead-priority-${lead.id}`,
-        clientId: lead.clientId,
-        text: `${getClientNameForLead(lead.clientId, clients)} · ${lead.name} — prioridad alta, requiere seguimiento.`,
-        href: '/leads',
-      })),
-    [homeSnapshot, clients],
-  );
+  const awaitingContactItems: AttentionItem[] = useMemo(() =>
+    (homeSnapshot?.awaitingFirstContact ?? []).map((lead) => ({
+      id: `contact-${lead.id}`,
+      title: `${getClientNameForLead(lead.clientId, clients)}: ${lead.name}`,
+      detail: 'Pendiente de primer contacto comercial',
+      href: '/leads', clientId: lead.clientId, priority: 'media',
+    })), [homeSnapshot, clients]);
 
-  const attentionAwaitingContact: AttentionItem[] = useMemo(
-    () =>
-      (homeSnapshot?.awaitingFirstContact ?? []).map((lead) => ({
-        id: `lead-awaiting-${lead.id}`,
-        clientId: lead.clientId,
-        text: `${getClientNameForLead(lead.clientId, clients)} · ${lead.name} — sin primer contacto (WhatsApp no enviado).`,
-        href: '/leads',
-      })),
-    [homeSnapshot, clients],
-  );
+  const opsItems: AttentionItem[] = useMemo(() =>
+    (opsSnapshot?.attention ?? []).map((item) => ({
+      id: `ops-${item.id}`, title: item.text, detail: 'Revisión de configuración operativa',
+      href: '/connections', priority: 'critica',
+    })), [opsSnapshot]);
 
-  // Real operational attention — genuine, server-observed configuration/
-  // health problems only (DATABASE_URL missing, PostgreSQL health check
-  // failing, a Make receiver key missing). See lib/server/ops-status.ts.
-  // Deliberately global (no clientId): these are REKREATIVE OS-side
-  // infrastructure issues, never "no recent activity" for any one client —
-  // absence of leads/WhatsApp/qualification traffic is neutral, not an
-  // attention item (see lib/server/ops-status.ts's evidenceLadderStatus).
-  const attentionReal: AttentionItem[] = useMemo(
-    () =>
-      (opsSnapshot?.attention ?? []).map((item) => ({
-        id: `ops-${item.id}`,
-        text: item.text,
-        href: '/connections',
-      })),
-    [opsSnapshot],
-  );
+  const attentionItems = [...opsItems, ...highPriorityItems, ...awaitingContactItems];
+  const topPriorities = attentionItems.slice(0, 3);
+  const clientsNeedingAttention = useMemo(() =>
+    new Set([...highPriorityItems, ...awaitingContactItems].flatMap((item) => item.clientId ? [item.clientId] : [])),
+  [highPriorityItems, awaitingContactItems]);
 
-  const attentionContent: AttentionItem[] = useMemo(
-    () =>
-      contentItems
-        .filter((item) => item.scope === 'internal' && isContentOverdue(item))
-        .map((item) => ({
-          id: `content-${item.id}`,
-          text: `Contenido interno "${item.title}" lleva retraso (previsto ${item.plannedPublishDate})`,
-          href: '/content',
-          demo: true,
-        })),
-    [contentItems],
-  );
-
-  const attentionItems: AttentionItem[] = [
-    ...attentionHighPriorityLeads,
-    ...attentionAwaitingContact,
-    ...attentionReal,
-    ...attentionContent,
-  ];
-
-  // The header count reflects REAL attention items only — PostgreSQL leads
-  // plus the real ops-evidence items above; demo-sourced rows (Content,
-  // tagged `demo: true`) stay visible in the list but never inflate this
-  // number.
-  const realAttentionCount = attentionHighPriorityLeads.length + attentionAwaitingContact.length + attentionReal.length;
-
-  // "Estado operativo" — honestly derived, not a new metric: a client is
-  // flagged the moment one of its own leads is already surfaced above in
-  // Necesita atención. Real ops attention items are global infrastructure
-  // issues (no clientId), so they never flag an individual client row.
-  const clientsNeedingAttention = useMemo(() => {
-    const ids = new Set<string>();
-    for (const item of [...attentionHighPriorityLeads, ...attentionAwaitingContact]) {
-      if (item.clientId) ids.add(item.clientId);
-    }
-    return ids;
-  }, [attentionHighPriorityLeads, attentionAwaitingContact]);
-
-  // ── Upcoming appointments / recent conversions / recent activity — real,
-  // event-time (not acquisition-cohort) operational feeds. ──
+  const activeClients = clients.filter((client) => client.status === 'active').length;
+  const contactedLeads = leads.filter((lead) => lead.stage !== 'new').length;
+  const appointmentLeads = leads.filter((lead) => lead.stage === 'appointment' || lead.stage === 'converted').length;
+  const convertedLeads = leads.filter((lead) => lead.stage === 'converted').length;
+  const funnelRate = leads.length > 0 ? Math.round((convertedLeads / leads.length) * 100) : 0;
   const upcomingAppointments = homeSnapshot?.upcomingAppointments ?? [];
-  const recentConversions = homeSnapshot?.recentConversions ?? [];
   const recentActivity = homeSnapshot?.recentActivity ?? [];
+  const valueGenerated = homeSnapshot?.valueGenerated ?? null;
+  const operationalAutomations = opsSnapshot?.automations.filter((item) =>
+    item.status === 'operational' || item.status === 'activity_observed').length ?? 0;
 
-  // ── Client snapshot — fast navigation + business awareness, not a second
-  // Client Workspace. Leads/Citas/Conversiones/Valor generado all come from
-  // the same real per-client snapshot the executive summary above uses. ──
-  const clientSnapshot = useMemo(
-    () =>
-      clients.map((client) => {
-        const row = clientSnapshotByClientId.get(client.id);
-        return {
-          client,
-          leadCount: row?.leads ?? 0,
-          appointments: row?.appointments ?? 0,
-          conversions: row?.conversions ?? 0,
-          valueGenerated: row?.valueGenerated ?? null,
-          needsAttention: clientsNeedingAttention.has(client.id),
-        };
-      }),
-    [clients, clientSnapshotByClientId, clientsNeedingAttention],
-  );
+  const clientSnapshot = useMemo(() => clients.map((client) => {
+    const row = clientSnapshotByClientId.get(client.id);
+    return {
+      client, leads: row?.leads ?? 0, appointments: row?.appointments ?? 0,
+      conversions: row?.conversions ?? 0, valueGenerated: row?.valueGenerated ?? null,
+      needsAttention: clientsNeedingAttention.has(client.id),
+    };
+  }), [clients, clientSnapshotByClientId, clientsNeedingAttention]);
 
-  // ── Quick access — the 4 highest-frequency REKREATIVE routes, derived
-  // from the same nav source as the sidebar (lib/nav.ts) so labels/icons can
-  // never drift from it or resurface a legacy FounderOS route. ──
-  const QUICK_ACCESS_HREFS = ['/clients', '/leads', '/meta-ads', '/results'];
-  const quickAccess = REKREATIVE_PRIMARY.filter((item) => QUICK_ACCESS_HREFS.includes(item.href));
+  const error = clientsError ?? leadsError ?? homeSnapshotError;
 
   return (
     <div>
-      <PageHeader eyebrow="REKREATIVE OS" title="Centro de operaciones" caret right={<Kbd>⌘K</Kbd>} />
+      <PageHeader eyebrow="REKREATIVE OS / INICIO" title="Bienvenido, Kilian" right={<Kbd>⌘K</Kbd>} />
+      {error && <div className="mb-5 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{error}</div>}
 
-      {(clientsError || leadsError || homeSnapshotError) && (
-        <div className="mb-[22px] border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">
-          {clientsError ?? leadsError ?? homeSnapshotError}
-        </div>
-      )}
-
-      {/* Executive summary */}
-      <section className="mb-[22px] grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
-        <StatTile href="/clients" label="Clientes activos" value={activeClients} unit={`/ ${clients.length} total`} />
-        <StatTile href="/leads" label="Leads CRM" value={leads.length} unit="total" />
-        <StatTile
-          href="/meta-ads"
-          label="Campañas activas"
-          value={metaAdsCampaignCounts.active}
-          unit={`/ ${metaAdsCampaignCounts.total} total`}
-        />
-        <StatTile href="/automations" label="Automatizaciones" value={automationsSummary.needsAttention} unit="requieren atención" demo />
-        <StatTile
-          href="/results"
-          label="Valor generado"
-          value={valueGeneratedRecently?.total == null ? '—' : formatEUR(valueGeneratedRecently.total)}
-          unit={`últimos ${valueGeneratedRecently?.days ?? 7} días`}
-        />
+      <section aria-label="Resumen ejecutivo" className="mb-5 grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-5">
+        <StatTile href="/clients" label="Clientes activos" value={activeClients} unit={`/ ${clients.length}`} icon={Users} />
+        <StatTile href="/leads" label="Leads CRM" value={leads.length} unit="totales" icon={Target} />
+        <StatTile href="/leads" label="Próximas citas" value={upcomingAppointments.length} unit="agenda" icon={CalendarDays} />
+        <StatTile href="/results" label="Conversiones" value={convertedLeads} unit={`${funnelRate}% cierre`} icon={ArrowUpRight} />
+        <StatTile href="/results" label="Valor generado" value={valueGenerated?.total == null ? 'Sin datos' : formatEUR(valueGenerated.total)} unit={`${valueGenerated?.days ?? 7} días`} icon={CircleDollarSign} />
       </section>
 
-      {/* Needs attention — header/count always visible; collapsing only
-          hides the rows below. Count is REAL (PostgreSQL) attention items
-          only (high-priority/awaiting-contact leads) — demo-sourced rows
-          (Automations/Integrations/AI Agents/Content) stay in the list,
-          each tagged DEMO, but never inflate this number. */}
-      <section className="mb-[22px]">
-        <div className="mb-3 flex items-baseline justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <Label count={realAttentionCount} rule>
-              Necesita atención
-            </Label>
+      <section className="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-[1.45fr_0.75fr]">
+        <div>
+          <SectionHead label="Funnel comercial" link="Ver resultados" href="/results" />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:gap-0">
+            <FunnelStep label="Leads" value={leads.length} detail="Entrada total" />
+            <FunnelStep label="Contactados" value={contactedLeads} detail="Con actividad" />
+            <FunnelStep label="Citas" value={appointmentLeads} detail="Reservadas o cerradas" />
+            <FunnelStep label="Cierres" value={convertedLeads} detail={`${funnelRate}% del total`} last />
           </div>
-          <button
-            type="button"
-            onClick={() => setAttentionExpanded((expanded) => !expanded)}
-            aria-expanded={attentionExpanded}
-            className="shrink-0 font-mono text-[11px] text-os-dim transition-colors hover:text-os-accent"
-          >
-            {attentionExpanded ? 'Colapsar ▲' : 'Expandir ▼'}
-          </button>
         </div>
-        {attentionExpanded &&
-          (attentionItems.length === 0 ? (
-            <div className="rounded-lg-t border border-dashed border-os-border bg-os-surface2 px-4 py-6 text-center font-mono text-[11px] text-os-dim">
-              Nada requiere atención ahora mismo.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-1.5">
-              {attentionItems.map((item) => (
-                <ActivityRow key={item.id} href={item.href} state="warn" text={item.text} demo={item.demo} />
-              ))}
-            </div>
-          ))}
-      </section>
-
-      {/* Upcoming appointments + recent activity — real, event-time feeds.
-          Two compact columns on wide screens, stacked on narrow ones; same
-          row visual as "Necesita atención" but neutral (ok) state, since
-          these are informational, not problems. */}
-      <section className="mb-[22px] grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div>
-          <SectionHead label="Próximas citas" count={upcomingAppointments.length} />
-          {upcomingAppointments.length === 0 ? (
-            <div className="rounded-lg-t border border-dashed border-os-border bg-os-surface2 px-4 py-6 text-center font-mono text-[11px] text-os-dim">
-              Sin citas próximas.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-1.5">
-              {upcomingAppointments.map((lead) => (
-                <ActivityRow
-                  key={lead.id}
-                  href="/leads"
-                  state="ok"
-                  text={`${getClientNameForLead(lead.clientId, clients)} · ${lead.name} — cita ${formatDateShort(lead.appointmentDate)}`}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div>
-          <SectionHead label="Actividad reciente" count={recentActivity.length} />
-          {recentActivity.length === 0 ? (
-            <div className="rounded-lg-t border border-dashed border-os-border bg-os-surface2 px-4 py-6 text-center font-mono text-[11px] text-os-dim">
-              Sin actividad todavía.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-1.5">
-              {recentActivity.map((entry) => (
-                <ActivityRow key={entry.event.id} href="/leads" state="ok" text={translateActivitySummary(entry.event)} />
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {recentConversions.length > 0 && (
-        <section className="mb-[22px]">
-          <SectionHead label="Conversiones recientes" count={recentConversions.length} />
+          <SectionHead label="Prioridades de hoy" count={attentionItems.length} />
           <div className="flex flex-col gap-1.5">
-            {recentConversions.map(({ lead, convertedAt }) => (
-              <ActivityRow
-                key={lead.id}
-                href="/leads"
-                state="ok"
-                text={`${getClientNameForLead(lead.clientId, clients)} · ${lead.name} — convertido ${formatDateShort(convertedAt)}${
-                  lead.conversionValue != null ? ` · ${formatEUR(lead.conversionValue)}` : ''
-                }`}
-              />
-            ))}
+            {topPriorities.length === 0 ? <EmptyState>No hay prioridades críticas ahora mismo.</EmptyState> : topPriorities.map((item) => <PriorityRow key={item.id} item={item} compact />)}
           </div>
-        </section>
-      )}
+        </div>
+      </section>
 
-      {/* Client snapshot — a compact operational row per client, columns
-          fixed so it reads densely on ultrawide instead of stretching into
-          whitespace. Leads/Citas/Conversiones/Valor generado are real
-          (lib/server/results-repo.ts); Estado operativo is just "does this
-          client already appear in Necesita atención". */}
-      <section className="mb-[22px]">
-        <SectionHead label="Clientes" count={clients.length} link="Ver todos" href="/clients" />
-        <div className="overflow-x-auto">
-          <div className="flex min-w-[920px] flex-col gap-1.5">
-            <div className="grid grid-cols-[1.6fr_0.7fr_0.55fr_0.55fr_0.75fr_0.9fr_0.9fr] gap-3 px-3.5 font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">
-              <span>Cliente</span>
-              <span>Estado</span>
-              <span>Leads</span>
-              <span>Citas</span>
-              <span>Conversiones</span>
-              <span>Valor generado</span>
-              <span>Operativo</span>
-            </div>
-            {clientSnapshot.map(({ client, leadCount, appointments, conversions, valueGenerated, needsAttention }) => (
-              <Link
-                key={client.id}
-                href={`/clients/${client.id}`}
-                className="hoverable grid grid-cols-[1.6fr_0.7fr_0.55fr_0.55fr_0.75fr_0.9fr_0.9fr] items-center gap-3 rounded-lg-t border border-os-border bg-os-surface px-3.5 py-[10px]"
-              >
-                <span className="truncate text-[13px] font-semibold text-os-text">{client.name}</span>
-                <span>
-                  <Badge tone={client.status === 'active' ? 'ok' : 'default'}>{getClientStatusLabel(client.status)}</Badge>
-                </span>
-                <span className="font-mono text-[11px] text-os-muted">{leadCount}</span>
-                <span className="font-mono text-[11px] text-os-muted">{appointments}</span>
-                <span className="font-mono text-[11px] text-os-muted">{conversions}</span>
-                <span className="font-mono text-[11px] text-os-muted">{valueGenerated == null ? '—' : formatEUR(valueGenerated)}</span>
-                <span className="flex items-center gap-1.5">
-                  <Dot state={needsAttention ? 'warn' : 'ok'} />
-                  <span className="font-mono text-[10px] uppercase tracking-wide text-os-dim">
-                    {needsAttention ? 'Atención' : 'Operativo'}
-                  </span>
-                </span>
+      <section className="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-[1.45fr_0.75fr]">
+        <div>
+          <SectionHead label="Cartera de clientes" count={clients.length} link="Ver todos" href="/clients" />
+          <div className="flex flex-col gap-2 lg:hidden">
+            {clientSnapshot.map(({ client, leads: leadCount, appointments, conversions, valueGenerated: clientValue, needsAttention }) => (
+              <Link key={client.id} href={`/clients/${client.id}`} className="hoverable border border-os-border bg-os-surface p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0"><p className="truncate text-[13px] font-semibold text-os-text">{client.name}</p><p className="mt-1 font-mono text-[9px] uppercase tracking-[0.15em] text-os-dim">{getClientStatusLabel(client.status)}</p></div>
+                  <Badge tone={needsAttention ? 'warn' : 'ok'}>{needsAttention ? 'Atención' : 'Operativo'}</Badge>
+                </div>
+                <div className="mt-4 grid grid-cols-4 gap-2 border-t border-os-hairline pt-3">
+                  {([['Leads', leadCount], ['Citas', appointments], ['Cierres', conversions], ['Valor', clientValue == null ? 'Sin datos' : formatEUR(clientValue)]] as const).map(([label, value]) => (
+                    <div key={label} className="min-w-0"><p className="font-mono text-[8px] uppercase tracking-[0.12em] text-os-dim">{label}</p><p className="mt-1 truncate font-mono text-[11px] text-os-muted">{value}</p></div>
+                  ))}
+                </div>
               </Link>
             ))}
-            {clients.length === 0 && (
-              <div className="rounded-lg-t border border-dashed border-os-border bg-os-surface2 px-4 py-6 text-center font-mono text-[11px] text-os-dim">
-                Aún no hay clientes.
-              </div>
-            )}
+            {clients.length === 0 && <EmptyState>Aún no hay clientes.</EmptyState>}
           </div>
+
+          <div className="hidden lg:block">
+            <div className="overflow-x-auto">
+              <div className="min-w-[820px]">
+                <div className="grid grid-cols-[1.6fr_0.8fr_0.55fr_0.55fr_0.65fr_0.9fr_0.9fr] gap-3 px-3.5 py-2 font-mono text-[8.5px] uppercase tracking-[0.15em] text-os-dim">
+                  <span>Cliente</span><span>Estado</span><span>Leads</span><span>Citas</span><span>Cierres</span><span>Valor</span><span>Salud</span>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {clientSnapshot.map(({ client, leads: leadCount, appointments, conversions, valueGenerated: clientValue, needsAttention }) => (
+                    <Link key={client.id} href={`/clients/${client.id}`} className="hoverable grid grid-cols-[1.6fr_0.8fr_0.55fr_0.55fr_0.65fr_0.9fr_0.9fr] items-center gap-3 border border-os-border bg-os-surface px-3.5 py-3">
+                      <span className="truncate text-[12.5px] font-semibold text-os-text">{client.name}</span>
+                      <Badge tone={client.status === 'active' ? 'ok' : 'default'}>{getClientStatusLabel(client.status)}</Badge>
+                      <span className="font-mono text-[10.5px] text-os-muted">{leadCount}</span><span className="font-mono text-[10.5px] text-os-muted">{appointments}</span><span className="font-mono text-[10.5px] text-os-muted">{conversions}</span>
+                      <span className="font-mono text-[10.5px] text-os-muted">{clientValue == null ? 'Sin datos' : formatEUR(clientValue)}</span>
+                      <span className="flex items-center gap-2 font-mono text-[9px] uppercase text-os-dim"><Dot state={needsAttention ? 'warn' : 'ok'} />{needsAttention ? 'Atención' : 'Operativo'}</span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {clients.length === 0 && <EmptyState>Aún no hay clientes.</EmptyState>}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 content-start gap-2.5">
+          <Link href="/meta-ads" className="hoverable border border-os-border bg-os-surface p-4"><Megaphone className="h-4 w-4 text-os-dim" /><p className="mt-4 font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Meta Ads</p><p className="mt-2 font-mono text-[22px] font-semibold text-os-text">{metaAdsCampaignCounts.active}</p><p className="mt-1 font-mono text-[9px] text-os-dim">de {metaAdsCampaignCounts.total} activas</p></Link>
+          <Link href="/automations" className="hoverable border border-os-border bg-os-surface p-4"><Target className="h-4 w-4 text-os-dim" /><p className="mt-4 font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Automatizaciones</p><p className="mt-2 font-mono text-[22px] font-semibold text-os-text">{operationalAutomations}</p><p className="mt-1 font-mono text-[9px] text-os-dim">con evidencia real</p></Link>
         </div>
       </section>
 
-      {/* Quick access — 4 highest-frequency routes only; the rest of
-          REKREATIVE_PRIMARY already lives in the sidebar. */}
-      <section>
-        <SectionHead label="Acceso rápido" />
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-          {quickAccess.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className="hoverable flex items-center gap-2.5 rounded-lg-t border border-os-border bg-os-surface px-3.5 py-3"
-            >
-              <Icon className="h-[15px] w-[15px] shrink-0 text-os-dim" strokeWidth={1.7} />
-              <span className="truncate text-[12.5px] font-semibold text-os-text">{label}</span>
-            </Link>
-          ))}
+      <section className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div>
+          <SectionHead label="Agenda operativa" count={upcomingAppointments.length + recentActivity.length} />
+          <div className="flex flex-col gap-1.5">
+            {upcomingAppointments.slice(0, 4).map((lead) => <FeedRow key={`appointment-${lead.id}`} href="/leads" title={`${lead.name}: cita ${formatDateShort(lead.appointmentDate)}`} detail={getClientNameForLead(lead.clientId, clients)} />)}
+            {recentActivity.slice(0, Math.max(0, 5 - upcomingAppointments.length)).map((entry) => <FeedRow key={entry.event.id} href="/leads" title={translateActivitySummary(entry.event)} detail={`${getClientNameForLead(entry.leadClientId, clients)}: ${entry.leadName}`} />)}
+            {upcomingAppointments.length === 0 && recentActivity.length === 0 && <EmptyState>Sin actividad pendiente o reciente.</EmptyState>}
+          </div>
+        </div>
+        <div>
+          <SectionHead label="Necesita atención" count={attentionItems.length} link="Revisar leads" href="/leads" />
+          <div className="flex flex-col gap-1.5">
+            {attentionItems.length === 0 ? <EmptyState>Todo está bajo control ahora mismo.</EmptyState> : attentionItems.slice(0, 7).map((item) => <PriorityRow key={item.id} item={item} />)}
+          </div>
         </div>
       </section>
     </div>

@@ -170,7 +170,7 @@ export function ConductorPanel() {
           onClick={() => setOpen(true)}
           aria-label="Open the Conductor agent panel"
           title="Ask the Conductor about this screen"
-          className="group fixed bottom-5 right-5 z-40 flex items-center rounded-full border border-os-border-strong bg-os-surface/90 p-2.5 opacity-60 backdrop-blur transition-all duration-300 hover:opacity-100 hover:pr-3.5"
+          className="group fixed bottom-20 right-4 z-40 flex items-center rounded-full border border-os-border-strong bg-os-surface/90 p-2.5 opacity-60 backdrop-blur transition-all duration-300 hover:opacity-100 hover:pr-3.5 lg:bottom-5 lg:right-5"
           style={{ transitionTimingFunction: 'var(--ease)', boxShadow: 'none' }}
         >
           <SparkIcon size={17} shade="var(--text)" />

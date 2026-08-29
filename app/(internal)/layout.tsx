@@ -4,6 +4,7 @@ import { Topbar } from '@/components/Topbar';
 import { CommandPalette } from '@/components/CommandPalette';
 import { ConductorPanel } from '@/components/ConductorPanel';
 import { ClientsProvider } from '@/components/ClientsProvider';
+import { MobileNav } from '@/components/MobileNav';
 import type { Command } from '@/lib/palette';
 import { REKREATIVE_PRIMARY } from '@/lib/nav';
 import { requireInternalUser } from '@/lib/server/auth';
@@ -80,9 +81,9 @@ export default async function InternalLayout({ children }: { children: React.Rea
       <Sidebar />
       {/* os-shell yields to the Conductor dock: the panel sets --conductor-w
           and the whole content column glides left instead of being covered */}
-      <div className="os-shell ml-[232px] flex min-h-screen min-w-0 flex-col" style={{ marginRight: 'var(--conductor-w, 0px)' }}>
+      <div className="os-shell flex min-h-screen min-w-0 flex-col lg:ml-[var(--sidebar-w,232px)]" style={{ marginRight: 'var(--conductor-w, 0px)' }}>
         <Topbar />
-        <main className="min-w-0 flex-1 px-8 pb-16 pt-7 wide:px-10 ultra:px-12">
+        <main className="min-w-0 flex-1 px-4 pb-20 pt-5 sm:px-6 lg:px-8 lg:pb-16 lg:pt-7 wide:px-10 ultra:px-12">
           {/* Width tiers: 1280 on laptops · 1760 on large monitors ·
               full-bleed on 32"/ultrawide. See tailwind screens wide/ultra. */}
           <div className="mx-auto max-w-[1280px] wide:max-w-[1760px] ultra:max-w-none">
@@ -91,6 +92,7 @@ export default async function InternalLayout({ children }: { children: React.Rea
         </main>
       </div>
       <CommandPalette commands={buildCommands()} />
+      <MobileNav />
       {/* Notion-style agent dock — the Conductor, aware of the current screen */}
       <ConductorPanel />
     </ClientsProvider>
