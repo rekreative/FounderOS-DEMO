@@ -382,8 +382,125 @@ seeded on first touch, and `/api/ready` reports `checks.sqlite:
 other than exactly `true`) and redeploy. This immediately restores today's
 auto-create-and-seed behavior with no other change required.
 
-This flag detects a missing file, not a restored-but-stale volume. A more
+This flag detects a missing file, not a restored-but-stale volume. The more
 precise check - recording a small "last known SQLite install id" in
-Postgres, which is durable and independent of the Railway volume, and
-comparing against it at boot - remains a deliberately deferred, separately
-scoped follow-up, not implemented here.
+Postgres, durable and independent of the Railway volume, and comparing
+against it at boot - is implemented separately below as REKREOS Phase 2.
+
+### Installation marker (REKREOS Phase 2)
+
+Phase 1's flag above answers "does founder-os.db exist?" but cannot answer
+"is this the *same* founder-os.db as before?" - a volume that was lost and
+recreated, or a file substituted from an unrelated backup, still "exists"
+and opens fine, so Phase 1 reports it as healthy. Phase 2 closes that gap
+with a stable installation UUID stored in **both** databases and compared
+at boot:
+
+- **SQLite half**: a small, dedicated `installation_metadata` table inside
+  founder-os.db (singleton row, key `'founder-os'`) - see
+  `lib/server/sqlite-installation.ts`. Deliberately separate from every
+  seeded business table; ordinary `getDb()` calls never read or write it.
+- **Postgres half**: the `sqlite_installations` table added by migration
+  `lib/server/migrations/0009_sqlite_installations.sql` (singleton row,
+  same key, RLS enabled with zero policies - the same defensive posture as
+  every other table in this schema). Not auto-seeded; production starts
+  with zero rows.
+- **Registration**: `npm run register:installation -- --sqlite-path <path>`
+  (`scripts/register-installation.ts` / `lib/server/installation-registration.ts`)
+  is an explicit, idempotent, human-run CLI - never run automatically on
+  boot or deploy, and it never creates a missing database. Requires an
+  explicit `--sqlite-path`; it never guesses or defaults to a location.
+  Safe-state behavior:
+  - neither marker exists -> generates one UUID, writes it to SQLite, then
+    registers the same UUID in Postgres.
+  - both exist and match -> succeeds as a no-op.
+  - SQLite marker exists, Postgres marker absent -> completes an
+    interrupted registration using the existing SQLite UUID.
+  - Postgres marker exists, SQLite marker absent -> hard fails; never
+    "blesses" the current SQLite file by inventing a marker for it.
+  - both exist but differ -> hard fails; overwrites neither marker.
+  - SQLite missing, corrupt, unreadable, or `:memory:` -> hard fails,
+    before Postgres is ever touched.
+  Every failure preserves whatever markers already existed - registration
+  never overwrites an identity. Console output never prints a path, UUID,
+  or `DATABASE_URL`.
+- **Startup verification**: `FOUNDER_OS_VERIFY_INSTALLATION=true` (see
+  `.env.example`). When set to exactly `"true"`:
+  - `FOUNDER_OS_REQUIRE_EXISTING_DB=true` is required as defense in depth -
+    enabling verification without it is treated as a misconfiguration and
+    fails closed.
+  - `scripts/verify-installation.js` runs inside `scripts/start-standalone.js`
+    **before** `server.js` is spawned - a failed check means the process
+    never comes up at all, rather than starting against a bad database.
+    Plain CommonJS, no TypeScript/tsx dependency, since only compiled JS
+    plus `node_modules` (not a TypeScript toolchain) is guaranteed present
+    in the standalone Railway build.
+  - Opens founder-os.db read-only (`fileMustExist: true`), reads its
+    installation UUID, reads the Postgres marker, and fails closed if
+    either is absent, malformed, duplicated, or unreadable, if Postgres is
+    unreachable, or if the two values differ. It never creates, seeds,
+    modifies, or repairs anything.
+  - Every SQLite handle and Postgres client is always closed, and every
+    logged failure is a stable safe category (e.g. `sqlite_unavailable`,
+    `installation_mismatch`) - never a path, UUID, connection string, or
+    certificate content.
+  - When the flag is unset (the default for local dev, CI, and tests),
+    `scripts/start-standalone.js` behaves exactly as before: verification
+    is skipped without touching SQLite or Postgres.
+- **Readiness**: `GET /api/ready` additively reports
+  `checks.installation`: `"not_required"` when the flag is off (never
+  affecting overall `ok`), `"ok"` when both markers match, `"error"`
+  (overall `503`) for any marker failure. `GET /api/health` is unchanged.
+
+**Safe rollout sequence** (do not skip or reorder):
+
+1. Confirm the current `founder-os.db` on the Railway volume, and take an
+   off-volume backup of it first (`npm run backup:sqlite`, then download it
+   per the "Downloading a backup off the volume" section above) - this
+   installation marker is new state, and you want a known-good copy of the
+   database from before it existed.
+2. Deploy this code with `FOUNDER_OS_VERIFY_INSTALLATION` still unset - a
+   no-op deploy for production behavior, same as Phase 1's rollout.
+3. Apply migration `0009_sqlite_installations.sql` explicitly
+   (`npm run db:migrate` against production `DATABASE_URL`).
+4. Run `npm run register:installation -- --sqlite-path /app/data/founder-os.db`
+   once, by hand, against the production volume and `DATABASE_URL`.
+5. Verify both markers exist and match without ever printing their values -
+   confirm the registration CLI reported success (it never prints the
+   UUID), and confirm `GET /api/ready` still reports
+   `checks.installation: "not_required"` at this point (the flag is still
+   off).
+6. Enable `FOUNDER_OS_VERIFY_INSTALLATION=true` as a Railway service
+   variable, alongside the already-enabled `FOUNDER_OS_REQUIRE_EXISTING_DB=true`.
+7. Redeploy, then confirm the deployment actually came up and
+   `GET /api/ready` reports `checks.installation: "ok"` and `ok: true`.
+
+**Rollback**: disable only `FOUNDER_OS_VERIFY_INSTALLATION` (unset it, or
+set it to anything other than exactly `"true"`) and redeploy. This never
+touches either marker - both stay registered exactly as they were - it only
+stops the startup check and the readiness check from consulting them.
+`FOUNDER_OS_REQUIRE_EXISTING_DB` can stay enabled; only the new flag needs
+to come back off.
+
+**Recovering from a genuinely restored backup**: restoring a verified
+snapshot per the "Restoring a snapshot" steps above brings back that
+snapshot's own installation marker along with the rest of its data, so a
+correctly restored `founder-os.db` still matches the Postgres marker and
+verification passes normally. A **pre-marker backup** (taken before this
+feature existed, or before registration ever ran) has no
+`installation_metadata` row at all - restoring one of those requires
+explicit inspection and manual reconciliation before re-enabling
+verification: either re-run the registration CLI against the restored file
+(only valid in the "SQLite exists, Postgres absent" state - if Postgres
+still has a marker from before the restore, registration will correctly
+hard-fail on a mismatch, which is a signal to investigate, not to force
+past) or restore Postgres's marker table alongside the SQLite file from a
+consistent point in time.
+
+**What this does not detect**: a matching installation marker only proves
+the current founder-os.db is the same *installation* it always was - it
+says nothing about whether a given restored backup is the *newest*
+available one. Restoring an old-but-legitimate snapshot of the same
+installation still passes verification even if a newer snapshot existed;
+choosing the right backup to restore remains a human judgment call made
+before running the restore steps above, not something this marker checks.

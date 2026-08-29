@@ -33,7 +33,35 @@ vi.mock('pg', () => ({
   types: { setTypeParser: vi.fn() },
 }));
 
-import { closePool, getPool, withTransaction } from '@/lib/server/db';
+import { closePool, getPool, getSslConfig, withTransaction } from '@/lib/server/db';
+
+describe('getSslConfig - optional CA override (used by lib/server/migrate.ts and scripts/register-installation.ts)', () => {
+  const ORIGINAL_CA = process.env.SUPABASE_CA_PEM;
+
+  afterEach(() => {
+    if (ORIGINAL_CA === undefined) delete process.env.SUPABASE_CA_PEM;
+    else process.env.SUPABASE_CA_PEM = ORIGINAL_CA;
+  });
+
+  it('with no argument, still reads process.env.SUPABASE_CA_PEM directly - the web app pool behavior is unchanged', () => {
+    process.env.SUPABASE_CA_PEM = 'fake-ca-from-process-env';
+    expect(getSslConfig()).toEqual({ ca: 'fake-ca-from-process-env', rejectUnauthorized: true });
+  });
+
+  it('with no argument and no process.env.SUPABASE_CA_PEM, omits ssl - unchanged default', () => {
+    delete process.env.SUPABASE_CA_PEM;
+    expect(getSslConfig()).toBeUndefined();
+  });
+
+  it('an explicit ca argument overrides process.env.SUPABASE_CA_PEM entirely', () => {
+    process.env.SUPABASE_CA_PEM = 'fake-ca-from-process-env';
+    expect(getSslConfig('fake-ca-from-explicit-override')).toEqual({ ca: 'fake-ca-from-explicit-override', rejectUnauthorized: true });
+  });
+
+  it('never produces rejectUnauthorized: false for any input', () => {
+    expect(getSslConfig('anything')?.rejectUnauthorized).toBe(true);
+  });
+});
 
 describe('lib/server/db', () => {
   const ORIGINAL_DATABASE_URL = process.env.DATABASE_URL;
