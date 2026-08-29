@@ -156,7 +156,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className="fixed inset-y-0 left-0 z-20 flex flex-col border-r border-os-border bg-os-bg2"
+      className="fixed inset-y-0 left-0 z-20 hidden flex-col border-r border-os-border bg-os-bg2 lg:flex"
       style={{ width: collapsed ? COLLAPSED_W : width }}
     >
       <div

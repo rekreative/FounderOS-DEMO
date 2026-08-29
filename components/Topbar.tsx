@@ -36,10 +36,10 @@ export function Topbar() {
   const here = SEGMENT_LABELS[segment] ?? segment;
 
   return (
-    <div className="sticky top-0 z-30 flex h-[52px] shrink-0 items-center gap-3.5 border-b border-os-border bg-os-bg2/70 px-6 backdrop-blur">
+    <div className="sticky top-0 z-30 flex h-[52px] shrink-0 items-center gap-3.5 border-b border-os-border bg-os-bg2/90 px-4 backdrop-blur sm:px-6">
       <div className="flex items-center gap-[7px] whitespace-nowrap font-mono text-[11px] tracking-[0.04em] text-os-dim">
-        <span>rekreative-os</span>
-        <span className="opacity-45">/</span>
+        <span className="hidden sm:inline">rekreative-os</span>
+        <span className="hidden opacity-45 sm:inline">/</span>
         <span className="text-os-text">{here}</span>
       </div>
       <div className="ml-auto flex items-center gap-2.5">
