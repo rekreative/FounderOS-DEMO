@@ -1,11 +1,6 @@
 /**
- * The agent emblem — the Vantage mark (public/vantage-emblem.png,
- * background keyed out and cropped).
- *
- * The PNG is used as a CSS mask over a solid color, so `shade` tints the exact
- * brand silhouette to any color — black for the Conductor, each department's
- * life-area color for its agents, etc. (The mint PNG was invisible on the
- * light theme's white; masking fixes that.)
+ * Inline Vantage spark emblem. Keeping the vector in the component avoids an
+ * external image request and lets every caller tint the same silhouette.
  */
 export const EMBLEM_MINT = '#00ffab';
 
@@ -18,26 +13,23 @@ export function SparkIcon({
   size?: number;
   className?: string;
 }) {
+  const classes = ['emblem', 'inline-block', 'shrink-0', className].filter(Boolean).join(' ');
+
   return (
-    <span
+    <svg
+      viewBox="0 0 100 100"
+      width={size}
+      height={size}
       role="img"
       aria-label="Vantage"
-      className={`emblem inline-block shrink-0 ${className}`}
-      style={{
-        width: size,
-        height: size,
-        backgroundColor: shade,
-        // color drives the hover drop-shadow glow (.emblem in globals.css)
-        color: shade,
-        WebkitMaskImage: 'url(/vantage-emblem.png)',
-        maskImage: 'url(/vantage-emblem.png)',
-        WebkitMaskRepeat: 'no-repeat',
-        maskRepeat: 'no-repeat',
-        WebkitMaskPosition: 'center',
-        maskPosition: 'center',
-        WebkitMaskSize: 'contain',
-        maskSize: 'contain',
-      }}
-    />
+      focusable="false"
+      className={classes}
+      style={{ color: shade }}
+    >
+      <path
+        fill={shade}
+        d="M50 4 58 38 82 18 62 42 96 50 62 58 82 82 58 62 50 96 42 62 18 82 38 58 4 50 38 42 18 18 42 38Z"
+      />
+    </svg>
   );
 }
