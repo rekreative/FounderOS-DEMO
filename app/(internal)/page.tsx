@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { ArrowRight, ArrowUpRight, CalendarDays, CircleDollarSign, Megaphone, Target, Users, type LucideIcon } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Bot, CalendarDays, CircleCheckBig, CircleDollarSign, Megaphone, Plus, Target, Users, Wifi, type LucideIcon } from 'lucide-react';
 import { useClientsRegistry } from '@/components/ClientsProvider';
 import { PageHeader } from '@/components/PageHeader';
-import { Badge, Dot, Kbd, SectionHead } from '@/components/terminal';
+import { Badge, Dot, SectionHead } from '@/components/terminal';
 import { getMetaAdsCampaigns } from '@/lib/api/meta-ads';
 import { getLeads, type Lead } from '@/lib/api/leads';
 import { getOpsSnapshot as fetchOpsSnapshot } from '@/lib/api/ops-status';
@@ -51,11 +51,12 @@ function formatDateShort(value: string | null): string {
   return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
 }
 
-function StatTile({ href, label, value, unit, icon: Icon }: {
-  href: string; label: string; value: ReactNode; unit: string; icon: LucideIcon;
+function StatTile({ href, label, value, unit, detail, icon: Icon, className = '' }: {
+  href: string; label: string; value: ReactNode; unit: string; detail: string; icon: LucideIcon; className?: string;
 }) {
   return (
-    <Link href={href} className="hoverable group min-w-0 border border-os-border bg-os-surface px-4 py-4 sm:px-[18px]">
+    <Link href={href} className={`hoverable group relative min-w-0 overflow-hidden border border-os-border bg-os-surface px-4 py-4 sm:px-[18px] ${className}`}>
+      <span className="absolute inset-x-0 top-0 h-px bg-os-accent opacity-0 transition-opacity group-hover:opacity-100" />
       <div className="flex items-start justify-between gap-3">
         <span className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-os-dim sm:text-[10px]">{label}</span>
         <span className="grid h-8 w-8 shrink-0 place-items-center border border-os-border text-os-dim">
@@ -66,6 +67,7 @@ function StatTile({ href, label, value, unit, icon: Icon }: {
         <span className="truncate">{value}</span>
         <small className="truncate text-[10px] font-normal text-os-dim sm:text-[11px]">{unit}</small>
       </div>
+      <p className="mt-2 truncate font-mono text-[9px] text-os-dim">{detail}</p>
     </Link>
   );
 }
@@ -100,8 +102,39 @@ function FeedRow({ href, title, detail }: { href: string; title: string; detail?
   );
 }
 
-function EmptyState({ children }: { children: ReactNode }) {
-  return <div className="border border-dashed border-os-border bg-os-surface2 px-4 py-7 text-center font-mono text-[10.5px] text-os-dim">{children}</div>;
+function EmptyState({ children, action, href }: { children: ReactNode; action?: string; href?: string }) {
+  return (
+    <div className="flex min-h-24 flex-col items-center justify-center border border-dashed border-os-border bg-os-surface2 px-4 py-6 text-center font-mono text-[10.5px] text-os-dim">
+      <p>{children}</p>
+      {action && href && (
+        <Link href={href} className="mt-3 inline-flex items-center gap-1.5 text-os-accent hover:underline">
+          <Plus className="h-3 w-3" />{action}
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function DashboardPanel({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className={`min-w-0 border border-os-border bg-os-bg p-3.5 sm:p-4 ${className}`}>{children}</div>;
+}
+
+function OperationalRow({ href, icon: Icon, label, value, detail, state }: {
+  href: string; icon: LucideIcon; label: string; value: ReactNode; detail: string; state: 'ok' | 'warn' | 'off';
+}) {
+  return (
+    <Link href={href} className="hoverable group flex min-w-0 items-center gap-3 border-t border-os-hairline px-1 py-3 first:border-t-0">
+      <span className="grid h-9 w-9 shrink-0 place-items-center border border-os-border bg-os-surface text-os-dim">
+        <Icon className="h-4 w-4" strokeWidth={1.6} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2"><Dot state={state} /><p className="truncate font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">{label}</p></div>
+        <p className="mt-1 truncate font-mono text-[10px] text-os-muted">{detail}</p>
+      </div>
+      <span className="font-mono text-[18px] font-semibold text-os-text">{value}</span>
+      <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-os-dim group-hover:text-os-accent" />
+    </Link>
+  );
 }
 
 function FunnelStep({ label, value, detail, last = false }: { label: string; value: number; detail: string; last?: boolean }) {
@@ -207,40 +240,61 @@ export default function HomePage() {
   }), [clients, clientSnapshotByClientId, clientsNeedingAttention]);
 
   const error = clientsError ?? leadsError ?? homeSnapshotError;
+  const agentOperational = opsSnapshot?.agent.status === 'operational' || opsSnapshot?.agent.status === 'activity_observed';
+  const operationalChecks = [metaAdsCampaignCounts.active > 0, operationalAutomations > 0, agentOperational].filter(Boolean).length;
 
   return (
-    <div>
-      <PageHeader eyebrow="REKREATIVE OS / INICIO" title="Bienvenido, Kilian" right={<Kbd>⌘K</Kbd>} />
+    <div className="pb-3">
+      <PageHeader
+        eyebrow="REKREATIVE OS / INICIO"
+        title="Bienvenido, Kilian"
+        right={(
+          <div className="hidden items-center sm:flex">
+            <span className="inline-flex items-center gap-2 border border-os-border bg-os-surface px-3 py-2 font-mono text-[9px] uppercase tracking-[0.14em] text-os-dim">
+              <Wifi className="h-3.5 w-3.5 text-os-ok" />Datos en tiempo real
+            </span>
+          </div>
+        )}
+      />
       {error && <div className="mb-5 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{error}</div>}
 
-      <section aria-label="Resumen ejecutivo" className="mb-5 grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-5">
-        <StatTile href="/clients" label="Clientes activos" value={activeClients} unit={`/ ${clients.length}`} icon={Users} />
-        <StatTile href="/leads" label="Leads CRM" value={leads.length} unit="totales" icon={Target} />
-        <StatTile href="/leads" label="Próximas citas" value={upcomingAppointments.length} unit="agenda" icon={CalendarDays} />
-        <StatTile href="/results" label="Conversiones" value={convertedLeads} unit={`${funnelRate}% cierre`} icon={ArrowUpRight} />
-        <StatTile href="/results" label="Valor generado" value={valueGenerated?.total == null ? 'Sin datos' : formatEUR(valueGenerated.total)} unit={`${valueGenerated?.days ?? 7} días`} icon={CircleDollarSign} />
+      <SectionHead label="Indicadores principales" />
+      <section aria-label="Indicadores principales" className="mb-5 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
+        <StatTile href="/clients" label="Clientes activos" value={activeClients} unit={`/ ${clients.length}`} detail="Cartera actual" icon={Users} />
+        <StatTile href="/leads" label="Leads CRM" value={leads.length} unit="totales" detail="Entrada comercial" icon={Target} />
+        <StatTile href="/leads" label="Próximas citas" value={upcomingAppointments.length} unit="agenda" detail="Pendientes" icon={CalendarDays} />
+        <StatTile href="/results" label="Conversiones" value={convertedLeads} unit={`${funnelRate}% cierre`} detail="Sobre leads totales" icon={ArrowUpRight} />
+        <StatTile href="/results" label="Valor generado" value={valueGenerated?.total == null ? 'Sin datos' : formatEUR(valueGenerated.total)} unit={`${valueGenerated?.days ?? 7} días`} detail="Ingresos atribuidos" icon={CircleDollarSign} className="col-span-2 md:col-span-1" />
       </section>
 
-      <section className="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-[1.45fr_0.75fr]">
-        <div>
+      <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <DashboardPanel className="xl:col-span-8">
           <SectionHead label="Funnel comercial" link="Ver resultados" href="/results" />
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:gap-0">
+          <div className="grid grid-cols-2 gap-0 sm:grid-cols-4">
             <FunnelStep label="Leads" value={leads.length} detail="Entrada total" />
             <FunnelStep label="Contactados" value={contactedLeads} detail="Con actividad" />
             <FunnelStep label="Citas" value={appointmentLeads} detail="Reservadas o cerradas" />
             <FunnelStep label="Cierres" value={convertedLeads} detail={`${funnelRate}% del total`} last />
           </div>
-        </div>
-        <div>
+          {leads.length === 0 && (
+            <div className="mt-3 border-l-2 border-os-accent bg-os-surface2 px-3 py-2 font-mono text-[10px] text-os-dim">
+              Los nuevos leads aparecerán aquí cuando conectes tu primer canal de captación.
+            </div>
+          )}
+        </DashboardPanel>
+
+        <DashboardPanel className="xl:col-span-4">
           <SectionHead label="Prioridades de hoy" count={attentionItems.length} />
           <div className="flex flex-col gap-1.5">
-            {topPriorities.length === 0 ? <EmptyState>No hay prioridades críticas ahora mismo.</EmptyState> : topPriorities.map((item) => <PriorityRow key={item.id} item={item} compact />)}
+            {topPriorities.length === 0
+              ? <EmptyState>Sin bloqueos ni seguimientos urgentes.</EmptyState>
+              : topPriorities.map((item) => <PriorityRow key={item.id} item={item} compact />)}
           </div>
-        </div>
+        </DashboardPanel>
       </section>
 
-      <section className="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-[1.45fr_0.75fr]">
-        <div>
+      <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <DashboardPanel className="xl:col-span-8">
           <SectionHead label="Cartera de clientes" count={clients.length} link="Ver todos" href="/clients" />
           <div className="flex flex-col gap-2 lg:hidden">
             {clientSnapshot.map(({ client, leads: leadCount, appointments, conversions, valueGenerated: clientValue, needsAttention }) => (
@@ -256,11 +310,11 @@ export default function HomePage() {
                 </div>
               </Link>
             ))}
-            {clients.length === 0 && <EmptyState>Aún no hay clientes.</EmptyState>}
+            {clients.length === 0 && <EmptyState action="Añadir primer cliente" href="/clients">Tu cartera está lista para recibir el primer negocio.</EmptyState>}
           </div>
 
           <div className="hidden lg:block">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-sm-t">
               <div className="min-w-[820px]">
                 <div className="grid grid-cols-[1.6fr_0.8fr_0.55fr_0.55fr_0.65fr_0.9fr_0.9fr] gap-3 px-3.5 py-2 font-mono text-[8.5px] uppercase tracking-[0.15em] text-os-dim">
                   <span>Cliente</span><span>Estado</span><span>Leads</span><span>Citas</span><span>Cierres</span><span>Valor</span><span>Salud</span>
@@ -278,31 +332,40 @@ export default function HomePage() {
                 </div>
               </div>
             </div>
-            {clients.length === 0 && <EmptyState>Aún no hay clientes.</EmptyState>}
+            {clients.length === 0 && <EmptyState action="Añadir primer cliente" href="/clients">Tu cartera está lista para recibir el primer negocio.</EmptyState>}
           </div>
-        </div>
+        </DashboardPanel>
 
-        <div className="grid grid-cols-2 content-start gap-2.5">
-          <Link href="/meta-ads" className="hoverable border border-os-border bg-os-surface p-4"><Megaphone className="h-4 w-4 text-os-dim" /><p className="mt-4 font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Meta Ads</p><p className="mt-2 font-mono text-[22px] font-semibold text-os-text">{metaAdsCampaignCounts.active}</p><p className="mt-1 font-mono text-[9px] text-os-dim">de {metaAdsCampaignCounts.total} activas</p></Link>
-          <Link href="/automations" className="hoverable border border-os-border bg-os-surface p-4"><Target className="h-4 w-4 text-os-dim" /><p className="mt-4 font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Automatizaciones</p><p className="mt-2 font-mono text-[22px] font-semibold text-os-text">{operationalAutomations}</p><p className="mt-1 font-mono text-[9px] text-os-dim">con evidencia real</p></Link>
-        </div>
+        <DashboardPanel className="xl:col-span-4">
+          <SectionHead label="Pulso operativo" count={`${operationalChecks}/3`} link="Ver conexiones" href="/connections" />
+          <div className="border border-os-border bg-os-surface px-3">
+            <OperationalRow href="/meta-ads" icon={Megaphone} label="Meta Ads" value={metaAdsCampaignCounts.active} detail={metaAdsCampaignCounts.total === 0 ? 'Conectar Meta Ads' : `${metaAdsCampaignCounts.total} campañas registradas`} state={metaAdsCampaignCounts.active > 0 ? 'ok' : 'off'} />
+            <OperationalRow href="/automations" icon={Target} label="Automatizaciones" value={operationalAutomations} detail="Con evidencia real" state={operationalAutomations > 0 ? 'ok' : 'off'} />
+            <OperationalRow href="/ai-agents" icon={Bot} label="Agente IA" value={agentOperational ? 1 : 0} detail={agentOperational ? 'Actividad observada' : 'Sin actividad observada'} state={agentOperational ? 'ok' : 'off'} />
+          </div>
+          <div className="mt-3 flex items-center gap-2 border border-os-border bg-os-surface2 px-3 py-2.5 font-mono text-[9.5px] text-os-dim">
+            <CircleCheckBig className={`h-4 w-4 ${opsSnapshot?.postgres.status === 'operational' ? 'text-os-ok' : 'text-os-dim'}`} />
+            Núcleo de datos {opsSnapshot?.postgres.status === 'operational' ? 'operativo' : 'pendiente de comprobar'}
+          </div>
+        </DashboardPanel>
       </section>
 
-      <section className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div>
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <DashboardPanel className="xl:col-span-7">
           <SectionHead label="Agenda operativa" count={upcomingAppointments.length + recentActivity.length} />
           <div className="flex flex-col gap-1.5">
             {upcomingAppointments.slice(0, 4).map((lead) => <FeedRow key={`appointment-${lead.id}`} href="/leads" title={`${lead.name}: cita ${formatDateShort(lead.appointmentDate)}`} detail={getClientNameForLead(lead.clientId, clients)} />)}
             {recentActivity.slice(0, Math.max(0, 5 - upcomingAppointments.length)).map((entry) => <FeedRow key={entry.event.id} href="/leads" title={translateActivitySummary(entry.event)} detail={`${getClientNameForLead(entry.leadClientId, clients)}: ${entry.leadName}`} />)}
-            {upcomingAppointments.length === 0 && recentActivity.length === 0 && <EmptyState>Sin actividad pendiente o reciente.</EmptyState>}
+            {upcomingAppointments.length === 0 && recentActivity.length === 0 && <EmptyState action="Revisar leads" href="/leads">La actividad reciente y las próximas citas aparecerán aquí.</EmptyState>}
           </div>
-        </div>
-        <div>
+        </DashboardPanel>
+
+        <DashboardPanel className="xl:col-span-5">
           <SectionHead label="Necesita atención" count={attentionItems.length} link="Revisar leads" href="/leads" />
           <div className="flex flex-col gap-1.5">
             {attentionItems.length === 0 ? <EmptyState>Todo está bajo control ahora mismo.</EmptyState> : attentionItems.slice(0, 7).map((item) => <PriorityRow key={item.id} item={item} />)}
           </div>
-        </div>
+        </DashboardPanel>
       </section>
     </div>
   );
