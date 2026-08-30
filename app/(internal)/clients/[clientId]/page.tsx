@@ -355,13 +355,13 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
       )}
       {/* Header — client identity always visible regardless of active tab */}
       <div className="mb-6 border-b border-os-border pb-4">
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <div>
+        <div className="mb-4 flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
+          <div className="min-w-0 max-w-full">
             <Link href="/clients" className="text-os-dim text-sm mb-2 block">← Volver a clientes</Link>
-            <h1 className="text-2xl font-semibold">{client.name}</h1>
-            <div className="text-os-dim text-sm">{client.sector} · {client.service}</div>
+            <h1 className="break-words text-2xl font-semibold">{client.name}</h1>
+            <div className="break-words text-sm text-os-dim">{client.sector} · {client.service}</div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex max-w-full flex-wrap items-center gap-2 sm:shrink-0">
             <button
               onClick={() => setShowEditForm(true)}
               className="px-3 py-1 border border-os-border hover:bg-os-surface2 transition-colors"
@@ -378,33 +378,47 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
         </div>
 
         {/* Client metadata grid */}
-        <div className="grid grid-cols-4 gap-3">
-          <div className="p-2 border border-os-border bg-os-surface2 text-sm">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="min-w-0 p-2 border border-os-border bg-os-surface2 text-sm">
             <div className="text-[11px] text-os-dim uppercase tracking-wide">Estado</div>
-            <div className="mt-1 font-mono">{getClientStatusLabel(client.status)}</div>
+            <div className="mt-1 break-words font-mono">{getClientStatusLabel(client.status)}</div>
           </div>
-          <div className="p-2 border border-os-border bg-os-surface2 text-sm">
+          <div className="min-w-0 p-2 border border-os-border bg-os-surface2 text-sm">
             <div className="text-[11px] text-os-dim uppercase tracking-wide">Presupuesto Meta</div>
-            <div className="mt-1 font-mono">{formatHeaderBudget(client.metaBudgetMonthly)}</div>
+            <div className="mt-1 break-words font-mono">{formatHeaderBudget(client.metaBudgetMonthly)}</div>
           </div>
-          <div className="p-2 border border-os-border bg-os-surface2 text-sm">
+          <div className="min-w-0 p-2 border border-os-border bg-os-surface2 text-sm">
             <div className="text-[11px] text-os-dim uppercase tracking-wide">Fecha de inicio</div>
-            <div className="mt-1">{formatHeaderStartDate(client.startDate)}</div>
+            <div className="mt-1 break-words">{formatHeaderStartDate(client.startDate)}</div>
           </div>
-          <div className="p-2 border border-os-border bg-os-surface2 text-sm">
+          <div className="min-w-0 p-2 border border-os-border bg-os-surface2 text-sm">
             <div className="text-[11px] text-os-dim uppercase tracking-wide">Responsable</div>
-            <div className="mt-1">{client.owner}</div>
+            <div className="mt-1 break-words">{client.owner}</div>
           </div>
         </div>
       </div>
 
       {/* Tab Navigation */}
-      <nav className="mb-6 border-b border-os-border">
-        <ul className="flex gap-4 text-sm font-mono text-os-dim">
+      <nav className="mb-6 border-b border-os-border pb-3 sm:pb-0">
+        <label className="block sm:hidden">
+          <span className="mb-1.5 block font-mono text-[9px] uppercase tracking-[0.18em] text-os-dim">Sección</span>
+          <select
+            aria-label="Sección del cliente"
+            value={activeTab}
+            onChange={(event) => setActiveTab(event.target.value as TabKey)}
+            className="w-full min-w-0 border border-os-border bg-os-surface px-3 py-2 text-sm text-os-text outline-none focus:border-os-border-strong"
+          >
+            {(Object.keys(TAB_LABELS) as TabKey[]).map((tab) => (
+              <option key={tab} value={tab}>{TAB_LABELS[tab]}</option>
+            ))}
+          </select>
+        </label>
+        <div className="hidden sm:block">
+        <ul className="flex flex-wrap gap-x-4 gap-y-2 text-sm font-mono text-os-dim">
           {(['overview', 'meta-ads', 'leads', 'automations', 'agents', 'integrations', 'content', 'knowledge', 'results', 'notes'] as TabKey[]).map((tab) => (
             <li
               key={tab}
-              className={`pb-2 cursor-pointer transition-colors ${
+              className={`min-w-0 cursor-pointer break-words pb-2 transition-colors ${
                 activeTab === tab ? 'text-os-accent border-b border-os-accent -mb-[1px]' : 'hover:text-os-muted'
               }`}
               onClick={() => setActiveTab(tab)}
@@ -413,6 +427,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
             </li>
           ))}
         </ul>
+        </div>
       </nav>
 
       {/* Tab Content */}
@@ -515,7 +530,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowDeleteConfirm(false)} />
-          <div className="relative w-full max-w-md bg-os-surface border border-os-border p-4">
+          <div className="relative max-h-[90vh] w-full max-w-md overflow-y-auto break-words bg-os-surface border border-os-border p-4">
             <h3 className="mb-3 text-lg font-semibold">Eliminar cliente</h3>
             <p className="text-sm text-os-dim mb-4">
               ¿Seguro que quieres eliminar a <strong>{client.name}</strong>? Esta acción no se puede deshacer.
