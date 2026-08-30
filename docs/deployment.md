@@ -460,6 +460,46 @@ seeded on first touch, and `/api/ready` reports `checks.sqlite:
 other than exactly `true`) and redeploy. This immediately restores today's
 auto-create-and-seed behavior with no other change required.
 
+### Removing demo and test data for real onboarding
+
+Production must disable both demo sources before any deletion:
+
+```
+FOUNDER_OS_SEED_DEMO_DATA=false
+NEXT_PUBLIC_REKREOS_DEMO_DATA=false
+```
+
+The first flag prevents `getDb()` from filling an empty SQLite business
+store again. The second is compiled into the browser bundle and prevents
+the legacy localStorage boards from recreating their demo rows. On first
+load it removes records explicitly marked `dataSource: "demo"`, plus the
+three obsolete client ids `client-acme`, `client-northwind`, and
+`client-lumen`. Manual records are retained.
+
+Use the production reset only after a fresh off-volume backup reports
+`ok: true`. The command is a dry run unless both `--execute` and the exact
+state token printed by that dry run are supplied:
+
+```
+npm run reset:production-data -- --sqlite-path /app/data/founder-os.db
+npm run reset:production-data -- --sqlite-path /app/data/founder-os.db --execute --confirm <token-from-dry-run>
+```
+
+The token fingerprints both Postgres and SQLite. Any row change between
+the dry run and execution makes the token stale and aborts the reset. The
+reset deletes business/demo rows but preserves Supabase users and profiles,
+database schemas and migrations, both installation markers, all backup
+files, and the internal Make connection with id
+`connection-mtcs133b-844`. After execution, verify `/api/ready`, inspect the
+empty business screens, and create another verified backup as the clean
+onboarding baseline.
+
+The two databases cannot share one distributed transaction. The command
+verifies both stores before starting and verifies each deletion, but an
+infrastructure failure between their commits can leave a partial reset.
+That is why the fresh verified backup is mandatory and why the command is
+never automatic at startup or deployment.
+
 This flag detects a missing file, not a restored-but-stale volume. The more
 precise check - recording a small "last known SQLite install id" in
 Postgres, durable and independent of the Railway volume, and comparing

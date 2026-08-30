@@ -1,4 +1,5 @@
 import { getClients } from '@/lib/clients';
+import { isBrowserDemoDataEnabled, withoutDemoRecords } from '@/lib/demo-data';
 
 // REKREATIVE is the agency's own internal acquisition/infrastructure, never
 // a client — scope distinguishes "REKREATIVE's own automations" (internal,
@@ -219,7 +220,8 @@ function normalizeAutomation(raw: Automation): Automation {
 }
 
 function readAutomations(): Automation[] {
-  return readStorage<Automation>(STORAGE_KEY).map(normalizeAutomation);
+  const automations = readStorage<Automation>(STORAGE_KEY).map(normalizeAutomation);
+  return isBrowserDemoDataEnabled() ? automations : withoutDemoRecords(automations);
 }
 
 // ===== SEED / DEMO DATA =====
@@ -519,7 +521,17 @@ function seedDemoAutomationRuns(): AutomationRun[] {
 
 export function initializeAutomationsStoreIfNeeded(): Automation[] {
   if (typeof window === 'undefined') {
-    return seedDemoAutomations();
+    return isBrowserDemoDataEnabled() ? seedDemoAutomations() : [];
+  }
+
+  if (!isBrowserDemoDataEnabled()) {
+    const existing = readAutomations();
+    const retainedIds = new Set(existing.map((automation) => automation.id));
+    const retainedRuns = readStorage<AutomationRun>(RUNS_STORAGE_KEY)
+      .filter((run) => retainedIds.has(run.automationId));
+    writeStorage(STORAGE_KEY, existing);
+    writeStorage(RUNS_STORAGE_KEY, retainedRuns);
+    return existing;
   }
 
   const automationsRaw = getStorageRaw(STORAGE_KEY);

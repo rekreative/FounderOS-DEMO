@@ -19,6 +19,7 @@
     "brain:docs": "tsx scripts/generate-brain-docs.ts",
     "db:migrate": "tsx lib/server/migrate.ts",
     "register:installation": "tsx scripts/register-installation.ts",
+    "reset:production-data": "tsx scripts/reset-production-data.ts",
     "db:seed": "tsx scripts/seed-backend-v1.ts",
     "db:seed-admin": "tsx scripts/seed-admin.ts"
   },

@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { openDb, type FounderDb } from '@/lib/db';
 import { seedDatabase } from '@/lib/seed';
+import { isServerDemoDataEnabled } from '@/lib/demo-data';
 
 /**
  * App-level singleton. Larp-first, real-ready: every page and API route reads
@@ -54,14 +55,17 @@ export function getDb(): FounderDb {
   // back-fills databases created before that table existed; seedDatabase is
   // idempotent (INSERT OR REPLACE), so re-running only adds what's missing.
   if (
-    instance.departments.all().length === 0 ||
-    instance.workflows.all().length === 0 ||
-    instance.skills.all().length === 0 ||
-    instance.social.accounts().length === 0 ||
-    instance.emailList.snapshots().length === 0 ||
-    instance.social.dmSnapshots().length === 0 ||
-    instance.social.dmMessages().length === 0 ||
-    instance.leadMagnets.all().length === 0
+    isServerDemoDataEnabled() &&
+    (
+      instance.departments.all().length === 0 ||
+      instance.workflows.all().length === 0 ||
+      instance.skills.all().length === 0 ||
+      instance.social.accounts().length === 0 ||
+      instance.emailList.snapshots().length === 0 ||
+      instance.social.dmSnapshots().length === 0 ||
+      instance.social.dmMessages().length === 0 ||
+      instance.leadMagnets.all().length === 0
+    )
   ) {
     seedDatabase(instance);
   }

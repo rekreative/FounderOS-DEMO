@@ -1,4 +1,5 @@
 import { getClients } from '@/lib/clients';
+import { isBrowserDemoDataEnabled, withoutDemoRecords } from '@/lib/demo-data';
 
 // AI agent configuration roster for REKREATIVE — NOT execution. This module
 // deliberately does not call any LLM provider, does not persist run history,
@@ -137,7 +138,8 @@ function readStorage<T>(key: string): T[] {
     const raw = window.localStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    const records = Array.isArray(parsed) ? parsed : [];
+    return (isBrowserDemoDataEnabled() ? records : withoutDemoRecords(records)) as T[];
   } catch (error) {
     console.error(`Failed to parse ${key} from localStorage`, error);
     return [];
@@ -260,7 +262,13 @@ function seedDemoAiAgents(): AiAgent[] {
 
 export function initializeAiAgentsStoreIfNeeded(): AiAgent[] {
   if (typeof window === 'undefined') {
-    return seedDemoAiAgents();
+    return isBrowserDemoDataEnabled() ? seedDemoAiAgents() : [];
+  }
+
+  if (!isBrowserDemoDataEnabled()) {
+    const existing = readStorage<AiAgent>(STORAGE_KEY);
+    writeStorage(STORAGE_KEY, existing);
+    return existing;
   }
 
   const raw = window.localStorage.getItem(STORAGE_KEY);
