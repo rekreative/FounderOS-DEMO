@@ -25,4 +25,15 @@ describe('OS mark branding', () => {
     expect(icon).toContain('rx="18"');
     expect(icon).toContain('transform="translate(14 14) scale(.72)"');
   });
+
+  test('the sidebar footer explains real system and integration status', () => {
+    const sidebar = read('components/Sidebar.tsx');
+    expect(sidebar).toContain("fetch('/api/ready')");
+    expect(sidebar).toContain('REKREOS operativo');
+    expect(sidebar).toContain('Datos protegidos');
+    expect(sidebar).toContain('integraciones conectadas');
+    expect(sidebar).toContain('href="/connections"');
+    expect(sidebar).not.toContain('systems live');
+    expect(sidebar).not.toContain('sqlite · real agents');
+  });
 });
