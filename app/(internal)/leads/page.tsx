@@ -130,6 +130,128 @@ function eventLabel(type: LeadEvent['type']): string {
   return map[type] ?? type;
 }
 
+function LeadMobileCard({
+  lead,
+  clients,
+  events,
+  eventsLoading,
+  showClient,
+  expanded,
+  onToggle,
+  onStageChange,
+  onEdit,
+  onAddNote,
+}: {
+  lead: Lead;
+  clients: { id: string; name: string }[];
+  events: LeadEvent[];
+  eventsLoading: boolean;
+  showClient: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  onStageChange: (nextStage: LeadStage) => void;
+  onEdit: () => void;
+  onAddNote: () => void;
+}) {
+  const clientName = getClientNameForLead(lead.clientId, clients);
+  const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
+  const contact = lead.email || lead.phone || lead.whatsapp || 'Sin contacto';
+
+  return (
+    <article className="min-w-0 border border-os-border bg-os-surface p-4">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <button type="button" onClick={onToggle} className="min-w-0 flex-1 text-left">
+          <span className="block break-words text-[14px] font-semibold text-os-text">{lead.name}</span>
+          <span className="mt-1 block break-all font-mono text-[10px] text-os-dim">{contact}</span>
+        </button>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={expanded ? 'Cerrar detalles del lead' : 'Abrir detalles del lead'}
+          className="shrink-0 border border-os-border px-2 py-1 font-mono text-[10px] text-os-dim"
+        >
+          {expanded ? '−' : '+'}
+        </button>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-os-border pt-3">
+        {showClient && (
+          <div className="min-w-0">
+            <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Cliente</div>
+            <div className="mt-1 break-words text-[11px] text-os-muted">{clientName}</div>
+          </div>
+        )}
+        <label className="min-w-0">
+          <span className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Etapa</span>
+          <select
+            value={lead.stage}
+            onChange={(event) => onStageChange(event.target.value as LeadStage)}
+            className="mt-1 w-full min-w-0 border border-os-border bg-os-surface2 px-2 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-text outline-none"
+          >
+            {LEAD_STAGE_OPTIONS.map((stage) => <option key={stage.id} value={stage.id}>{stage.label}</option>)}
+          </select>
+        </label>
+        <div className="min-w-0">
+          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Intención IA</div>
+          <div className="mt-1 break-words font-mono text-[11px] text-os-muted">{aiIntent}</div>
+        </div>
+        <div className="min-w-0">
+          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Origen</div>
+          <div className="mt-1 break-words font-mono text-[11px] text-os-muted">{lead.source || '—'}</div>
+        </div>
+        <div className="min-w-0">
+          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Campaña</div>
+          <div className="mt-1 break-words font-mono text-[11px] text-os-muted">{lead.campaign || '—'}</div>
+        </div>
+        <div className="min-w-0">
+          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Última actividad</div>
+          <div className="mt-1 break-words font-mono text-[11px] text-os-dim">{formatRelative(lead.lastActivityAt)}</div>
+        </div>
+        <div className="min-w-0">
+          <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Contacto</div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {lead.email && <span className="border border-os-border px-1.5 py-0.5 font-mono text-[8.5px] text-os-dim">EMAIL</span>}
+            {lead.phone && <span className="border border-os-border px-1.5 py-0.5 font-mono text-[8.5px] text-os-dim">TEL</span>}
+            {lead.whatsapp && <span className="border border-os-border px-1.5 py-0.5 font-mono text-[8.5px] text-os-dim">WA</span>}
+            {!lead.email && !lead.phone && !lead.whatsapp && <span className="font-mono text-[10px] text-os-dim">—</span>}
+          </div>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="mt-4 min-w-0 space-y-3 border-t border-os-border pt-3">
+          {lead.aiAnalysis?.summary && (
+            <div>
+              <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Resumen IA</div>
+              <div className="mt-1 whitespace-pre-wrap break-words text-[11px] text-os-muted">{lead.aiAnalysis.summary}</div>
+            </div>
+          )}
+          <div>
+            <div className="font-mono text-[8.5px] uppercase tracking-wide text-os-dim">Actividad</div>
+            <div className="mt-2 space-y-1.5">
+              {eventsLoading ? (
+                <div className="font-mono text-[10px] text-os-dim">Cargando actividad...</div>
+              ) : events.length === 0 ? (
+                <div className="font-mono text-[10px] text-os-dim">Sin eventos registrados.</div>
+              ) : events.slice(-5).reverse().map((event) => (
+                <div key={event.id} className="flex min-w-0 justify-between gap-3 border border-os-border bg-os-surface2 px-2 py-1.5">
+                  <span className="min-w-0 break-words font-mono text-[9.5px] text-os-muted">{eventLabel(event.type)}</span>
+                  <span className="shrink-0 font-mono text-[8.5px] text-os-dim">{formatDateTime(event.occurredAt)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-os-border pt-3">
+        <button type="button" onClick={onAddNote} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Añadir nota</button>
+        <button type="button" onClick={onEdit} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted">Editar</button>
+      </div>
+    </article>
+  );
+}
+
 function LeadRow({
   lead,
   clients,
@@ -790,19 +912,19 @@ export default function LeadsPage() {
         })}
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative">
+      <div className="mb-4 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="relative w-full min-w-0 sm:w-auto">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-os-dim" />
           <input
             type="text"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Buscar lead..."
-            className="border border-os-border bg-os-surface py-1.5 pl-8 pr-2.5 text-[12.5px] text-os-text outline-none placeholder:text-os-dim focus:border-os-border-strong"
+            className="w-full min-w-0 border border-os-border bg-os-surface py-1.5 pl-8 pr-2.5 text-[12.5px] text-os-text outline-none placeholder:text-os-dim focus:border-os-border-strong sm:w-auto"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="grid w-full grid-cols-2 gap-1.5 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
           {STAGE_FILTERS.map((option) => {
             const active = stageFilter === option.id;
             return (
@@ -810,7 +932,7 @@ export default function LeadsPage() {
                 key={option.id}
                 type="button"
                 onClick={() => setStageFilter(option.id as 'all' | LeadStage)}
-                className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-wide ${
+                className={`min-w-0 break-words border px-2 py-1 font-mono text-[10px] uppercase tracking-wide ${
                   active ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim hover:border-os-border-strong hover:text-os-muted'
                 }`}
               >
@@ -821,12 +943,12 @@ export default function LeadsPage() {
         </div>
 
         {moduleScope === 'client' && (
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex w-full min-w-0 flex-col gap-1.5 sm:ml-auto sm:w-auto sm:flex-row sm:items-center sm:gap-2">
             <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
             <select
               value={clientFilter}
               onChange={(event) => setClientFilter(event.target.value)}
-              className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
+              className="w-full min-w-0 border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text sm:w-auto"
             >
               <option value="all">Todos los clientes</option>
               {clients.map((client) => (
@@ -839,7 +961,30 @@ export default function LeadsPage() {
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-sm-t border border-os-border bg-os-surface">
+      <div className="grid gap-3 md:hidden">
+        {loading ? (
+          <div className="border border-dashed border-os-border px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">Cargando leads...</div>
+        ) : visibleLeads.length === 0 ? (
+          <div className="border border-dashed border-os-border px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">No hay leads que coincidan con estos filtros.</div>
+        ) : visibleLeads.map((lead) => (
+          <LeadMobileCard
+            key={lead.id}
+            lead={lead}
+            clients={clients}
+            events={eventsByLeadId[lead.id] ?? []}
+            eventsLoading={Boolean(eventsLoadingId[lead.id])}
+            showClient={showClientColumn}
+            expanded={Boolean(expanded[lead.id])}
+            onToggle={() => handleToggle(lead.id)}
+            onStageChange={(nextStage) => handleStageChange(lead.id, nextStage)}
+            onEdit={() => openEditForm(lead)}
+            onAddNote={() => handleAddManualNote(lead.id)}
+          />
+        ))}
+      </div>
+
+      <div className="hidden md:block">
+        <div className="overflow-x-auto rounded-sm-t border border-os-border bg-os-surface">
         <table className="w-full min-w-[900px] border-collapse text-left text-sm">
           <thead>
             <tr className="bg-os-surface2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">
@@ -888,11 +1033,12 @@ export default function LeadsPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {showCreate && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-2xl rounded-sm-t border border-os-border bg-os-surface p-4">
+        <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/60 p-3 sm:items-center sm:p-4">
+          <div className="my-auto max-h-[calc(100vh-24px)] w-full max-w-2xl overflow-y-auto rounded-sm-t border border-os-border bg-os-surface p-4 sm:max-h-[calc(100vh-32px)]">
             <div className="mb-4 flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold uppercase tracking-wide">{editingLeadId ? 'Editar lead' : 'Nuevo lead'}</h2>
               <button type="button" onClick={closeForm} className="font-mono text-[10px] uppercase tracking-wide text-os-dim hover:text-os-accent">
@@ -900,7 +1046,7 @@ export default function LeadsPage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {moduleScope === 'client' ? (
                 <label className="col-span-2">
                   <span className="mb-1 block font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Cliente</span>
