@@ -1,3 +1,5 @@
+import { isBrowserDemoDataEnabled } from '@/lib/demo-data';
+
 export type ClientStatus = 'active' | 'paused' | 'prospect';
 
 export const CLIENT_STATUS_OPTIONS = [
@@ -61,12 +63,17 @@ const SEED_CLIENTS: Client[] = [
   },
 ];
 
+const SEED_CLIENT_IDS = new Set(SEED_CLIENTS.map((client) => client.id));
+
 function readStorage(): Client[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as Client[];
+    const clients = JSON.parse(raw) as Client[];
+    return isBrowserDemoDataEnabled()
+      ? clients
+      : clients.filter((client) => !SEED_CLIENT_IDS.has(client.id));
   } catch (e) {
     console.error('Failed to parse clients from localStorage', e);
     return [];
@@ -83,8 +90,12 @@ function writeStorage(clients: Client[]) {
 }
 
 export function initializeStoreIfNeeded(): Client[] {
-  if (typeof window === 'undefined') return SEED_CLIENTS;
+  if (typeof window === 'undefined') return isBrowserDemoDataEnabled() ? SEED_CLIENTS : [];
   const existing = readStorage();
+  if (!isBrowserDemoDataEnabled()) {
+    writeStorage(existing);
+    return existing;
+  }
   if (!existing || existing.length === 0) {
     writeStorage(SEED_CLIENTS);
     return SEED_CLIENTS;

@@ -1,4 +1,5 @@
 import { getClients } from '@/lib/clients';
+import { isBrowserDemoDataEnabled, withoutDemoRecords } from '@/lib/demo-data';
 
 // REKREATIVE is the agency's own internal acquisition, never a client —
 // scope distinguishes "REKREATIVE's own campaigns" (internal, clientId
@@ -112,7 +113,8 @@ function readStorage(): MetaCampaign[] {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map(normalizeCampaign) : [];
+    const campaigns = Array.isArray(parsed) ? parsed.map(normalizeCampaign) : [];
+    return isBrowserDemoDataEnabled() ? campaigns : withoutDemoRecords(campaigns);
   } catch (error) {
     console.error(`Failed to parse ${STORAGE_KEY} from localStorage`, error);
     return [];
@@ -323,7 +325,13 @@ function seedDemoCampaigns(): MetaCampaign[] {
 
 export function initializeMetaCampaignsStoreIfNeeded(): MetaCampaign[] {
   if (typeof window === 'undefined') {
-    return seedDemoCampaigns();
+    return isBrowserDemoDataEnabled() ? seedDemoCampaigns() : [];
+  }
+
+  if (!isBrowserDemoDataEnabled()) {
+    const existing = readStorage();
+    writeStorage(existing);
+    return existing;
   }
 
   const existing = readStorage();
