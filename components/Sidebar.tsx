@@ -68,7 +68,11 @@ const DEFAULT_W = 232;
 export function Sidebar() {
   const pathname = usePathname();
   const [live, setLive] = useState<{ up: number; total: number } | null>(null);
-  const [host, setHost] = useState<string | null>(null);
+  const [environmentLabel, setEnvironmentLabel] = useState('Comprobando entorno');
+  const [health, setHealth] = useState<{ status: 'checking' | 'ok' | 'error'; dataProtected: boolean }>({
+    status: 'checking',
+    dataProtected: false,
+  });
   const [collapsed, setCollapsed] = useState(false);
   // The nav scrolls, and any scrolling ancestor clips an absolutely positioned
   // child — so the collapsed label is rendered fixed, outside that box.
@@ -84,10 +88,8 @@ export function Sidebar() {
     setCollapsed(localStorage.getItem('founderos.sidebar.collapsed') === '1');
   }, []);
 
-  // Where this instance actually is. Client-only: there is no location
-  // during SSR.
   useEffect(() => {
-    setHost(window.location.host);
+    setEnvironmentLabel(window.location.hostname === 'localhost' ? 'Entorno local' : 'Producción');
   }, []);
 
   // A stale label must never hang around after the rail expands.
@@ -154,6 +156,25 @@ export function Sidebar() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/ready')
+      .then((res) => res.json())
+      .then((body: { ok?: boolean; checks?: { sqlite?: string; installation?: string } }) => {
+        if (cancelled) return;
+        setHealth({
+          status: body.ok === true ? 'ok' : 'error',
+          dataProtected: body.checks?.sqlite === 'ok' && body.checks?.installation === 'ok',
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setHealth({ status: 'error', dataProtected: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <aside
       className="fixed inset-y-0 left-0 z-20 hidden flex-col border-r border-os-border bg-os-bg2 lg:flex"
@@ -189,24 +210,23 @@ export function Sidebar() {
         {/* REKREATIVE OS primary rail: agency-focused ordering */}
         <NavGroup title="Main" items={REKREATIVE_PRIMARY} pathname={pathname} collapsed={collapsed} onTip={setTip} />
       </nav>
-      <div
-        className={`flex flex-col gap-2 border-t border-os-border py-3.5 ${
+      <Link
+        href="/connections"
+        className={`flex flex-col gap-1.5 border-t border-os-border py-3.5 transition-colors hover:bg-os-surface2 ${
           collapsed ? 'items-center px-0' : 'px-[18px]'
         }`}
       >
         <div className="flex items-center gap-2 whitespace-nowrap font-mono text-[10px] text-os-muted">
-          <span className="dot ok pulse" />
-          {!collapsed && <>{live ? `${live.up}/${live.total}` : '—/—'} systems live</>}
+          <span className={`dot ${health.status === 'ok' ? 'ok pulse' : health.status === 'error' ? 'err' : 'off'}`} />
+          {!collapsed && <>{health.status === 'ok' ? 'REKREOS operativo' : health.status === 'error' ? 'Revisar REKREOS' : 'Comprobando REKREOS'}</>}
         </div>
         {!collapsed && (
-          // The host is read at runtime, so a deployed instance never claims to
-          // be localhost. Wraps rather than nowrap, which used to clip the line
-          // off the edge of the rail.
-          <div className="break-words font-mono text-[10px] leading-relaxed text-os-dim">
-            {host ?? '…'} · sqlite · real agents
+          <div className="font-mono text-[9.5px] leading-relaxed text-os-dim">
+            <div>{environmentLabel} · {health.dataProtected ? 'Datos protegidos' : 'Protección pendiente'}</div>
+            <div>{live ? `${live.up} de ${live.total} integraciones conectadas` : 'Comprobando integraciones'}</div>
           </div>
         )}
-      </div>
+      </Link>
 
       {collapsed && tip && (
         <div
