@@ -1,19 +1,15 @@
-/**
- * The OS mark — the ring-and-S logo from Alex's Founder OS brand assets
- * (os-mark.png), recreated as a crisp inline vector so it scales and themes.
- * Ring proportions calibrated against the source PNG (r 30.8 / stroke 6.64
- * on a 100 box); the seam is the half-radius arc pair stood UPRIGHT as a
- * letter S — Alex's call (2026-07-13): the S runs vertical like the O,
- * never the lying-down wave. Brand red #ef4444 by default; pass `color` to
- * re-ink it. (And the OS logo only — never the "Founder" wordmark.)
- */
-export function OsMark({ size = 34, color = '#ef4444', className }: { size?: number; color?: string; className?: string }) {
+/** REKREOS rocket mark, adapted from the approved brand artwork. */
+export function OsMark({ size = 34, className }: { size?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 100 100" width={size} height={size} className={className} role="img" aria-label="REKREATIVE OS">
-      <g fill="none" stroke={color} strokeWidth={6.64}>
-        <circle cx={50} cy={50} r={30.8} />
-        <path d="M 50 22.53 A 13.74 13.74 0 0 0 50 50 A 13.74 13.74 0 0 1 50 77.47" />
-      </g>
+    <svg viewBox="0 0 100 100" width={size} height={size} className={className} role="img" aria-label="REKREOS OS">
+      <defs>
+        <linearGradient id="rekreos-mark-gradient" x1="50" y1="2" x2="50" y2="98" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#ec008c" />
+          <stop offset="1" stopColor="#ff7a45" />
+        </linearGradient>
+      </defs>
+      <path fill="url(#rekreos-mark-gradient)" d="M50 2 73 25v30l6 6v12L60 54V29L50 19 40 29v25L21 73V61l6-6V25L50 2Z" />
+      <path fill="url(#rekreos-mark-gradient)" d="m50 58 14 14c-8 0-12 8-14 26-2-18-6-26-14-26l14-14Z" />
     </svg>
   );
 }

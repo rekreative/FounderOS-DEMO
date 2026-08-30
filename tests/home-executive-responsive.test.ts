@@ -19,11 +19,26 @@ describe('Home Executive responsive contract', () => {
 
   test('puts priorities, KPIs, funnel, clients and the operational agenda in one hierarchy', () => {
     expect(home).toContain('Prioridades de hoy');
-    expect(home).toContain('Resumen ejecutivo');
+    expect(home).toContain('Indicadores principales');
     expect(home).toContain('Funnel comercial');
     expect(home).toContain('Cartera de clientes');
+    expect(home).toContain('Pulso operativo');
     expect(home).toContain('Agenda operativa');
     expect(home).toContain('Necesita atención');
+  });
+
+  test('groups the dashboard into dense responsive panels', () => {
+    expect(home).toContain('xl:grid-cols-12');
+    expect(home).toContain('xl:col-span-8');
+    expect(home).toContain('xl:col-span-4');
+    expect(home).toContain('Datos en tiempo real');
+    expect(home).not.toContain('<Kbd>');
+  });
+
+  test('turns empty states into useful next actions', () => {
+    expect(home).toContain('Añadir primer cliente');
+    expect(home).toContain('Conectar Meta Ads');
+    expect(home).toContain('Los nuevos leads aparecerán aquí');
   });
 
   test('provides mobile cards and a separate wide client table', () => {
