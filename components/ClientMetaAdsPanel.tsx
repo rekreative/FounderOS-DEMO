@@ -98,15 +98,15 @@ export function ClientMetaAdsPanel({ data, error }: { data: MetaAdsCampaignsResp
                   { label: 'Leads (Meta)', value: formatNumber(data.summary?.leads ?? 0) },
                   { label: 'CPL', value: formatMoneyRate(data.summary?.cpl ?? null) },
                 ].map((tile) => (
-                  <div key={tile.label} className="border border-os-border bg-os-surface2 px-3 py-2.5">
-                    <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">{tile.label}</div>
-                    <div className="mt-1.5 font-mono text-[15px] font-semibold text-os-text">{tile.value}</div>
+                  <div key={tile.label} className="min-w-0 border border-os-border bg-os-surface2 px-3 py-2.5">
+                    <div className="break-words font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">{tile.label}</div>
+                    <div className="mt-1.5 break-words font-mono text-[15px] font-semibold text-os-text">{tile.value}</div>
                   </div>
                 ))}
               </div>
 
-              <div className="overflow-hidden border border-os-border bg-os-surface">
-                <table className="w-full border-collapse text-left text-sm">
+              <div className="overflow-x-auto border border-os-border bg-os-surface">
+                <table className="min-w-[680px] w-full border-collapse text-left text-sm">
                   <thead>
                     <tr className="bg-os-surface2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">
                       <th className="px-3 py-2 font-normal">Campaña</th>
@@ -121,7 +121,7 @@ export function ClientMetaAdsPanel({ data, error }: { data: MetaAdsCampaignsResp
                   <tbody>
                     {data.campaigns.map((campaign) => (
                       <tr key={campaign.metaCampaignId} className="border-t border-os-border">
-                        <td className="px-3 py-2.5 text-[13px] font-semibold text-os-text">{campaign.campaignName}</td>
+                        <td className="max-w-[240px] break-words px-3 py-2.5 text-[13px] font-semibold text-os-text">{campaign.campaignName}</td>
                         <td className="px-3 py-2.5">
                           <Badge tone={STATUS_TONE[campaign.status.toUpperCase()] ?? 'default'}>{campaign.status}</Badge>
                         </td>

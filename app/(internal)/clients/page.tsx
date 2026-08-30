@@ -72,19 +72,19 @@ export default function ClientsPage() {
         <div className="mb-4 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10.5px] text-os-err">{createError}</div>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative">
+      <div className="mb-4 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="relative w-full min-w-0 sm:w-auto">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-os-dim" />
           <input
             type="text"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Buscar cliente..."
-            className="border border-os-border bg-os-surface py-1.5 pl-8 pr-2.5 text-[12.5px] text-os-text outline-none placeholder:text-os-dim focus:border-os-border-strong"
+            className="w-full min-w-0 border border-os-border bg-os-surface py-1.5 pl-8 pr-2.5 text-[12.5px] text-os-text outline-none placeholder:text-os-dim focus:border-os-border-strong sm:w-auto"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="grid w-full grid-cols-2 gap-1.5 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
           {STATUS_FILTERS.map((option) => {
             const active = statusFilter === option.id;
             return (
@@ -92,7 +92,7 @@ export default function ClientsPage() {
                 key={option.id}
                 type="button"
                 onClick={() => setStatusFilter(option.id)}
-                className={`border px-2 py-1 font-mono text-[10px] uppercase tracking-wide ${
+                className={`min-w-0 break-words border px-2 py-1 font-mono text-[10px] uppercase tracking-wide ${
                   active ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim hover:border-os-border-strong hover:text-os-muted'
                 }`}
               >

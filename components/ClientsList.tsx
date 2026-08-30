@@ -21,8 +21,41 @@ function formatStartDate(value: string): string {
 
 export function ClientsList({ clients }: { clients: Client[] }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left border-collapse">
+    <>
+      <div className="grid gap-2 md:hidden">
+        {clients.length === 0 ? (
+          <div className="border border-dashed border-os-border px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+            No hay clientes que coincidan con estos filtros.
+          </div>
+        ) : clients.map((client) => (
+          <Link key={client.id} href={`/clients/${client.id}`} className="min-w-0 border border-os-border bg-os-surface p-4 transition-colors hover:bg-os-surface2">
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="break-words text-[13px] font-semibold text-os-text">{client.name}</div>
+                <div className="mt-1 break-words text-[11px] text-os-dim">{client.sector} · {client.service}</div>
+              </div>
+              <span className={`shrink-0 border border-os-border bg-os-surface2 px-2 py-0.5 font-mono text-[10px] tracking-wide ${
+                client.status === 'active' ? 'text-os-ok' : client.status === 'paused' ? 'text-os-dim' : 'text-os-accent'
+              }`}>
+                {getClientStatusLabel(client.status)}
+              </span>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3 border-t border-os-border pt-3">
+              <div className="min-w-0">
+                <div className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Presupuesto Meta</div>
+                <div className="mt-1 break-words font-mono text-[11px] text-os-muted">{formatBudget(client.metaBudgetMonthly)}</div>
+              </div>
+              <div className="min-w-0">
+                <div className="font-mono text-[8px] uppercase tracking-wide text-os-dim">Responsable</div>
+                <div className="mt-1 break-words text-[11px] text-os-muted">{client.owner}</div>
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
+
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full border-collapse text-left">
         <thead>
           <tr className="text-[12px] uppercase tracking-wide text-os-dim border-b border-os-border">
             <th className="px-3 py-2">Cliente</th>
@@ -52,7 +85,7 @@ export function ClientsList({ clients }: { clients: Client[] }) {
                     {c.name}
                   </Link>
                 </td>
-                <td className="px-3 py-2 text-[13px] text-os-dim">{c.sector}</td>
+                <td className="max-w-[180px] break-words px-3 py-2 text-[13px] text-os-dim">{c.sector}</td>
                 <td className="px-3 py-2">
                   <span className={`inline-block px-2 py-0.5 text-[11px] font-mono tracking-wide rounded-sm ${
                     c.status === 'active' ? 'text-os-ok border border-os-border bg-os-surface2' : c.status === 'paused' ? 'text-os-dim border border-os-border bg-os-surface2' : 'text-os-accent border border-os-border bg-os-surface2'
@@ -60,15 +93,16 @@ export function ClientsList({ clients }: { clients: Client[] }) {
                     {getClientStatusLabel(c.status)}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-[13px] text-os-dim">{c.service}</td>
+                <td className="max-w-[220px] break-words px-3 py-2 text-[13px] text-os-dim">{c.service}</td>
                 <td className="px-3 py-2 text-[13px] font-mono">{formatBudget(c.metaBudgetMonthly)}</td>
                 <td className="px-3 py-2 text-[13px] text-os-dim">{formatStartDate(c.startDate)}</td>
-                <td className="px-3 py-2 text-[13px] text-os-dim">{c.owner}</td>
+                <td className="max-w-[180px] break-words px-3 py-2 text-[13px] text-os-dim">{c.owner}</td>
               </tr>
             ))
           )}
         </tbody>
-      </table>
-    </div>
+        </table>
+      </div>
+    </>
   );
 }

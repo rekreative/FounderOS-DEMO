@@ -128,8 +128,8 @@ export function ClientIntegrationsPanel({
           </div>
 
           {/* B + C + D. Requirement rows: level, connection scope, configuration state, verification state */}
-          <div className="overflow-hidden border border-os-border bg-os-surface">
-            <table className="w-full border-collapse text-left text-sm">
+          <div className="overflow-x-auto border border-os-border bg-os-surface">
+            <table className="min-w-[720px] w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="bg-os-surface2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">
                   <th className="px-3 py-2 font-normal">Plataforma</th>
@@ -145,7 +145,7 @@ export function ClientIntegrationsPanel({
                   const configStatus = row.connection ? getIntegrationConfigurationStatus(row.connection) : null;
                   return (
                     <tr key={row.platform} className="border-t border-os-border">
-                      <td className="px-3 py-2.5 text-[13px] font-semibold text-os-text">
+                      <td className="max-w-[180px] break-words px-3 py-2.5 text-[13px] font-semibold text-os-text">
                         {getIntegrationPlatformLabel(row.platform)}
                       </td>
                       <td className="px-3 py-2.5 font-mono text-[10.5px] text-os-muted">

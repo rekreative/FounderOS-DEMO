@@ -71,8 +71,8 @@ export function ClientLeadsPanel({ leads }: { leads: Lead[] }) {
             </div>
           </div>
 
-          <div className="overflow-hidden border border-os-border bg-os-surface">
-            <table className="w-full border-collapse text-left text-sm">
+          <div className="overflow-x-auto border border-os-border bg-os-surface">
+            <table className="min-w-[640px] w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="bg-os-surface2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">
                   <th className="px-3 py-2 font-normal">Lead</th>
@@ -86,8 +86,8 @@ export function ClientLeadsPanel({ leads }: { leads: Lead[] }) {
                 {leads.map((lead) => (
                   <tr key={lead.id} className="border-t border-os-border align-top">
                     <td className="px-3 py-2.5">
-                      <div className="text-[13px] font-semibold text-os-text">{lead.name}</div>
-                      <div className="mt-0.5 text-[10px] text-os-dim">
+                      <div className="max-w-[220px] break-words text-[13px] font-semibold text-os-text">{lead.name}</div>
+                      <div className="mt-0.5 max-w-[220px] break-all text-[10px] text-os-dim">
                         {lead.email || lead.phone || lead.whatsapp || 'Sin contacto'}
                       </div>
                     </td>
