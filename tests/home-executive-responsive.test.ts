@@ -35,6 +35,12 @@ describe('Home Executive responsive contract', () => {
     expect(home).not.toContain('<Kbd>');
   });
 
+  test('keeps KPI values and units readable without text collisions', () => {
+    expect(home).toContain('flex-wrap items-baseline gap-x-3 gap-y-1');
+    expect(home).toContain('shrink-0 whitespace-nowrap font-sans');
+    expect(home).toContain('tracking-normal');
+  });
+
   test('turns empty states into useful next actions', () => {
     expect(home).toContain('Añadir primer cliente');
     expect(home).toContain('Conectar Meta Ads');

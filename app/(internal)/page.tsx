@@ -63,9 +63,9 @@ function StatTile({ href, label, value, unit, detail, icon: Icon, className = ''
           <Icon className="h-4 w-4" strokeWidth={1.6} />
         </span>
       </div>
-      <div className="mt-3 flex min-w-0 items-baseline gap-2 font-mono text-[24px] font-semibold tracking-[-0.03em] text-os-text sm:text-[27px]">
-        <span className="truncate">{value}</span>
-        <small className="truncate text-[10px] font-normal text-os-dim sm:text-[11px]">{unit}</small>
+      <div className="mt-3 flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[24px] font-semibold tracking-[-0.03em] text-os-text sm:text-[27px]">
+        <span className="min-w-0 max-w-full truncate">{value}</span>
+        <small className="shrink-0 whitespace-nowrap font-sans text-[10px] font-normal tracking-normal text-os-dim sm:text-[11px]">{unit}</small>
       </div>
       <p className="mt-2 truncate font-mono text-[9px] text-os-dim">{detail}</p>
     </Link>
