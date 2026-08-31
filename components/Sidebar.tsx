@@ -189,7 +189,7 @@ export function Sidebar() {
         <OsMark size={collapsed ? 24 : 34} className="shrink-0" />
         {!collapsed && (
           <div className="min-w-0 flex-1">
-            <div className="whitespace-nowrap text-[13px] font-bold tracking-[0.18em]">REKREOS</div>
+            <div className="whitespace-nowrap font-display text-[13px] font-bold tracking-[0.16em]">REKREOS</div>
             <div className="mt-[3px] whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">
               v1 · Agency OS
             </div>

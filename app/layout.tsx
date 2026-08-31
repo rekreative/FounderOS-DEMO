@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { THEME_INIT_SCRIPT } from '@/lib/theme';
 
@@ -13,12 +12,6 @@ import { THEME_INIT_SCRIPT } from '@/lib/theme';
  * simply aren't mounted for that route), not by a pathname runtime check.
  */
 
-const fontMono = JetBrains_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-mono',
-});
-
 export const metadata: Metadata = {
   title: 'REKREATIVE OS',
   description: 'Personal operating system and AI agent command center',
@@ -26,7 +19,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={fontMono.variable} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
         {/* Apply the persisted theme before first paint — no dark↔light flash. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />

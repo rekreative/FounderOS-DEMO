@@ -22,7 +22,7 @@ export function PageHeader({
             {eyebrow}
           </div>
         )}
-        <h1 className={`break-words text-[22px] font-bold uppercase leading-[1.1] tracking-[0.06em] sm:text-[25px]${caret ? ' caret-blink' : ''}`}>
+        <h1 className={`break-words font-display text-[22px] font-bold uppercase leading-[1.1] tracking-[0.045em] sm:text-[25px]${caret ? ' caret-blink' : ''}`}>
           {title}
         </h1>
       </div>

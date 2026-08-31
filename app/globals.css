@@ -300,6 +300,12 @@ body {
     repeating-linear-gradient(90deg, var(--grid) 0 1px, transparent 1px 48px);
 }
 
+/* Existing font-mono hooks now keep data aligned without changing typeface. */
+.font-mono {
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: 'tnum' 1, 'zero' 1;
+}
+
 ::selection {
   background: var(--accent);
   color: var(--accent-ink);

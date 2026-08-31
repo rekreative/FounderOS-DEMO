@@ -1,5 +1,8 @@
 import type { Config } from 'tailwindcss';
 
+const appleText = ['"SF Pro Text"', '"SF Pro Display"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'sans-serif'];
+const appleDisplay = ['"SF Pro Display"', '"SF Pro Text"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'sans-serif'];
+
 // Terminal direction tokens — source of truth mirrored as CSS vars in globals.css
 const config: Config = {
   content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],
@@ -40,9 +43,9 @@ const config: Config = {
         },
       },
       fontFamily: {
-        // Monolith lettering: mono everywhere — Space Grotesk is retired.
-        sans: ['var(--font-mono)', '"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
-        mono: ['var(--font-mono)', '"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+        sans: appleText,
+        display: appleDisplay,
+        mono: appleText,
       },
       borderRadius: {
         // class names stay so no component edits; the values go sharp
