@@ -75,6 +75,7 @@ const createClientMetaAccount = vi.fn();
 const getMetaSpendSummary = vi.fn();
 const getMetaCampaignSummaries = vi.fn();
 const getLatestSyncRun = vi.fn();
+const getLatestSyncRunByOwnerScope = vi.fn();
 const getMetaSpendSummaryByClient = vi.fn();
 vi.mock('@/lib/server/meta-repo', () => ({
   listClientMetaAccounts: (...args: unknown[]) => listClientMetaAccounts(...args),
@@ -82,6 +83,7 @@ vi.mock('@/lib/server/meta-repo', () => ({
   getMetaSpendSummary: (...args: unknown[]) => getMetaSpendSummary(...args),
   getMetaCampaignSummaries: (...args: unknown[]) => getMetaCampaignSummaries(...args),
   getLatestSyncRun: (...args: unknown[]) => getLatestSyncRun(...args),
+  getLatestSyncRunByOwnerScope: (...args: unknown[]) => getLatestSyncRunByOwnerScope(...args),
   getMetaSpendSummaryByClient: (...args: unknown[]) => getMetaSpendSummaryByClient(...args),
 }));
 
@@ -123,6 +125,7 @@ beforeEach(() => {
   getMetaSpendSummary.mockResolvedValue(null);
   getMetaCampaignSummaries.mockResolvedValue([]);
   getLatestSyncRun.mockResolvedValue(null);
+  getLatestSyncRunByOwnerScope.mockResolvedValue(null);
   getMetaSpendSummaryByClient.mockResolvedValue(new Map());
   getClientOpsSnapshot.mockResolvedValue({ automations: [], agents: [] });
 });
@@ -352,6 +355,7 @@ describe('GET /api/results — aggregate never falls through to global when clie
     expect(res.status).toBe(403);
     expect(getResults).not.toHaveBeenCalled();
   });
+
 });
 
 describe('GET /api/meta-ads/campaigns — aggregate never falls through to the global byClient breakdown', () => {
@@ -385,6 +389,22 @@ describe('GET /api/meta-ads/campaigns — aggregate never falls through to the g
     const res = await get('?clientId=client-other');
     expect(res.status).toBe(403);
   });
+
+  it('internal + ownerScope=internal returns only internal reporting', async () => {
+    asInternal();
+    const res = await get('?ownerScope=internal');
+    expect(res.status).toBe(200);
+    expect(listClientMetaAccounts).toHaveBeenCalledWith(undefined, 'internal');
+    expect(getMetaSpendSummary).toHaveBeenCalledWith(expect.objectContaining({ ownerScope: 'internal' }));
+    expect(getMetaSpendSummaryByClient).not.toHaveBeenCalled();
+  });
+
+  it('client + ownerScope=internal is forbidden', async () => {
+    asClient(true);
+    const res = await get('?ownerScope=internal');
+    expect(res.status).toBe(403);
+    expect(listClientMetaAccounts).not.toHaveBeenCalled();
+  });
 });
 
 describe('GET /api/meta-ads/accounts — list never falls through to every client\'s mappings', () => {
@@ -409,6 +429,20 @@ describe('GET /api/meta-ads/accounts — list never falls through to every clien
     const res = await get('?clientId=client-acme');
     expect(res.status).toBe(200);
     expect(listClientMetaAccounts).toHaveBeenCalledWith('client-acme');
+  });
+
+  it('internal + ownerScope=internal lists only internal mappings', async () => {
+    asInternal();
+    const res = await get('?ownerScope=internal');
+    expect(res.status).toBe(200);
+    expect(listClientMetaAccounts).toHaveBeenCalledWith(undefined, 'internal');
+  });
+
+  it('client + ownerScope=internal is forbidden', async () => {
+    asClient(true);
+    const res = await get('?ownerScope=internal');
+    expect(res.status).toBe(403);
+    expect(listClientMetaAccounts).not.toHaveBeenCalled();
   });
 
   it('POST /api/meta-ads/accounts remains internal-only: client role → 403', async () => {

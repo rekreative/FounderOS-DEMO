@@ -11,9 +11,9 @@ import { Badge, type BadgeTone } from '@/components/terminal';
 // /api/meta-ads/campaigns), never the legacy demo/localStorage MetaCampaign
 // store (lib/meta-ads.ts) that used to back this page. No campaign
 // creation/editing here — Meta owns campaign truth; this page reports it.
-// "Todos los clientes" aggregates across every mapped client; selecting one
-// client narrows to its own campaigns, matching the client's own Meta Ads
-// tab (ClientMetaAdsPanel) exactly (same endpoint, same response shape).
+// "Todos los clientes" aggregates the client portfolio. "REKREATIVE"
+// explicitly selects internal agency accounts, while selecting a client
+// narrows to that client's campaigns.
 
 function formatCurrency(value: number): string {
   return `${Math.round(value).toLocaleString('es-ES', { useGrouping: true })} €`;
@@ -51,7 +51,7 @@ const STATUS_TONE: Record<string, BadgeTone> = {
 
 export default function MetaAdsPage() {
   const { clients } = useClientsRegistry();
-  const [clientFilter, setClientFilter] = useState<'all' | string>('all');
+  const [clientFilter, setClientFilter] = useState<'all' | 'internal' | string>('all');
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
   const [data, setData] = useState<MetaAdsCampaignsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +60,11 @@ export default function MetaAdsPage() {
     let cancelled = false;
     setData(null);
     setError(null);
-    getMetaAdsCampaigns({ clientId: clientFilter === 'all' ? undefined : clientFilter, preset: periodPreset })
+    getMetaAdsCampaigns({
+      clientId: clientFilter !== 'all' && clientFilter !== 'internal' ? clientFilter : undefined,
+      ownerScope: clientFilter === 'internal' ? 'internal' : undefined,
+      preset: periodPreset,
+    })
       .then((response) => {
         if (!cancelled) setData(response);
       })
@@ -87,9 +91,8 @@ export default function MetaAdsPage() {
         </div>
       </div>
 
-      {/* Filters — client + period. No campaign-scope toggle (REKREATIVE's
-          own internal acquisition has no Meta Ads Real V1 data model; only
-          client-mapped ad accounts exist here). */}
+      {/* Owner + period filters. Internal agency metrics are kept separate
+          from the client portfolio and are selected explicitly. */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2">
           <label className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-os-dim">Cliente</label>
@@ -99,6 +102,7 @@ export default function MetaAdsPage() {
             className="border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text"
           >
             <option value="all">Todos los clientes</option>
+            <option value="internal">REKREATIVE (interno)</option>
             {clients.map((client) => (
               <option key={client.id} value={client.id}>
                 {client.name}
@@ -152,7 +156,7 @@ export default function MetaAdsPage() {
 
       {data && !data.hasAccountMapping && clientFilter !== 'all' && (
         <div className="mb-4 border border-dashed border-os-border px-3 py-6 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
-          Meta Ads no configurado para este cliente.
+          {clientFilter === 'internal' ? 'Meta Ads interno no configurado.' : 'Meta Ads no configurado para este cliente.'}
         </div>
       )}
 
@@ -218,7 +222,7 @@ export default function MetaAdsPage() {
               </tr>
             ) : (
               data.campaigns.map((campaign) => (
-                <tr key={campaign.metaCampaignId} className="border-t border-os-border">
+                <tr key={`${campaign.metaAdAccountId ?? 'legacy'}:${campaign.metaCampaignId}`} className="border-t border-os-border">
                   <td className="px-3 py-3 text-[13px] font-semibold text-os-text">{campaign.campaignName}</td>
                   <td className="px-3 py-3">
                     <Badge tone={STATUS_TONE[campaign.status] ?? 'default'}>{campaign.status}</Badge>

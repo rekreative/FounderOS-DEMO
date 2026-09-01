@@ -375,16 +375,32 @@ export const IngestLeadBodySchema = z
 // meta_sync_runs, and meta_campaign_daily_metrics — see
 // lib/server/migrations/0004_meta_ads_real_v1.sql.
 
+export const MetaAccountOwnerScopeSchema = z.enum(['internal', 'client']);
+
 export const CreateClientMetaAccountBodySchema = z
   .object({
-    clientId: z.string().trim().min(1),
+    ownerScope: MetaAccountOwnerScopeSchema.default('client'),
+    clientId: z.string().trim().min(1).nullable().optional(),
     metaAdAccountId: z.string().trim().min(1),
     metaPageId: z.string().trim().min(1).nullable().optional(),
     metaFormIds: z.array(z.string().trim().min(1)).nullable().optional(),
     label: z.string().trim().min(1).nullable().optional(),
     active: z.boolean().optional(),
+    validFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'validFrom must be YYYY-MM-DD').optional(),
+    validTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'validTo must be YYYY-MM-DD').nullable().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.ownerScope === 'internal' && value.clientId != null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['clientId'], message: 'clientId must be null for an internal Meta account' });
+    }
+    if (value.ownerScope === 'client' && !value.clientId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['clientId'], message: 'clientId is required for a client Meta account' });
+    }
+    if (value.validFrom && value.validTo && value.validTo < value.validFrom) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['validTo'], message: 'validTo must not be before validFrom' });
+    }
+  });
 
 // clientId and metaAdAccountId define the mapping's identity — never
 // re-pointed by an update; only the account's own metadata and active flag
@@ -396,6 +412,7 @@ export const UpdateClientMetaAccountBodySchema = z
     metaFormIds: z.array(z.string().trim().min(1)).nullable(),
     label: z.string().trim().min(1).nullable(),
     active: z.boolean(),
+    validTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'validTo must be YYYY-MM-DD').nullable(),
   })
   .strict()
   .partial();
@@ -403,8 +420,14 @@ export const UpdateClientMetaAccountBodySchema = z
 export const ListClientMetaAccountsQuerySchema = z
   .object({
     clientId: z.string().trim().min(1).optional(),
+    ownerScope: MetaAccountOwnerScopeSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.ownerScope === 'internal' && value.clientId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['clientId'], message: 'clientId is not valid for internal Meta accounts' });
+    }
+  });
 
 const dailyMetricRowSchema = z
   .object({
@@ -440,11 +463,17 @@ export const IngestMetaMetricsBodySchema = z
 export const MetaAdsCampaignsQuerySchema = z
   .object({
     clientId: z.string().trim().min(1).optional(),
+    ownerScope: MetaAccountOwnerScopeSchema.optional(),
     preset: ResultsPeriodPresetSchema.optional(),
     start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'start must be YYYY-MM-DD').optional(),
     end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'end must be YYYY-MM-DD').optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.ownerScope === 'internal' && value.clientId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['clientId'], message: 'clientId is not valid for internal Meta reporting' });
+    }
+  });
 
 // G-Brain Postgres V1 — preserves the exact current KnowledgeEntry enums
 // from lib/knowledge-entries.ts's KNOWLEDGE_*_OPTIONS.

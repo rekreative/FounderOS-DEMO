@@ -166,6 +166,55 @@ four, `x-manychat-secret` for ManyChat), same secret values as configured in
 the deployment's environment variables — no code change required for this
 swap.
 
+### Meta Metrics ownership and internal account registration
+
+`POST /api/ingest/meta-metrics` keeps the existing Make request contract:
+the request contains only `metaAdAccountId` and `rows`. REKREOS resolves the
+owner from `client_meta_accounts`; Make never sends a REKREOS `clientId` or
+scope.
+
+Mappings are effective-dated with a half-open interval: `valid_from` is
+included and `valid_to` is excluded. Intervals for the same canonical Meta ad
+account cannot overlap. A transfer therefore closes the old mapping on date
+`D` and creates the new mapping with `validFrom: D`. Historical resyncs still
+resolve to the owner that covered each metric date.
+
+Internal agency accounts use `ownerScope: "internal"` and `clientId: null`.
+They do not require a fake row in `clients`. Client mappings keep the existing
+default behavior and use `ownerScope: "client"` with a real `clientId`.
+
+There is not yet a dedicated settings form for this administrative action.
+After migration `0010_meta_internal_owner.sql` is deployed, an authenticated
+internal operator can register REKREATIVE from the production app's browser
+console:
+
+```js
+await fetch('/api/meta-ads/accounts', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    ownerScope: 'internal',
+    clientId: null,
+    metaAdAccountId: '3704368926499756',
+    label: 'REKREATIVE'
+  })
+}).then(async (response) => ({ status: response.status, body: await response.json() }));
+```
+
+Omitting `validFrom` on the first mapping covers all available historical
+days. Provide an explicit `validFrom` when ownership begins on a known date.
+A `201` response creates the mapping. A `422` response means the
+canonical account already has an overlapping ownership interval and must be
+reviewed rather than overwritten.
+
+Daily metric identity is `(meta_ad_account_id, meta_campaign_id, date)`.
+`meta_account_id` remains attached to each fact for historical ownership and
+audit traceability. Each mapped request creates a durable `running` sync row;
+all metric upserts and the transition to `success` share one transaction. A
+failure rolls back the whole metric batch and updates that run to `error`.
+Unmapped or inactive accounts are recorded directly as `error` without
+starting metric ingestion.
+
 ## Health check vs. readiness check
 
 Liveness and DB readiness are deliberately separate endpoints, because a

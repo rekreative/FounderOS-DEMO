@@ -14,6 +14,10 @@ function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505';
 }
 
+function isOwnershipOverlap(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23P01';
+}
+
 /**
  * client_meta_accounts — the canonical clientId <-> Meta ad account mapping
  * (Meta Ads Real V1). Deliberately the minimal CRUD surface needed to onboard
@@ -27,14 +31,19 @@ function isUniqueViolation(error: unknown): boolean {
  */
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
-  const parsed = ListClientMetaAccountsQuerySchema.safeParse({ clientId: url.searchParams.get('clientId') ?? undefined });
+  const parsed = ListClientMetaAccountsQuerySchema.safeParse({
+    clientId: url.searchParams.get('clientId') ?? undefined,
+    ownerScope: url.searchParams.get('ownerScope') ?? undefined,
+  });
   if (!parsed.success) return jsonError(400, 'invalid query parameters', { issues: parsed.error.flatten() });
 
   const auth = await requireClientAccessOrResponse(parsed.data.clientId);
   if ('response' in auth) return auth.response;
 
   try {
-    const accounts = await listClientMetaAccounts(parsed.data.clientId);
+    const accounts = parsed.data.ownerScope
+      ? await listClientMetaAccounts(parsed.data.clientId, parsed.data.ownerScope)
+      : await listClientMetaAccounts(parsed.data.clientId);
     return NextResponse.json({ accounts });
   } catch (error) {
     return unexpectedError('GET /api/meta-ads/accounts', error);
@@ -53,7 +62,9 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ account }, { status: 201 });
   } catch (error) {
     if (isForeignKeyViolation(error)) return jsonError(422, 'unknown client id');
-    if (isUniqueViolation(error)) return jsonError(422, 'this Meta ad account is already actively mapped to a client');
+    if (isUniqueViolation(error) || isOwnershipOverlap(error)) {
+      return jsonError(422, 'this Meta ad account already has an overlapping ownership mapping');
+    }
     return unexpectedError('POST /api/meta-ads/accounts', error);
   }
 }
