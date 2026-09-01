@@ -13,23 +13,29 @@ import type { ResultsPeriodPreset } from './results';
 
 export type ClientMetaAccount = {
   id: string;
-  clientId: string;
+  ownerScope: 'internal' | 'client';
+  clientId: string | null;
   metaAdAccountId: string;
   metaPageId: string | null;
   metaFormIds: string[] | null;
   label: string | null;
   active: boolean;
+  validFrom: string;
+  validTo: string | null;
   createdAt: string;
   updatedAt: string;
 };
 
 export type CreateClientMetaAccountInput = {
-  clientId: string;
+  ownerScope?: 'internal' | 'client';
+  clientId?: string | null;
   metaAdAccountId: string;
   metaPageId?: string | null;
   metaFormIds?: string[] | null;
   label?: string | null;
   active?: boolean;
+  validFrom?: string;
+  validTo?: string | null;
 };
 
 export type UpdateClientMetaAccountInput = Partial<{
@@ -37,11 +43,18 @@ export type UpdateClientMetaAccountInput = Partial<{
   metaFormIds: string[] | null;
   label: string | null;
   active: boolean;
+  validTo: string | null;
 }>;
 
-export async function listClientMetaAccounts(clientId?: string): Promise<ClientMetaAccount[]> {
-  const qs = clientId ? `?clientId=${encodeURIComponent(clientId)}` : '';
-  const { accounts } = await apiFetch<{ accounts: ClientMetaAccount[] }>(`/api/meta-ads/accounts${qs}`);
+export async function listClientMetaAccounts(
+  clientId?: string,
+  ownerScope?: 'internal' | 'client',
+): Promise<ClientMetaAccount[]> {
+  const params = new URLSearchParams();
+  if (clientId) params.set('clientId', clientId);
+  if (ownerScope) params.set('ownerScope', ownerScope);
+  const qs = params.toString();
+  const { accounts } = await apiFetch<{ accounts: ClientMetaAccount[] }>(`/api/meta-ads/accounts${qs ? `?${qs}` : ''}`);
   return accounts;
 }
 
@@ -63,11 +76,13 @@ export async function updateClientMetaAccount(id: string, patch: UpdateClientMet
   });
 }
 
-export type MetaSyncRunStatus = 'success' | 'partial' | 'error';
+export type MetaSyncRunStatus = 'running' | 'success' | 'partial' | 'error';
 
 export type MetaSyncRun = {
   id: string;
   clientId: string | null;
+  metaAdAccountId: string | null;
+  metaAccountId: string | null;
   startedAt: string;
   finishedAt: string | null;
   status: MetaSyncRunStatus;
@@ -77,6 +92,7 @@ export type MetaSyncRun = {
 };
 
 export type MetaCampaignSummary = {
+  metaAdAccountId: string | null;
   metaCampaignId: string;
   campaignName: string;
   status: string;
@@ -116,6 +132,7 @@ export type MetaAdsCampaignsResponse = {
 
 export type GetMetaAdsCampaignsOptions = {
   clientId?: string;
+  ownerScope?: 'internal' | 'client';
   preset?: ResultsPeriodPreset;
   start?: string;
   end?: string;
@@ -142,6 +159,7 @@ export function countActiveMetaCampaigns(campaigns: Pick<MetaCampaignSummary, 's
 export async function getMetaAdsCampaigns(options: GetMetaAdsCampaignsOptions = {}): Promise<MetaAdsCampaignsResponse> {
   const params = new URLSearchParams();
   if (options.clientId) params.set('clientId', options.clientId);
+  if (options.ownerScope) params.set('ownerScope', options.ownerScope);
   if (options.preset) params.set('preset', options.preset);
   if (options.start) params.set('start', options.start);
   if (options.end) params.set('end', options.end);

@@ -12,23 +12,29 @@ import { query, withTransaction } from './db';
 
 export type ClientMetaAccount = {
   id: string;
-  clientId: string;
+  ownerScope: 'internal' | 'client';
+  clientId: string | null;
   metaAdAccountId: string;
   metaPageId: string | null;
   metaFormIds: string[] | null;
   label: string | null;
   active: boolean;
+  validFrom: string;
+  validTo: string | null;
   createdAt: string;
   updatedAt: string;
 };
 
 export type CreateClientMetaAccountInput = {
-  clientId: string;
+  ownerScope?: 'internal' | 'client';
+  clientId?: string | null;
   metaAdAccountId: string;
   metaPageId?: string | null;
   metaFormIds?: string[] | null;
   label?: string | null;
   active?: boolean;
+  validFrom?: string;
+  validTo?: string | null;
 };
 
 export type UpdateClientMetaAccountInput = Partial<{
@@ -36,16 +42,20 @@ export type UpdateClientMetaAccountInput = Partial<{
   metaFormIds: string[] | null;
   label: string | null;
   active: boolean;
+  validTo: string | null;
 }>;
 
 type ClientMetaAccountRow = {
   id: string;
-  client_id: string;
+  owner_scope: string;
+  client_id: string | null;
   meta_ad_account_id: string;
   meta_page_id: string | null;
   meta_form_ids: string[] | null;
   label: string | null;
   active: boolean;
+  valid_from: string;
+  valid_to: string | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -53,12 +63,15 @@ type ClientMetaAccountRow = {
 function rowToClientMetaAccount(row: ClientMetaAccountRow): ClientMetaAccount {
   return {
     id: row.id,
+    ownerScope: row.owner_scope as 'internal' | 'client',
     clientId: row.client_id,
     metaAdAccountId: row.meta_ad_account_id,
     metaPageId: row.meta_page_id,
     metaFormIds: row.meta_form_ids,
     label: row.label,
     active: row.active,
+    validFrom: row.valid_from,
+    validTo: row.valid_to,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -70,18 +83,35 @@ function generateId(prefix: string): string {
 
 export async function createClientMetaAccount(input: CreateClientMetaAccountInput): Promise<ClientMetaAccount> {
   const id = generateId('meta-account');
+  const ownerScope = input.ownerScope ?? 'client';
   const result = await query<ClientMetaAccountRow>(
-    `INSERT INTO client_meta_accounts (id, client_id, meta_ad_account_id, meta_page_id, meta_form_ids, label, active)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO client_meta_accounts (
+       id, owner_scope, client_id, meta_ad_account_id, meta_page_id,
+       meta_form_ids, label, active, valid_from, valid_to
+     )
+     VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8,
+       COALESCE(
+         $9::date,
+         CASE
+           WHEN EXISTS (SELECT 1 FROM client_meta_accounts WHERE meta_ad_account_id = $4) THEN CURRENT_DATE
+           ELSE '-infinity'::date
+         END
+       ),
+       $10
+     )
      RETURNING *`,
     [
       id,
-      input.clientId,
+      ownerScope,
+      input.clientId ?? null,
       input.metaAdAccountId.trim(),
       input.metaPageId?.trim() || null,
       input.metaFormIds && input.metaFormIds.length > 0 ? JSON.stringify(input.metaFormIds) : null,
       input.label?.trim() || null,
       input.active ?? true,
+      input.validFrom ?? null,
+      input.validTo ?? null,
     ],
   );
   return rowToClientMetaAccount(result.rows[0]);
@@ -96,17 +126,33 @@ export async function getClientMetaAccountById(id: string): Promise<ClientMetaAc
  *  resolves; a deactivated/reassigned account id is treated as unmapped. */
 export async function getActiveClientMetaAccountByAdAccountId(metaAdAccountId: string): Promise<ClientMetaAccount | null> {
   const result = await query<ClientMetaAccountRow>(
-    'SELECT * FROM client_meta_accounts WHERE meta_ad_account_id = $1 AND active = true',
+    `SELECT * FROM client_meta_accounts
+     WHERE meta_ad_account_id = $1
+       AND active = true
+       AND CURRENT_DATE >= valid_from
+       AND (valid_to IS NULL OR CURRENT_DATE < valid_to)`,
     [metaAdAccountId],
   );
   return result.rowCount === 0 ? null : rowToClientMetaAccount(result.rows[0]);
 }
 
-/** No clientId -> every mapping. A clientId -> only that client's own mappings. */
-export async function listClientMetaAccounts(clientId?: string): Promise<ClientMetaAccount[]> {
-  const result = clientId
-    ? await query<ClientMetaAccountRow>('SELECT * FROM client_meta_accounts WHERE client_id = $1 ORDER BY created_at DESC', [clientId])
-    : await query<ClientMetaAccountRow>('SELECT * FROM client_meta_accounts ORDER BY created_at DESC');
+/** No filters -> every mapping (internal callers only at the route boundary). */
+export async function listClientMetaAccounts(
+  clientId?: string,
+  ownerScope?: 'internal' | 'client',
+): Promise<ClientMetaAccount[]> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (clientId) {
+    params.push(clientId);
+    conditions.push(`client_id = $${params.length}`);
+  }
+  if (ownerScope) {
+    params.push(ownerScope);
+    conditions.push(`owner_scope = $${params.length}`);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const result = await query<ClientMetaAccountRow>(`SELECT * FROM client_meta_accounts ${where} ORDER BY created_at DESC`, params);
   return result.rows.map(rowToClientMetaAccount);
 }
 
@@ -115,17 +161,25 @@ const UPDATABLE_ACCOUNT_FIELDS: Array<{ key: keyof UpdateClientMetaAccountInput;
   { key: 'metaFormIds', column: 'meta_form_ids', toDb: (v) => (v && (v as string[]).length > 0 ? JSON.stringify(v) : null) },
   { key: 'label', column: 'label', toDb: (v) => (v ? (v as string).trim() : null) },
   { key: 'active', column: 'active', toDb: (v) => v },
+  { key: 'validTo', column: 'valid_to', toDb: (v) => v ?? null },
 ];
 
 /** clientId and metaAdAccountId are immutable — see the schema/module doc
  *  comment for why (re-mapping goes through deactivate + create, not update). */
 export async function updateClientMetaAccount(id: string, patch: UpdateClientMetaAccountInput): Promise<ClientMetaAccount | null> {
+  const normalizedPatch = { ...patch };
+  if (normalizedPatch.active === false && !('validTo' in normalizedPatch)) {
+    normalizedPatch.validTo = new Date().toISOString().slice(0, 10);
+  }
+  if (normalizedPatch.active === true && !('validTo' in normalizedPatch)) {
+    normalizedPatch.validTo = null;
+  }
   const setClauses: string[] = [];
   const values: unknown[] = [];
 
   for (const { key, column, toDb } of UPDATABLE_ACCOUNT_FIELDS) {
-    if (!(key in patch)) continue;
-    values.push(toDb(patch[key]));
+    if (!(key in normalizedPatch)) continue;
+    values.push(toDb(normalizedPatch[key]));
     setClauses.push(`${column} = $${values.length}`);
   }
 
@@ -141,11 +195,13 @@ export async function updateClientMetaAccount(id: string, patch: UpdateClientMet
 
 // ── meta_sync_runs ──────────────────────────────────────────────────────────
 
-export type MetaSyncRunStatus = 'success' | 'partial' | 'error';
+export type MetaSyncRunStatus = 'running' | 'success' | 'partial' | 'error';
 
 export type MetaSyncRun = {
   id: string;
   clientId: string | null;
+  metaAdAccountId: string | null;
+  metaAccountId: string | null;
   startedAt: string;
   finishedAt: string | null;
   status: MetaSyncRunStatus;
@@ -156,6 +212,8 @@ export type MetaSyncRun = {
 
 export type RecordSyncRunInput = {
   clientId: string | null;
+  metaAdAccountId?: string | null;
+  metaAccountId?: string | null;
   startedAt: Date;
   finishedAt: Date | null;
   status: MetaSyncRunStatus;
@@ -167,6 +225,8 @@ export type RecordSyncRunInput = {
 type MetaSyncRunRow = {
   id: string;
   client_id: string | null;
+  meta_ad_account_id: string | null;
+  meta_account_id: string | null;
   started_at: Date;
   finished_at: Date | null;
   status: string;
@@ -179,6 +239,8 @@ function rowToSyncRun(row: MetaSyncRunRow): MetaSyncRun {
   return {
     id: row.id,
     clientId: row.client_id,
+    metaAdAccountId: row.meta_ad_account_id,
+    metaAccountId: row.meta_account_id,
     startedAt: row.started_at.toISOString(),
     finishedAt: row.finished_at ? row.finished_at.toISOString() : null,
     status: row.status as MetaSyncRunStatus,
@@ -188,18 +250,43 @@ function rowToSyncRun(row: MetaSyncRunRow): MetaSyncRun {
   };
 }
 
-/** One row per POST /api/ingest/meta-metrics call — the request is
- *  synchronous end-to-end, so the run is recorded once, after processing
- *  completes, rather than as a separate start/finish pair. */
+/** Creates the durable audit row for one POST /api/ingest/meta-metrics call.
+ *  Mapped requests start as `running`; the metric transaction performs the
+ *  success transition, while the route records a later error transition. */
 export async function recordSyncRun(input: RecordSyncRunInput): Promise<MetaSyncRun> {
   const id = generateId('meta-sync');
   const result = await query<MetaSyncRunRow>(
-    `INSERT INTO meta_sync_runs (id, client_id, started_at, finished_at, status, rows_upserted, error_message, source)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO meta_sync_runs (
+       id, client_id, meta_ad_account_id, meta_account_id, started_at,
+       finished_at, status, rows_upserted, error_message, source
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING *`,
-    [id, input.clientId, input.startedAt, input.finishedAt, input.status, input.rowsUpserted, input.errorMessage, input.source ?? 'make'],
+    [
+      id,
+      input.clientId,
+      input.metaAdAccountId ?? null,
+      input.metaAccountId ?? null,
+      input.startedAt,
+      input.finishedAt,
+      input.status,
+      input.rowsUpserted,
+      input.errorMessage,
+      input.source ?? 'make',
+    ],
   );
   return rowToSyncRun(result.rows[0]);
+}
+
+export async function markMetaSyncRunError(id: string, errorCategory: string): Promise<MetaSyncRun | null> {
+  const result = await query<MetaSyncRunRow>(
+    `UPDATE meta_sync_runs
+     SET status = 'error', finished_at = now(), rows_upserted = 0, error_message = $2
+     WHERE id = $1
+     RETURNING *`,
+    [id, errorCategory],
+  );
+  return result.rowCount === 0 ? null : rowToSyncRun(result.rows[0]);
 }
 
 /** Most recently STARTED run — not most recently inserted (those coincide in
@@ -210,6 +297,19 @@ export async function getLatestSyncRun(clientId?: string): Promise<MetaSyncRun |
   const result = clientId
     ? await query<MetaSyncRunRow>('SELECT * FROM meta_sync_runs WHERE client_id = $1 ORDER BY started_at DESC LIMIT 1', [clientId])
     : await query<MetaSyncRunRow>('SELECT * FROM meta_sync_runs ORDER BY started_at DESC LIMIT 1');
+  return result.rowCount === 0 ? null : rowToSyncRun(result.rows[0]);
+}
+
+export async function getLatestSyncRunByOwnerScope(ownerScope: 'internal' | 'client'): Promise<MetaSyncRun | null> {
+  const result = await query<MetaSyncRunRow>(
+    `SELECT run.*
+     FROM meta_sync_runs run
+     JOIN client_meta_accounts account ON account.id = run.meta_account_id
+     WHERE account.owner_scope = $1
+     ORDER BY run.started_at DESC
+     LIMIT 1`,
+    [ownerScope],
+  );
   return result.rowCount === 0 ? null : rowToSyncRun(result.rows[0]);
 }
 
@@ -235,9 +335,97 @@ export type DailyMetricRowInput = {
   reach: number | null;
 };
 
+export class MetaOwnershipResolutionError extends Error {
+  constructor() {
+    super('No unambiguous Meta account owner exists for the metric date.');
+    this.name = 'MetaOwnershipResolutionError';
+  }
+}
+
 /**
- * Idempotent UPSERT on (client_id, meta_campaign_id, date) — see the unique
- * constraint in migration 0004. A repeated delivery for the same day
+ * Production ingestion path. The run already exists as `running`. Every
+ * canonical Meta fact and the transition to `success` commit together. If
+ * any row fails, withTransaction rolls back both the metric writes and the
+ * success transition; the route then marks the durable run as `error`.
+ */
+export async function ingestMetaCampaignDailyMetrics(
+  activeAccount: ClientMetaAccount,
+  syncRunId: string,
+  rows: DailyMetricRowInput[],
+): Promise<number> {
+  return withTransaction(async (client) => {
+    let count = 0;
+    for (const row of rows) {
+      const ownership = await client.query<ClientMetaAccountRow>(
+        `SELECT *
+         FROM client_meta_accounts
+         WHERE meta_ad_account_id = $1
+           AND $2::date >= valid_from
+           AND (valid_to IS NULL OR $2::date < valid_to)
+         ORDER BY valid_from DESC
+         LIMIT 2`,
+        [activeAccount.metaAdAccountId, row.date],
+      );
+      if (ownership.rowCount !== 1) throw new MetaOwnershipResolutionError();
+      const mapping = ownership.rows[0];
+
+      const id = generateId('meta-metric');
+      await client.query(
+        `INSERT INTO meta_campaign_daily_metrics (
+           id, client_id, meta_ad_account_id, meta_account_id,
+           meta_campaign_id, campaign_name, status, date,
+           spend, impressions, clicks, leads, reach, sync_run_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         ON CONFLICT (meta_ad_account_id, meta_campaign_id, date)
+           WHERE meta_ad_account_id IS NOT NULL
+         DO UPDATE SET
+           client_id = EXCLUDED.client_id,
+           meta_account_id = EXCLUDED.meta_account_id,
+           campaign_name = EXCLUDED.campaign_name,
+           status = EXCLUDED.status,
+           spend = EXCLUDED.spend,
+           impressions = EXCLUDED.impressions,
+           clicks = EXCLUDED.clicks,
+           leads = EXCLUDED.leads,
+           reach = EXCLUDED.reach,
+           sync_run_id = EXCLUDED.sync_run_id,
+           updated_at = now()`,
+        [
+          id,
+          mapping.client_id,
+          activeAccount.metaAdAccountId,
+          mapping.id,
+          row.metaCampaignId,
+          row.campaignName,
+          row.status,
+          row.date,
+          row.spend,
+          row.impressions,
+          row.clicks,
+          row.leads,
+          row.reach,
+          syncRunId,
+        ],
+      );
+      count += 1;
+    }
+
+    const completed = await client.query<MetaSyncRunRow>(
+      `UPDATE meta_sync_runs
+       SET status = 'success', finished_at = now(), rows_upserted = $2, error_message = NULL
+       WHERE id = $1 AND status = 'running'
+       RETURNING *`,
+      [syncRunId, count],
+    );
+    if (completed.rowCount !== 1) throw new Error('Meta sync run is not in the running state.');
+    return count;
+  });
+}
+
+/**
+ * Legacy/testing helper for historical client-only metric fixtures. New
+ * ingestion must use ingestMetaCampaignDailyMetrics() so canonical account
+ * identity and run ownership are always present. A repeated delivery
  * OVERWRITES spend/impressions/clicks/leads/reach/campaign_name/status with
  * the latest values (Meta's own attribution corrections up to ~28 days
  * out), never inserts a duplicate. All rows for one call share `syncRunId`
@@ -260,7 +448,9 @@ export async function upsertMetaCampaignDailyMetrics(
            id, client_id, meta_campaign_id, campaign_name, status, date,
            spend, impressions, clicks, leads, reach, sync_run_id
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-         ON CONFLICT (client_id, meta_campaign_id, date) DO UPDATE SET
+         ON CONFLICT (client_id, meta_campaign_id, date)
+           WHERE meta_ad_account_id IS NULL
+         DO UPDATE SET
            campaign_name = EXCLUDED.campaign_name,
            status = EXCLUDED.status,
            spend = EXCLUDED.spend,
@@ -281,6 +471,7 @@ export async function upsertMetaCampaignDailyMetrics(
 // ── Reporting (aggregated from the daily rows — never a separate rollup table) ──
 
 export type MetaCampaignSummary = {
+  metaAdAccountId: string | null;
   metaCampaignId: string;
   /** Most recent day's name/status within the queried window — Meta renames
    *  or pauses a campaign going forward, never retroactively. */
@@ -307,6 +498,7 @@ export type MetaSpendSummary = {
 
 export type MetaReportingQuery = {
   clientId?: string;
+  ownerScope?: 'internal' | 'client';
   /** Inclusive YYYY-MM-DD lower bound on `date` (a plain calendar date, same
    *  as lib/server/results-time.ts's ResolvedResultsPeriod.start — never a
    *  UTC instant, so no timezone-shift risk comparing against it). Omitted
@@ -326,6 +518,12 @@ function buildReportingWhere(opts: MetaReportingQuery): { where: string; params:
   if (opts.clientId) {
     params.push(opts.clientId);
     conditions.push(`client_id = $${params.length}`);
+  } else if (opts.ownerScope === 'internal') {
+    conditions.push(`meta_account_id IN (SELECT id FROM client_meta_accounts WHERE owner_scope = 'internal')`);
+  } else {
+    // The unscoped dashboard remains the client portfolio. Internal agency
+    // metrics are visible only when explicitly requested.
+    conditions.push('client_id IS NOT NULL');
   }
   if (opts.dateFrom) {
     params.push(opts.dateFrom);
@@ -344,6 +542,7 @@ function buildReportingWhere(opts: MetaReportingQuery): { where: string; params:
 export async function getMetaCampaignSummaries(opts: MetaReportingQuery = {}): Promise<MetaCampaignSummary[]> {
   const { where, params } = buildReportingWhere(opts);
   const result = await query<{
+    meta_ad_account_id: string | null;
     meta_campaign_id: string;
     campaign_name: string;
     status: string;
@@ -354,6 +553,7 @@ export async function getMetaCampaignSummaries(opts: MetaReportingQuery = {}): P
     reach: string | null;
   }>(
     `SELECT
+       meta_ad_account_id,
        meta_campaign_id,
        (array_agg(campaign_name ORDER BY date DESC))[1] AS campaign_name,
        (array_agg(status ORDER BY date DESC))[1] AS status,
@@ -364,7 +564,7 @@ export async function getMetaCampaignSummaries(opts: MetaReportingQuery = {}): P
        SUM(reach) AS reach
      FROM meta_campaign_daily_metrics
      ${where}
-     GROUP BY meta_campaign_id
+     GROUP BY meta_ad_account_id, meta_campaign_id
      ORDER BY SUM(spend) DESC`,
     params,
   );
@@ -375,6 +575,7 @@ export async function getMetaCampaignSummaries(opts: MetaReportingQuery = {}): P
     const clicks = Number(row.clicks);
     const leads = Number(row.leads);
     return {
+      metaAdAccountId: row.meta_ad_account_id,
       metaCampaignId: row.meta_campaign_id,
       campaignName: row.campaign_name,
       status: row.status,
@@ -424,7 +625,9 @@ export async function getMetaSpendSummary(opts: MetaReportingQuery = {}): Promis
  *  clients with at least one row in the window appear (a client with no
  *  data simply has no entry, matched the same way getMetaSpendSummary
  *  returns null for a single client). */
-export async function getMetaSpendSummaryByClient(opts: Omit<MetaReportingQuery, 'clientId'> = {}): Promise<Map<string, MetaSpendSummary>> {
+export async function getMetaSpendSummaryByClient(
+  opts: Omit<MetaReportingQuery, 'clientId' | 'ownerScope'> = {},
+): Promise<Map<string, MetaSpendSummary>> {
   const { where, params } = buildReportingWhere(opts);
   const result = await query<{ client_id: string; spend: string; impressions: string; clicks: string; leads: string; reach: string | null }>(
     `SELECT client_id, SUM(spend) AS spend, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(leads) AS leads, SUM(reach) AS reach

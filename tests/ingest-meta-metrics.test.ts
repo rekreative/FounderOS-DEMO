@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { checkMetaIngestAuth } from '@/lib/server/meta-ingest-auth';
 import { closePool, query } from '@/lib/server/db';
 import { createClient } from '@/lib/server/clients-repo';
-import { createClientMetaAccount } from '@/lib/server/meta-repo';
+import { createClientMetaAccount, updateClientMetaAccount } from '@/lib/server/meta-repo';
 import { POST } from '@/app/api/ingest/meta-metrics/route';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
@@ -29,6 +29,7 @@ const TEST_META_INGEST_KEY = 'test-meta-ingest-key-for-vitest';
 describe.runIf(Boolean(TEST_DATABASE_URL))('POST /api/ingest/meta-metrics (real PostgreSQL)', () => {
   const originalKey = process.env.INGEST_META_API_KEY;
   const createdClientIds: string[] = [];
+  const createdMetaAccountIds: string[] = [];
   const rand = () => Math.random().toString(36).slice(2);
   // The "unmapped account" tests below deliberately record a
   // client_id=NULL meta_sync_runs row (see route.ts) — not scoped to any
@@ -50,6 +51,11 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('POST /api/ingest/meta-metrics (real 
   });
 
   afterEach(async () => {
+    for (const metaAdAccountId of createdMetaAccountIds.splice(0)) {
+      await query('DELETE FROM meta_campaign_daily_metrics WHERE meta_ad_account_id = $1', [metaAdAccountId]);
+      await query('DELETE FROM meta_sync_runs WHERE meta_ad_account_id = $1', [metaAdAccountId]);
+      await query('DELETE FROM client_meta_accounts WHERE meta_ad_account_id = $1', [metaAdAccountId]);
+    }
     for (const id of createdClientIds.splice(0)) {
       await query('DELETE FROM meta_campaign_daily_metrics WHERE client_id = $1', [id]);
       await query('DELETE FROM meta_sync_runs WHERE client_id = $1', [id]);
@@ -171,6 +177,48 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('POST /api/ingest/meta-metrics (real 
       const json = (await res.json()) as { clientId: string };
       expect(json.clientId).toBe(client.id);
     });
+
+    it('accepts an internal owner without creating a fake client', async () => {
+      const accountId = `act_internal_${rand()}`;
+      createdMetaAccountIds.push(accountId);
+      await createClientMetaAccount({ ownerScope: 'internal', clientId: null, metaAdAccountId: accountId });
+
+      const res = await post({ metaAdAccountId: accountId, rows: [baseRow()] });
+      expect(res.status).toBe(201);
+      expect(await res.json()).toMatchObject({ ownerScope: 'internal', clientId: null, rowsUpserted: 1 });
+
+      const metric = await query(
+        'SELECT client_id, meta_ad_account_id, meta_account_id FROM meta_campaign_daily_metrics WHERE meta_ad_account_id = $1',
+        [accountId],
+      );
+      expect(metric.rows[0]).toMatchObject({ client_id: null, meta_ad_account_id: accountId });
+      expect(metric.rows[0].meta_account_id).toBeTruthy();
+    });
+
+    it('fails the complete batch and marks its run error when no owner covers a metric date', async () => {
+      const accountId = `act_gap_${rand()}`;
+      createdMetaAccountIds.push(accountId);
+      await createClientMetaAccount({
+        ownerScope: 'internal',
+        clientId: null,
+        metaAdAccountId: accountId,
+        validFrom: '2026-07-01',
+      });
+
+      const res = await post({
+        metaAdAccountId: accountId,
+        rows: [
+          baseRow({ metaCampaignId: 'valid-first', date: '2026-08-01' }),
+          baseRow({ metaCampaignId: 'uncovered-second', date: '2026-06-01' }),
+        ],
+      });
+      expect(res.status).toBe(500);
+
+      const metrics = await query('SELECT id FROM meta_campaign_daily_metrics WHERE meta_ad_account_id = $1', [accountId]);
+      expect(metrics.rowCount).toBe(0);
+      const run = await query('SELECT status, rows_upserted, error_message FROM meta_sync_runs WHERE meta_ad_account_id = $1', [accountId]);
+      expect(run.rows[0]).toMatchObject({ status: 'error', rows_upserted: 0, error_message: 'ownership_resolution_failed' });
+    });
   });
 
   describe('idempotent upsert', () => {
@@ -201,6 +249,36 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('POST /api/ingest/meta-metrics (real 
 
       const run = await query('SELECT status, rows_upserted FROM meta_sync_runs WHERE client_id = $1 ORDER BY started_at DESC LIMIT 1', [client.id]);
       expect(run.rows[0]).toMatchObject({ status: 'success', rows_upserted: 2 });
+    });
+
+    it('keeps one canonical fact when an account is transferred and historical days are resynced', async () => {
+      const client = await makeClient();
+      const accountId = `act_transfer_${rand()}`;
+      createdMetaAccountIds.push(accountId);
+      const original = await createClientMetaAccount({
+        ownerScope: 'internal',
+        clientId: null,
+        metaAdAccountId: accountId,
+        validFrom: '2026-01-01',
+      });
+      await post({ metaAdAccountId: accountId, rows: [baseRow({ date: '2026-06-01', spend: 100 })] });
+
+      await updateClientMetaAccount(original.id, { active: false, validTo: '2026-07-01' });
+      await createClientMetaAccount({
+        ownerScope: 'client',
+        clientId: client.id,
+        metaAdAccountId: accountId,
+        validFrom: '2026-07-01',
+      });
+      await post({ metaAdAccountId: accountId, rows: [baseRow({ date: '2026-06-01', spend: 125 })] });
+
+      const metrics = await query(
+        'SELECT client_id, spend FROM meta_campaign_daily_metrics WHERE meta_ad_account_id = $1 AND meta_campaign_id = $2 AND date = $3',
+        [accountId, 'camp-1', '2026-06-01'],
+      );
+      expect(metrics.rowCount).toBe(1);
+      expect(metrics.rows[0].client_id).toBeNull();
+      expect(Number(metrics.rows[0].spend)).toBe(125);
     });
   });
 

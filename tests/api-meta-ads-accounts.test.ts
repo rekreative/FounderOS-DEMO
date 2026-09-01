@@ -9,6 +9,7 @@ const TEST_DATABASE_URL = installTestDatabaseUrl();
 
 describe.runIf(Boolean(TEST_DATABASE_URL))('/api/meta-ads/accounts (real PostgreSQL)', () => {
   const createdClientIds: string[] = [];
+  const createdMetaAccountIds: string[] = [];
   const rand = () => Math.random().toString(36).slice(2);
 
   async function makeClient() {
@@ -26,6 +27,9 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('/api/meta-ads/accounts (real Postgre
   }
 
   afterEach(async () => {
+    for (const metaAdAccountId of createdMetaAccountIds.splice(0)) {
+      await query('DELETE FROM client_meta_accounts WHERE meta_ad_account_id = $1', [metaAdAccountId]);
+    }
     for (const id of createdClientIds.splice(0)) {
       await query('DELETE FROM client_meta_accounts WHERE client_id = $1', [id]);
       await query('DELETE FROM clients WHERE id = $1', [id]);
@@ -55,6 +59,29 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('/api/meta-ads/accounts (real Postgre
     const json = await res.json();
     expect(json.account.clientId).toBe(client.id);
     expect(json.account.label).toBe('Cuenta principal');
+  });
+
+  it('creates and lists an internal mapping without a client row', async () => {
+    const accountId = `act_internal_${rand()}`;
+    createdMetaAccountIds.push(accountId);
+    const created = await post({ ownerScope: 'internal', clientId: null, metaAdAccountId: accountId, label: 'REKREATIVE' });
+    expect(created.status).toBe(201);
+    expect((await created.json()).account).toMatchObject({ ownerScope: 'internal', clientId: null, metaAdAccountId: accountId });
+
+    const response = await list('?ownerScope=internal');
+    const json = await response.json();
+    expect(json.accounts.some((item: { metaAdAccountId: string }) => item.metaAdAccountId === accountId)).toBe(true);
+    expect(json.accounts.every((item: { ownerScope: string }) => item.ownerScope === 'internal')).toBe(true);
+  });
+
+  it('rejects overlapping ownership intervals for the same canonical account', async () => {
+    const client = await makeClient();
+    const accountId = `act_overlap_${rand()}`;
+    createdMetaAccountIds.push(accountId);
+    expect((await post({ ownerScope: 'internal', clientId: null, metaAdAccountId: accountId, validFrom: '2026-01-01' })).status).toBe(201);
+
+    const conflict = await post({ ownerScope: 'client', clientId: client.id, metaAdAccountId: accountId, validFrom: '2026-07-01' });
+    expect(conflict.status).toBe(422);
   });
 
   it('400s on a missing metaAdAccountId', async () => {

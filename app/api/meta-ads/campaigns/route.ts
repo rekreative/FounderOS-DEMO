@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   getLatestSyncRun,
+  getLatestSyncRunByOwnerScope,
   getMetaCampaignSummaries,
   getMetaSpendSummary,
   getMetaSpendSummaryByClient,
@@ -34,6 +35,7 @@ export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const parsed = MetaAdsCampaignsQuerySchema.safeParse({
     clientId: url.searchParams.get('clientId') ?? undefined,
+    ownerScope: url.searchParams.get('ownerScope') ?? undefined,
     preset: url.searchParams.get('preset') ?? undefined,
     start: url.searchParams.get('start') ?? undefined,
     end: url.searchParams.get('end') ?? undefined,
@@ -43,7 +45,7 @@ export async function GET(request: Request): Promise<Response> {
   const auth = await requireClientAccessOrResponse(parsed.data.clientId);
   if ('response' in auth) return auth.response;
 
-  const { clientId, preset, start, end } = parsed.data;
+  const { clientId, ownerScope, preset, start, end } = parsed.data;
   const period = resolveResultsPeriod(preset ?? 'all', start && end ? { start, end } : undefined);
   const dateFrom = period.start ?? undefined;
   const dateTo = period.end ?? undefined;
@@ -67,11 +69,30 @@ export async function GET(request: Request): Promise<Response> {
       });
     }
 
+    if (ownerScope === 'internal') {
+      const [accounts, summary, campaigns, lastSync] = await Promise.all([
+        listClientMetaAccounts(undefined, 'internal'),
+        getMetaSpendSummary({ ownerScope: 'internal', dateFrom, dateTo }),
+        getMetaCampaignSummaries({ ownerScope: 'internal', dateFrom, dateTo }),
+        getLatestSyncRunByOwnerScope('internal'),
+      ]);
+      return NextResponse.json({
+        period,
+        ownerScope,
+        hasAccountMapping: accounts.some((account) => account.active),
+        accounts,
+        summary,
+        campaigns,
+        lastSync,
+        byClient: [],
+      });
+    }
+
     const [accounts, summary, campaigns, lastSync, byClientMap] = await Promise.all([
-      listClientMetaAccounts(),
+      listClientMetaAccounts(undefined, 'client'),
       getMetaSpendSummary({ dateFrom, dateTo }),
       getMetaCampaignSummaries({ dateFrom, dateTo }),
-      getLatestSyncRun(),
+      getLatestSyncRunByOwnerScope('client'),
       getMetaSpendSummaryByClient({ dateFrom, dateTo }),
     ]);
 

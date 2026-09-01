@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { checkMetaIngestAuth, type MetaIngestAuthFailureReason } from '@/lib/server/meta-ingest-auth';
-import { getActiveClientMetaAccountByAdAccountId, recordSyncRun, upsertMetaCampaignDailyMetrics } from '@/lib/server/meta-repo';
+import {
+  getActiveClientMetaAccountByAdAccountId,
+  ingestMetaCampaignDailyMetrics,
+  markMetaSyncRunError,
+  MetaOwnershipResolutionError,
+  recordSyncRun,
+} from '@/lib/server/meta-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { IngestMetaMetricsBodySchema } from '@/lib/server/schemas';
 
@@ -30,14 +36,12 @@ const AUTH_ERROR_MESSAGE: Record<MetaIngestAuthFailureReason, string> = {
  * Auth: see lib/server/meta-ingest-auth.ts — a dedicated INGEST_META_API_KEY,
  * independent of INGEST_API_KEY/MAKE_EVENTS_API_KEY, fails closed.
  *
- * Idempotency: delegates to lib/server/meta-repo.ts's
- * upsertMetaCampaignDailyMetrics — UPSERT on (client_id, meta_campaign_id,
- * date), so a repeated/corrected delivery for the same day overwrites,
- * never duplicates.
+ * Idempotency: the canonical fact key is (meta_ad_account_id,
+ * meta_campaign_id, date). A corrected delivery overwrites the same Meta
+ * fact even if ownership changed since an earlier sync.
  *
- * Every call — including an unmapped-account rejection — is recorded as one
- * meta_sync_runs row, the freshness/failure evidence the global Meta Ads
- * page and ops-status read.
+ * Every authenticated, valid call is recorded as one meta_sync_runs row.
+ * Mapped calls start as running; metrics and success commit together.
  */
 export async function POST(request: Request): Promise<Response> {
   const auth = checkMetaIngestAuth(request);
@@ -61,41 +65,49 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (!account) {
-    await recordSyncRun({
-      clientId: null,
-      startedAt,
-      finishedAt: new Date(),
-      status: 'error',
-      rowsUpserted: 0,
-      errorMessage: `Unmapped or inactive Meta ad account: ${metaAdAccountId}`,
-    });
+    try {
+      await recordSyncRun({
+        clientId: null,
+        metaAdAccountId,
+        metaAccountId: null,
+        startedAt,
+        finishedAt: new Date(),
+        status: 'error',
+        rowsUpserted: 0,
+        errorMessage: 'account_unmapped_or_inactive',
+      });
+    } catch {
+      return unexpectedError('POST /api/ingest/meta-metrics', new Error('sync_run_create_failed'));
+    }
     return jsonError(422, 'unmapped or inactive Meta ad account', { metaAdAccountId });
   }
 
+  let syncRun;
   try {
-    const rowsUpserted = await upsertMetaCampaignDailyMetrics(
-      account.clientId,
-      null,
-      rows.map((row) => ({ ...row, reach: row.reach ?? null })),
-    );
-    await recordSyncRun({
+    syncRun = await recordSyncRun({
       clientId: account.clientId,
+      metaAdAccountId,
+      metaAccountId: account.id,
       startedAt,
-      finishedAt: new Date(),
-      status: 'success',
-      rowsUpserted,
+      finishedAt: null,
+      status: 'running',
+      rowsUpserted: 0,
       errorMessage: null,
     });
-    return NextResponse.json({ ok: true, clientId: account.clientId, rowsUpserted }, { status: 201 });
+  } catch {
+    return unexpectedError('POST /api/ingest/meta-metrics', new Error('sync_run_create_failed'));
+  }
+
+  try {
+    const rowsUpserted = await ingestMetaCampaignDailyMetrics(
+      account,
+      syncRun.id,
+      rows.map((row) => ({ ...row, reach: row.reach ?? null })),
+    );
+    return NextResponse.json({ ok: true, ownerScope: account.ownerScope, clientId: account.clientId, rowsUpserted }, { status: 201 });
   } catch (error) {
-    await recordSyncRun({
-      clientId: account.clientId,
-      startedAt,
-      finishedAt: new Date(),
-      status: 'error',
-      rowsUpserted: 0,
-      errorMessage: error instanceof Error ? error.message : 'unknown error',
-    });
-    return unexpectedError('POST /api/ingest/meta-metrics', error);
+    const category = error instanceof MetaOwnershipResolutionError ? 'ownership_resolution_failed' : 'metric_ingestion_failed';
+    await markMetaSyncRunError(syncRun.id, category).catch(() => undefined);
+    return unexpectedError('POST /api/ingest/meta-metrics', new Error(category));
   }
 }

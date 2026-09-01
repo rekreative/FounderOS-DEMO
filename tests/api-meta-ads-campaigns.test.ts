@@ -1,7 +1,12 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { closePool, query } from '@/lib/server/db';
 import { createClient } from '@/lib/server/clients-repo';
-import { createClientMetaAccount, recordSyncRun, upsertMetaCampaignDailyMetrics } from '@/lib/server/meta-repo';
+import {
+  createClientMetaAccount,
+  ingestMetaCampaignDailyMetrics,
+  recordSyncRun,
+  upsertMetaCampaignDailyMetrics,
+} from '@/lib/server/meta-repo';
 import { GET } from '@/app/api/meta-ads/campaigns/route';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
@@ -9,6 +14,7 @@ const TEST_DATABASE_URL = installTestDatabaseUrl();
 
 describe.runIf(Boolean(TEST_DATABASE_URL))('GET /api/meta-ads/campaigns (real PostgreSQL)', () => {
   const createdClientIds: string[] = [];
+  const createdMetaAccountIds: string[] = [];
   const rand = () => Math.random().toString(36).slice(2);
 
   async function makeClient() {
@@ -26,6 +32,11 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('GET /api/meta-ads/campaigns (real Po
   }
 
   afterEach(async () => {
+    for (const metaAdAccountId of createdMetaAccountIds.splice(0)) {
+      await query('DELETE FROM meta_campaign_daily_metrics WHERE meta_ad_account_id = $1', [metaAdAccountId]);
+      await query('DELETE FROM meta_sync_runs WHERE meta_ad_account_id = $1', [metaAdAccountId]);
+      await query('DELETE FROM client_meta_accounts WHERE meta_ad_account_id = $1', [metaAdAccountId]);
+    }
     for (const id of createdClientIds.splice(0)) {
       await query('DELETE FROM meta_campaign_daily_metrics WHERE client_id = $1', [id]);
       await query('DELETE FROM meta_sync_runs WHERE client_id = $1', [id]);
@@ -128,5 +139,32 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('GET /api/meta-ads/campaigns (real Po
     const rowB = json.byClient.find((r: { clientId: string }) => r.clientId === clientB.id);
     expect(rowA.summary.spend).toBe(100);
     expect(rowB.summary.spend).toBe(200);
+  });
+
+  it('internal reporting is explicit and never leaks into the client portfolio', async () => {
+    const accountId = `act_internal_${rand()}`;
+    createdMetaAccountIds.push(accountId);
+    const account = await createClientMetaAccount({ ownerScope: 'internal', clientId: null, metaAdAccountId: accountId });
+    const run = await recordSyncRun({
+      clientId: null,
+      metaAdAccountId: accountId,
+      metaAccountId: account.id,
+      startedAt: new Date(),
+      finishedAt: null,
+      status: 'running',
+      rowsUpserted: 0,
+      errorMessage: null,
+    });
+    await ingestMetaCampaignDailyMetrics(account, run.id, [
+      { metaCampaignId: 'internal-campaign', campaignName: 'REKREATIVE', status: 'ACTIVE', date: '2026-06-01', spend: 75, impressions: 750, clicks: 25, leads: 3, reach: 600 },
+    ]);
+
+    const internal = await (await get('?ownerScope=internal&preset=all')).json();
+    expect(internal.summary).toMatchObject({ spend: 75, leads: 3 });
+    expect(internal.campaigns[0]).toMatchObject({ metaAdAccountId: accountId, metaCampaignId: 'internal-campaign' });
+
+    const portfolio = await (await get('?preset=all')).json();
+    expect(portfolio.campaigns.some((item: { metaAdAccountId: string | null }) => item.metaAdAccountId === accountId)).toBe(false);
+    expect(portfolio.byClient.some((item: { clientId: string | null }) => item.clientId === null)).toBe(false);
   });
 });

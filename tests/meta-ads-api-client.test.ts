@@ -10,6 +10,7 @@ import { countActiveMetaCampaigns, type MetaCampaignSummary } from '@/lib/api/me
 
 function campaign(overrides: Partial<MetaCampaignSummary> = {}): MetaCampaignSummary {
   return {
+    metaAdAccountId: null,
     metaCampaignId: 'camp-1',
     campaignName: 'Test Campaign',
     status: 'ACTIVE',
