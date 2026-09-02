@@ -29,6 +29,7 @@ describe('shared nav config', () => {
   test('REKREATIVE_PRIMARY holds only REKREATIVE routes, in the sidebar order, in Spanish', () => {
     expect(REKREATIVE_PRIMARY.map((n) => n.href)).toEqual([
       '/',
+      '/business',
       '/clients',
       '/leads',
       '/meta-ads',

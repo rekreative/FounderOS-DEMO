@@ -22,6 +22,7 @@ import {
   LayoutGrid,
   Layers,
   TrendingUp,
+  Building2,
 } from 'lucide-react';
 
 export type NavItem = { href: string; label: string; icon: typeof Home };
@@ -39,6 +40,7 @@ export const NAV_OPERATE: NavItem[] = [
 // REKREATIVE primary menu (visible rail for the agency). Keeps original NAV_* intact for tests and CommandPalette.
 export const REKREATIVE_PRIMARY: NavItem[] = [
   { href: '/', label: 'Inicio', icon: Home },
+  { href: '/business', label: 'REKREATIVE', icon: Building2 },
   { href: '/clients', label: 'Clientes', icon: Users },
   { href: '/leads', label: 'Leads', icon: Filter },
   { href: '/meta-ads', label: 'Meta Ads', icon: LayoutGrid },

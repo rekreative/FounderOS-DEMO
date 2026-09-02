@@ -117,6 +117,7 @@ const PAGES: PageEntry[] = [
   { file: 'reference/page.tsx', load: () => import('@/app/(internal)/reference/page') },
   { file: 'personas/page.tsx', load: () => import('@/app/(internal)/personas/page') },
   // REKREATIVE pages (2026-08-20 QA pass — these were missing from the net entirely).
+  { file: 'business/page.tsx', load: () => import('@/app/(internal)/business/page'), client: true },
   { file: 'clients/page.tsx', load: () => import('@/app/(internal)/clients/page'), client: true },
   { file: 'clients/[clientId]/page.tsx', load: () => import('@/app/(internal)/clients/[clientId]/page'), props: { params: { clientId: 'client-acme' } }, client: true },
   { file: 'clients/[clientId]/results/page.tsx', load: () => import('@/app/(internal)/clients/[clientId]/results/page'), props: { params: { clientId: 'client-acme' } } },
