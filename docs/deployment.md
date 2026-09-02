@@ -215,6 +215,27 @@ failure rolls back the whole metric batch and updates that run to `error`.
 Unmapped or inactive accounts are recorded directly as `error` without
 starting metric ingestion.
 
+### REKREATIVE internal workspace
+
+Migration `0011_internal_business_workspace.sql` adds the internal business
+profile and service catalogue used by `/business`. It creates schema only and
+never seeds business information. Apply it with the normal manual
+`npm run db:migrate` step before deploying the page and API.
+
+The workspace is a singleton identified by `workspace_key = 'rekreative'`.
+It is not a row in `clients` and must never be used as a substitute for a
+client account. Both `GET /api/business` and `PUT /api/business` require an
+authenticated internal user. The profile and complete service payload are
+saved in one PostgreSQL transaction, so a rejected service cannot leave a
+partially updated workspace. Both tables have RLS enabled with zero direct
+access policies.
+
+After deployment, open `/business` while authenticated as the internal
+operator, enter the approved REKREATIVE profile, objectives, acquisition
+channels, tools, service prices, and payment conditions, then save once.
+This explicit operator action is the only supported registration path for
+business data in V1. No Make scenario or startup process writes these rows.
+
 ## Health check vs. readiness check
 
 Liveness and DB readiness are deliberately separate endpoints, because a

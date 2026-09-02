@@ -98,6 +98,10 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
     // Connections/Secrets V1's integration-connections route is the same
     // shape once more (real PostgreSQL only, internal-auth-gated) — full
     // coverage lives in tests/api-integration-connections.test.ts.
+    // REKREATIVE Workspace V1's business route also requires real
+    // PostgreSQL; its schema/guard contract and real repository behavior
+    // live in tests/internal-business-workspace.test.ts and
+    // tests/business-repo.test.ts.
     // ready (Deployment Health V1) is the same shape once more — it pings
     // real PostgreSQL and honestly returns 503 (not 200) when unreachable,
     // which this SQLite-only smoke net can't satisfy by design. Full
@@ -121,6 +125,7 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
       'revenue-records',
       'knowledge-entries',
       'integration-connections',
+      'business',
     ]);
     const discovered = discoverGetRoutes(path.join(process.cwd(), 'app', 'api')).filter((r) => !IGNORE.has(r)).sort();
     const covered = ROUTES.map((r) => r.route).sort();

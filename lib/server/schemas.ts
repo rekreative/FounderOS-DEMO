@@ -12,6 +12,66 @@ import { z } from 'zod';
  */
 
 export const ClientStatusSchema = z.enum(['active', 'paused', 'prospect']);
+
+const BusinessTextItemSchema = z.string().trim().min(1).max(100);
+
+const InternalBusinessProfileBodySchema = z
+  .object({
+    displayName: z.string().trim().min(1).max(120),
+    description: z.string().trim().min(1).max(4000),
+    ownerName: z.string().trim().min(1).max(120),
+    timezone: z.string().trim().min(1).max(100),
+    currency: z.string().trim().regex(/^[A-Z]{3}$/),
+    monthlyRevenueTarget: z.number().finite().nonnegative(),
+    monthlyNewClientsMin: z.number().int().nonnegative(),
+    monthlyNewClientsTarget: z.number().int().nonnegative(),
+    monthlyNewClientsMax: z.number().int().nonnegative(),
+    monthlyLeadsMin: z.number().int().nonnegative(),
+    monthlyLeadsTarget: z.number().int().nonnegative(),
+    monthlyLeadsMax: z.number().int().nonnegative(),
+    monthlyAppointmentsTarget: z.number().int().nonnegative(),
+    acquisitionChannels: z.array(BusinessTextItemSchema).max(20),
+    tools: z.array(BusinessTextItemSchema).max(30),
+    commercialPolicy: z.string().trim().min(1).max(4000),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!(value.monthlyNewClientsMin <= value.monthlyNewClientsTarget && value.monthlyNewClientsTarget <= value.monthlyNewClientsMax)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['monthlyNewClientsTarget'], message: 'new-client targets must be ordered min <= target <= max' });
+    }
+    if (!(value.monthlyLeadsMin <= value.monthlyLeadsTarget && value.monthlyLeadsTarget <= value.monthlyLeadsMax)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['monthlyLeadsTarget'], message: 'lead targets must be ordered min <= target <= max' });
+    }
+  });
+
+const InternalBusinessServiceBodySchema = z
+  .object({
+    id: z.string().trim().min(1).max(160).optional(),
+    name: z.string().trim().min(1).max(160),
+    description: z.string().trim().max(1000).nullable(),
+    price: z.number().finite().nonnegative(),
+    billingType: z.enum(['one_off', 'monthly']),
+    allowTwoPayments: z.boolean(),
+    secondPaymentTrigger: z.string().trim().min(1).max(500).nullable(),
+    active: z.boolean(),
+    sortOrder: z.number().int().nonnegative(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.allowTwoPayments && (value.billingType !== 'one_off' || !value.secondPaymentTrigger)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['secondPaymentTrigger'], message: 'two-payment services require a one-off billing type and a second-payment trigger' });
+    }
+    if (!value.allowTwoPayments && value.secondPaymentTrigger != null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['secondPaymentTrigger'], message: 'a second-payment trigger requires two payments' });
+    }
+  });
+
+export const SaveInternalBusinessWorkspaceBodySchema = z
+  .object({
+    profile: InternalBusinessProfileBodySchema,
+    services: z.array(InternalBusinessServiceBodySchema).max(50),
+  })
+  .strict();
 export const LeadScopeSchema = z.enum(['internal', 'client']);
 export const LeadStageSchema = z.enum([
   'new',

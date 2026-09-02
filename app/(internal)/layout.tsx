@@ -29,6 +29,7 @@ import { AuthError } from '@/lib/server/auth-errors';
 // so ⌘K can never contradict it or resurface a legacy FounderOS route.
 const NAV_COMMAND_KEYWORDS: Record<string, string> = {
   '/': 'inicio dashboard resumen centro de operaciones',
+  '/business': 'rekreative negocio perfil servicios objetivos estrategia',
   '/clients': 'clientes cuentas workspace',
   '/leads': 'leads crm pipeline etapas',
   '/meta-ads': 'meta ads campañas publicidad gasto cpl ctr',

@@ -380,6 +380,7 @@ describe('migration file discovery', () => {
       '0008_integration_connections.sql',
       '0009_sqlite_installations.sql',
       '0010_meta_internal_owner.sql',
+      '0011_internal_business_workspace.sql',
     ]);
   });
 });
