@@ -45,8 +45,19 @@ function initialCustomRange(): { start: string; end: string } {
 }
 
 const STATUS_TONE: Record<string, BadgeTone> = { active: 'ok', paused: 'default', ended: 'default', archived: 'default' };
+const STATUS_LABEL: Record<string, string> = {
+  active: 'Activa',
+  paused: 'Pausada',
+  ended: 'Finalizada',
+  archived: 'Archivada',
+};
 const SYNC_TONE: Record<MetaSyncRunStatus, BadgeTone> = { running: 'warn', success: 'ok', partial: 'warn', error: 'err' };
 const SYNC_LABEL: Record<MetaSyncRunStatus, string> = { running: 'En curso', success: 'Correcta', partial: 'Parcial', error: 'Error' };
+
+function campaignStatusLabel(status: string): string {
+  const normalized = status.trim().toLowerCase();
+  return STATUS_LABEL[normalized] ?? status;
+}
 
 export default function MetaAdsPage() {
   const { clients } = useClientsRegistry();
@@ -180,7 +191,10 @@ export default function MetaAdsPage() {
       {visibleSyncs.length > 0 && (
         <section className="mb-4 border border-os-border bg-os-surface">
           <div className="border-b border-os-border px-3 py-2 font-mono text-[9px] uppercase tracking-[0.18em] text-os-dim">Sincronización por cuenta</div>
-          <div className="grid gap-px bg-os-border sm:grid-cols-2 xl:grid-cols-3">
+          <div
+            className="grid gap-px bg-os-border"
+            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))' }}
+          >
             {visibleSyncs.map((item) => (
               <div key={item.metaAccountId} className="min-w-0 bg-os-surface px-3 py-3">
                 <div className="flex items-start justify-between gap-2"><div className="min-w-0"><div className="truncate text-[12px] font-semibold text-os-text">{item.label || item.metaAdAccountId}</div><div className="mt-1 font-mono text-[9px] text-os-dim">{formatRelativeSync(item.lastSync?.finishedAt ?? item.lastSync?.startedAt ?? null)}</div></div>{item.lastSync ? <Badge tone={SYNC_TONE[item.lastSync.status]}>{SYNC_LABEL[item.lastSync.status]}</Badge> : <Badge tone="default">Sin datos</Badge>}</div>
@@ -202,7 +216,7 @@ export default function MetaAdsPage() {
             {loading ? <tr><td colSpan={10} className="px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">Cargando…</td></tr>
               : error ? <tr><td colSpan={10} className="px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">Informe no disponible.</td></tr>
                 : !data || data.campaigns.length === 0 ? <tr><td colSpan={10} className="px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">{emptyCampaignMessage}</td></tr>
-                  : data.campaigns.map((campaign) => <tr key={`${campaign.metaAdAccountId ?? 'legacy'}:${campaign.metaCampaignId}`} className="border-t border-os-border"><td className="max-w-[280px] break-words px-3 py-3 text-[13px] font-semibold text-os-text">{campaign.campaignName}</td><td className="px-3 py-3"><Badge tone={STATUS_TONE[campaign.status.trim().toLowerCase()] ?? 'default'}>{campaign.status}</Badge></td><td className="px-3 py-3 font-mono text-[10.5px] text-os-text">{formatCurrency(campaign.spend)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-muted">{formatNumber(campaign.impressions)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-muted">{campaign.reach == null ? '—' : formatNumber(campaign.reach)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-muted">{formatNumber(campaign.clicks)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-muted">{formatPercent(campaign.ctr)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-muted">{formatMoneyRate(campaign.cpc)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-text">{formatNumber(campaign.leads)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-text">{formatMoneyRate(campaign.cpl)}</td></tr>)}
+                  : data.campaigns.map((campaign) => <tr key={`${campaign.metaAdAccountId ?? 'legacy'}:${campaign.metaCampaignId}`} className="border-t border-os-border"><td className="max-w-[280px] break-words px-3 py-3 text-[13px] font-semibold text-os-text">{campaign.campaignName}</td><td className="px-3 py-3"><Badge tone={STATUS_TONE[campaign.status.trim().toLowerCase()] ?? 'default'}>{campaignStatusLabel(campaign.status)}</Badge></td><td className="px-3 py-3 font-mono text-[10.5px] text-os-text">{formatCurrency(campaign.spend)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-muted">{formatNumber(campaign.impressions)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-muted">{campaign.reach == null ? '—' : formatNumber(campaign.reach)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-muted">{formatNumber(campaign.clicks)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-muted">{formatPercent(campaign.ctr)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-muted">{formatMoneyRate(campaign.cpc)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-text">{formatNumber(campaign.leads)}</td><td className="px-3 py-3 font-mono text-[10.5px] text-os-text">{formatMoneyRate(campaign.cpl)}</td></tr>)}
           </tbody>
         </table>
       </div>

@@ -45,4 +45,10 @@ describe('Meta Ads Reporting V1 contract', () => {
     expect(page).toContain('No hay datos en el periodo seleccionado.');
     expect(page).toContain('todavía no tiene métricas sincronizadas.');
   });
+
+  it('fills the sync grid responsively and presents known campaign statuses in Spanish', () => {
+    expect(page).toContain("repeat(auto-fit, minmax(min(100%, 260px), 1fr))");
+    expect(page).toContain("paused: 'Pausada'");
+    expect(page).toContain('campaignStatusLabel(campaign.status)');
+  });
 });
