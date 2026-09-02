@@ -102,6 +102,7 @@ export type MetaCampaignSummary = {
   leads: number;
   reach: number | null;
   ctr: number | null;
+  cpc: number | null;
   cpl: number | null;
 };
 
@@ -112,7 +113,15 @@ export type MetaSpendSummary = {
   leads: number;
   reach: number | null;
   ctr: number | null;
+  cpc: number | null;
   cpl: number | null;
+};
+
+export type MetaAccountSync = {
+  metaAccountId: string;
+  metaAdAccountId: string;
+  label: string | null;
+  lastSync: MetaSyncRun | null;
 };
 
 export type MetaAdsCampaignsResponse = {
@@ -122,10 +131,14 @@ export type MetaAdsCampaignsResponse = {
    *  no configurado" from "configurado, sin datos sincronizados todavía"
    *  even though `summary` is null in both cases. */
   hasAccountMapping: boolean;
+  /** Any historical metric in the current owner/account scope, ignoring the
+   * selected date window. Enables an honest period-empty UI state. */
+  hasAnyMetrics: boolean;
   accounts: ClientMetaAccount[];
   summary: MetaSpendSummary | null;
   campaigns: MetaCampaignSummary[];
   lastSync: MetaSyncRun | null;
+  accountSyncs: MetaAccountSync[];
   /** Populated only for the unscoped (global) call. */
   byClient: { clientId: string; summary: MetaSpendSummary }[];
 };
@@ -133,6 +146,7 @@ export type MetaAdsCampaignsResponse = {
 export type GetMetaAdsCampaignsOptions = {
   clientId?: string;
   ownerScope?: 'internal' | 'client';
+  metaAdAccountId?: string;
   preset?: ResultsPeriodPreset;
   start?: string;
   end?: string;
@@ -160,6 +174,7 @@ export async function getMetaAdsCampaigns(options: GetMetaAdsCampaignsOptions = 
   const params = new URLSearchParams();
   if (options.clientId) params.set('clientId', options.clientId);
   if (options.ownerScope) params.set('ownerScope', options.ownerScope);
+  if (options.metaAdAccountId) params.set('metaAdAccountId', options.metaAdAccountId);
   if (options.preset) params.set('preset', options.preset);
   if (options.start) params.set('start', options.start);
   if (options.end) params.set('end', options.end);

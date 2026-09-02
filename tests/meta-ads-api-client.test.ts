@@ -20,6 +20,7 @@ function campaign(overrides: Partial<MetaCampaignSummary> = {}): MetaCampaignSum
     leads: 0,
     reach: null,
     ctr: null,
+    cpc: null,
     cpl: null,
     ...overrides,
   };

@@ -2,10 +2,14 @@ import { NextResponse } from 'next/server';
 import {
   getLatestSyncRun,
   getLatestSyncRunByOwnerScope,
+  getLatestSyncRunsByMetaAccountIds,
   getMetaCampaignSummaries,
   getMetaSpendSummary,
   getMetaSpendSummaryByClient,
+  hasMetaMetrics,
   listClientMetaAccounts,
+  type ClientMetaAccount,
+  type MetaSyncRun,
 } from '@/lib/server/meta-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { MetaAdsCampaignsQuerySchema } from '@/lib/server/schemas';
@@ -13,6 +17,24 @@ import { resolveResultsPeriod } from '@/lib/server/results-time';
 import { requireClientAccessOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
+
+function activeAccounts(accounts: ClientMetaAccount[]): ClientMetaAccount[] {
+  return accounts.filter((account) => account.active);
+}
+
+function selectedAccountOrNull(accounts: ClientMetaAccount[], metaAdAccountId?: string): ClientMetaAccount | null {
+  if (!metaAdAccountId) return null;
+  return activeAccounts(accounts).find((account) => account.metaAdAccountId === metaAdAccountId) ?? null;
+}
+
+function accountSyncPayload(accounts: ClientMetaAccount[], latestByMapping: Map<string, MetaSyncRun>) {
+  return activeAccounts(accounts).map((account) => ({
+    metaAccountId: account.id,
+    metaAdAccountId: account.metaAdAccountId,
+    label: account.label,
+    lastSync: latestByMapping.get(account.id) ?? null,
+  }));
+}
 
 /**
  * GET /api/meta-ads/campaigns
@@ -36,6 +58,7 @@ export async function GET(request: Request): Promise<Response> {
   const parsed = MetaAdsCampaignsQuerySchema.safeParse({
     clientId: url.searchParams.get('clientId') ?? undefined,
     ownerScope: url.searchParams.get('ownerScope') ?? undefined,
+    metaAdAccountId: url.searchParams.get('metaAdAccountId') ?? undefined,
     preset: url.searchParams.get('preset') ?? undefined,
     start: url.searchParams.get('start') ?? undefined,
     end: url.searchParams.get('end') ?? undefined,
@@ -45,55 +68,76 @@ export async function GET(request: Request): Promise<Response> {
   const auth = await requireClientAccessOrResponse(parsed.data.clientId);
   if ('response' in auth) return auth.response;
 
-  const { clientId, ownerScope, preset, start, end } = parsed.data;
+  const { clientId, ownerScope, metaAdAccountId, preset, start, end } = parsed.data;
   const period = resolveResultsPeriod(preset ?? 'all', start && end ? { start, end } : undefined);
   const dateFrom = period.start ?? undefined;
   const dateTo = period.end ?? undefined;
 
   try {
     if (clientId) {
-      const [accounts, summary, campaigns, lastSync] = await Promise.all([
-        listClientMetaAccounts(clientId),
-        getMetaSpendSummary({ clientId, dateFrom, dateTo }),
-        getMetaCampaignSummaries({ clientId, dateFrom, dateTo }),
+      const accounts = await listClientMetaAccounts(clientId);
+      const selectedAccount = selectedAccountOrNull(accounts, metaAdAccountId);
+      if (metaAdAccountId && !selectedAccount) return jsonError(404, 'Meta account not found');
+      const scope = { clientId, metaAdAccountId, dateFrom, dateTo };
+      const [summary, campaigns, latestOverall, latestByMapping, hasAnyMetrics] = await Promise.all([
+        getMetaSpendSummary(scope),
+        getMetaCampaignSummaries(scope),
         getLatestSyncRun(clientId),
+        getLatestSyncRunsByMetaAccountIds(activeAccounts(accounts).map((account) => account.id)),
+        hasMetaMetrics({ clientId, metaAdAccountId }),
       ]);
+      const accountSyncs = accountSyncPayload(accounts, latestByMapping);
       return NextResponse.json({
         period,
         hasAccountMapping: accounts.some((account) => account.active),
+        hasAnyMetrics,
         accounts,
         summary,
         campaigns,
-        lastSync,
+        lastSync: selectedAccount ? latestByMapping.get(selectedAccount.id) ?? null : latestOverall,
+        accountSyncs,
         byClient: [],
       });
     }
 
     if (ownerScope === 'internal') {
-      const [accounts, summary, campaigns, lastSync] = await Promise.all([
-        listClientMetaAccounts(undefined, 'internal'),
-        getMetaSpendSummary({ ownerScope: 'internal', dateFrom, dateTo }),
-        getMetaCampaignSummaries({ ownerScope: 'internal', dateFrom, dateTo }),
+      const accounts = await listClientMetaAccounts(undefined, 'internal');
+      const selectedAccount = selectedAccountOrNull(accounts, metaAdAccountId);
+      if (metaAdAccountId && !selectedAccount) return jsonError(404, 'Meta account not found');
+      const scope = { ownerScope: 'internal' as const, metaAdAccountId, dateFrom, dateTo };
+      const [summary, campaigns, latestOverall, latestByMapping, hasAnyMetrics] = await Promise.all([
+        getMetaSpendSummary(scope),
+        getMetaCampaignSummaries(scope),
         getLatestSyncRunByOwnerScope('internal'),
+        getLatestSyncRunsByMetaAccountIds(activeAccounts(accounts).map((account) => account.id)),
+        hasMetaMetrics({ ownerScope: 'internal', metaAdAccountId }),
       ]);
+      const accountSyncs = accountSyncPayload(accounts, latestByMapping);
       return NextResponse.json({
         period,
         ownerScope,
         hasAccountMapping: accounts.some((account) => account.active),
+        hasAnyMetrics,
         accounts,
         summary,
         campaigns,
-        lastSync,
+        lastSync: selectedAccount ? latestByMapping.get(selectedAccount.id) ?? null : latestOverall,
+        accountSyncs,
         byClient: [],
       });
     }
 
-    const [accounts, summary, campaigns, lastSync, byClientMap] = await Promise.all([
-      listClientMetaAccounts(undefined, 'client'),
-      getMetaSpendSummary({ dateFrom, dateTo }),
-      getMetaCampaignSummaries({ dateFrom, dateTo }),
+    const accounts = await listClientMetaAccounts(undefined, 'client');
+    const selectedAccount = selectedAccountOrNull(accounts, metaAdAccountId);
+    if (metaAdAccountId && !selectedAccount) return jsonError(404, 'Meta account not found');
+    const scope = { metaAdAccountId, dateFrom, dateTo };
+    const [summary, campaigns, latestOverall, byClientMap, latestByMapping, hasAnyMetrics] = await Promise.all([
+      getMetaSpendSummary(scope),
+      getMetaCampaignSummaries(scope),
       getLatestSyncRunByOwnerScope('client'),
-      getMetaSpendSummaryByClient({ dateFrom, dateTo }),
+      getMetaSpendSummaryByClient(scope),
+      getLatestSyncRunsByMetaAccountIds(activeAccounts(accounts).map((account) => account.id)),
+      hasMetaMetrics({ metaAdAccountId }),
     ]);
 
     const byClient = [...byClientMap.entries()].map(([id, clientSummary]) => ({ clientId: id, summary: clientSummary }));
@@ -101,10 +145,12 @@ export async function GET(request: Request): Promise<Response> {
     return NextResponse.json({
       period,
       hasAccountMapping: accounts.some((account) => account.active),
+      hasAnyMetrics,
       accounts,
       summary,
       campaigns,
-      lastSync,
+      lastSync: selectedAccount ? latestByMapping.get(selectedAccount.id) ?? null : latestOverall,
+      accountSyncs: accountSyncPayload(accounts, latestByMapping),
       byClient,
     });
   } catch (error) {

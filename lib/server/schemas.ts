@@ -464,6 +464,7 @@ export const MetaAdsCampaignsQuerySchema = z
   .object({
     clientId: z.string().trim().min(1).optional(),
     ownerScope: MetaAccountOwnerScopeSchema.optional(),
+    metaAdAccountId: z.string().trim().min(1).optional(),
     preset: ResultsPeriodPresetSchema.optional(),
     start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'start must be YYYY-MM-DD').optional(),
     end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'end must be YYYY-MM-DD').optional(),
@@ -472,6 +473,18 @@ export const MetaAdsCampaignsQuerySchema = z
   .superRefine((value, ctx) => {
     if (value.ownerScope === 'internal' && value.clientId) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['clientId'], message: 'clientId is not valid for internal Meta reporting' });
+    }
+    if ((value.start && !value.end) || (!value.start && value.end)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['start'], message: 'start and end must be provided together' });
+    }
+    if (value.preset === 'custom' && (!value.start || !value.end)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['preset'], message: 'custom preset requires start and end' });
+    }
+    if ((value.start || value.end) && value.preset !== 'custom') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['preset'], message: 'start and end require the custom preset' });
+    }
+    if (value.start && value.end && value.end < value.start) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['end'], message: 'end must not be before start' });
     }
   });
 
