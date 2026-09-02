@@ -313,6 +313,21 @@ export async function getLatestSyncRunByOwnerScope(ownerScope: 'internal' | 'cli
   return result.rowCount === 0 ? null : rowToSyncRun(result.rows[0]);
 }
 
+/** Latest durable ingestion state for every concrete ownership mapping.
+ * The caller supplies already-authorized mapping ids, so account-level
+ * reporting never resolves a raw Meta account id outside its owner scope. */
+export async function getLatestSyncRunsByMetaAccountIds(metaAccountIds: string[]): Promise<Map<string, MetaSyncRun>> {
+  if (metaAccountIds.length === 0) return new Map();
+  const result = await query<MetaSyncRunRow>(
+    `SELECT DISTINCT ON (meta_account_id) *
+     FROM meta_sync_runs
+     WHERE meta_account_id = ANY($1::text[])
+     ORDER BY meta_account_id, started_at DESC`,
+    [metaAccountIds],
+  );
+  return new Map(result.rows.map((row) => [row.meta_account_id as string, rowToSyncRun(row)]));
+}
+
 export async function listRecentSyncRuns(clientId?: string, limit = 10): Promise<MetaSyncRun[]> {
   const result = clientId
     ? await query<MetaSyncRunRow>('SELECT * FROM meta_sync_runs WHERE client_id = $1 ORDER BY started_at DESC LIMIT $2', [clientId, limit])
@@ -483,6 +498,7 @@ export type MetaCampaignSummary = {
   leads: number;
   reach: number | null;
   ctr: number | null;
+  cpc: number | null;
   cpl: number | null;
 };
 
@@ -493,12 +509,16 @@ export type MetaSpendSummary = {
   leads: number;
   reach: number | null;
   ctr: number | null;
+  cpc: number | null;
   cpl: number | null;
 };
 
 export type MetaReportingQuery = {
   clientId?: string;
   ownerScope?: 'internal' | 'client';
+  /** Canonical Meta account filter. It is always combined with clientId or
+   * ownerScope by buildReportingWhere, never treated as authorization. */
+  metaAdAccountId?: string;
   /** Inclusive YYYY-MM-DD lower bound on `date` (a plain calendar date, same
    *  as lib/server/results-time.ts's ResolvedResultsPeriod.start — never a
    *  UTC instant, so no timezone-shift risk comparing against it). Omitted
@@ -524,6 +544,10 @@ function buildReportingWhere(opts: MetaReportingQuery): { where: string; params:
     // The unscoped dashboard remains the client portfolio. Internal agency
     // metrics are visible only when explicitly requested.
     conditions.push('client_id IS NOT NULL');
+  }
+  if (opts.metaAdAccountId) {
+    params.push(opts.metaAdAccountId);
+    conditions.push(`meta_ad_account_id = $${params.length}`);
   }
   if (opts.dateFrom) {
     params.push(opts.dateFrom);
@@ -585,6 +609,7 @@ export async function getMetaCampaignSummaries(opts: MetaReportingQuery = {}): P
       leads,
       reach: row.reach == null ? null : Number(row.reach),
       ctr: nullOnZero(clicks, impressions),
+      cpc: nullOnZero(spend, clicks),
       cpl: nullOnZero(spend, leads),
     };
   });
@@ -616,8 +641,22 @@ export async function getMetaSpendSummary(opts: MetaReportingQuery = {}): Promis
     leads,
     reach: row.reach == null ? null : Number(row.reach),
     ctr: nullOnZero(clicks, impressions),
+    cpc: nullOnZero(spend, clicks),
     cpl: nullOnZero(spend, leads),
   };
+}
+
+/** Distinguishes "this account has never produced a metric" from "it has
+ * history, but none inside the selected period" without fabricating zeros. */
+export async function hasMetaMetrics(opts: Omit<MetaReportingQuery, 'dateFrom' | 'dateTo'> = {}): Promise<boolean> {
+  const { where, params } = buildReportingWhere(opts);
+  const result = await query<{ exists: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM meta_campaign_daily_metrics ${where} LIMIT 1
+     ) AS exists`,
+    params,
+  );
+  return result.rows[0]?.exists === true;
 }
 
 /** Per-client spend summaries for the global Meta Ads page's per-client
@@ -650,6 +689,7 @@ export async function getMetaSpendSummaryByClient(
       leads,
       reach: row.reach == null ? null : Number(row.reach),
       ctr: nullOnZero(clicks, impressions),
+      cpc: nullOnZero(spend, clicks),
       cpl: nullOnZero(spend, leads),
     });
   }

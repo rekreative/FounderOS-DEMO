@@ -63,6 +63,8 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('GET /api/meta-ads/campaigns (real Po
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.hasAccountMapping).toBe(false);
+    expect(json.hasAnyMetrics).toBe(false);
+    expect(json.accountSyncs).toEqual([]);
     expect(json.summary).toBeNull();
     expect(json.campaigns).toEqual([]);
     expect(json.lastSync).toBeNull();
@@ -75,6 +77,7 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('GET /api/meta-ads/campaigns (real Po
     const res = await get(`?clientId=${client.id}&preset=all`);
     const json = await res.json();
     expect(json.hasAccountMapping).toBe(true);
+    expect(json.hasAnyMetrics).toBe(false);
     expect(json.summary).toBeNull();
   });
 
@@ -105,6 +108,8 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('GET /api/meta-ads/campaigns (real Po
     const res = await get(`?clientId=${client.id}&preset=all`);
     const json = await res.json();
     expect(json.summary).toMatchObject({ spend: 150, impressions: 3000, clicks: 90, leads: 12 });
+    expect(json.summary.cpc).toBeCloseTo(150 / 90);
+    expect(json.hasAnyMetrics).toBe(true);
     expect(json.campaigns).toHaveLength(1);
     expect(json.campaigns[0]).toMatchObject({ metaCampaignId: 'camp-1', campaignName: 'Real Campaign', spend: 150 });
   });
@@ -166,5 +171,40 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('GET /api/meta-ads/campaigns (real Po
     const portfolio = await (await get('?preset=all')).json();
     expect(portfolio.campaigns.some((item: { metaAdAccountId: string | null }) => item.metaAdAccountId === accountId)).toBe(false);
     expect(portfolio.byClient.some((item: { clientId: string | null }) => item.clientId === null)).toBe(false);
+  });
+
+  it('filters one authorized account and keeps the same campaign id independent across accounts', async () => {
+    const accountIdA = `act_internal_a_${rand()}`;
+    const accountIdB = `act_internal_b_${rand()}`;
+    createdMetaAccountIds.push(accountIdA, accountIdB);
+    const accountA = await createClientMetaAccount({ ownerScope: 'internal', clientId: null, metaAdAccountId: accountIdA, label: 'Internal A' });
+    const accountB = await createClientMetaAccount({ ownerScope: 'internal', clientId: null, metaAdAccountId: accountIdB, label: 'Internal B' });
+
+    for (const [account, spend] of [[accountA, 10], [accountB, 20]] as const) {
+      const run = await recordSyncRun({
+        clientId: null,
+        metaAdAccountId: account.metaAdAccountId,
+        metaAccountId: account.id,
+        startedAt: new Date(),
+        finishedAt: null,
+        status: 'running',
+        rowsUpserted: 0,
+        errorMessage: null,
+      });
+      await ingestMetaCampaignDailyMetrics(account, run.id, [
+        { metaCampaignId: 'shared-campaign-id', campaignName: account.label ?? 'Campaign', status: 'ACTIVE', date: '2026-06-01', spend, impressions: 100, clicks: 10, leads: 1, reach: 80 },
+      ]);
+    }
+
+    const all = await (await get('?ownerScope=internal&preset=all')).json();
+    expect(all.campaigns.filter((item: { metaCampaignId: string }) => item.metaCampaignId === 'shared-campaign-id')).toHaveLength(2);
+    expect(all.summary.spend).toBe(30);
+    expect(all.accountSyncs).toHaveLength(2);
+
+    const selected = await (await get(`?ownerScope=internal&metaAdAccountId=${accountIdA}&preset=all`)).json();
+    expect(selected.campaigns).toHaveLength(1);
+    expect(selected.campaigns[0]).toMatchObject({ metaAdAccountId: accountIdA, spend: 10 });
+    expect(selected.summary.spend).toBe(10);
+    expect(selected.lastSync).toMatchObject({ status: 'success', rowsUpserted: 1 });
   });
 });

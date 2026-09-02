@@ -76,7 +76,9 @@ const getMetaSpendSummary = vi.fn();
 const getMetaCampaignSummaries = vi.fn();
 const getLatestSyncRun = vi.fn();
 const getLatestSyncRunByOwnerScope = vi.fn();
+const getLatestSyncRunsByMetaAccountIds = vi.fn();
 const getMetaSpendSummaryByClient = vi.fn();
+const hasMetaMetrics = vi.fn();
 vi.mock('@/lib/server/meta-repo', () => ({
   listClientMetaAccounts: (...args: unknown[]) => listClientMetaAccounts(...args),
   createClientMetaAccount: (...args: unknown[]) => createClientMetaAccount(...args),
@@ -84,7 +86,9 @@ vi.mock('@/lib/server/meta-repo', () => ({
   getMetaCampaignSummaries: (...args: unknown[]) => getMetaCampaignSummaries(...args),
   getLatestSyncRun: (...args: unknown[]) => getLatestSyncRun(...args),
   getLatestSyncRunByOwnerScope: (...args: unknown[]) => getLatestSyncRunByOwnerScope(...args),
+  getLatestSyncRunsByMetaAccountIds: (...args: unknown[]) => getLatestSyncRunsByMetaAccountIds(...args),
   getMetaSpendSummaryByClient: (...args: unknown[]) => getMetaSpendSummaryByClient(...args),
+  hasMetaMetrics: (...args: unknown[]) => hasMetaMetrics(...args),
 }));
 
 const getClientOpsSnapshot = vi.fn();
@@ -126,7 +130,9 @@ beforeEach(() => {
   getMetaCampaignSummaries.mockResolvedValue([]);
   getLatestSyncRun.mockResolvedValue(null);
   getLatestSyncRunByOwnerScope.mockResolvedValue(null);
+  getLatestSyncRunsByMetaAccountIds.mockResolvedValue(new Map());
   getMetaSpendSummaryByClient.mockResolvedValue(new Map());
+  hasMetaMetrics.mockResolvedValue(false);
   getClientOpsSnapshot.mockResolvedValue({ automations: [], agents: [] });
 });
 
@@ -388,6 +394,15 @@ describe('GET /api/meta-ads/campaigns — aggregate never falls through to the g
     asClient(false);
     const res = await get('?clientId=client-other');
     expect(res.status).toBe(403);
+  });
+
+  it('client cannot select an account outside the authorized client scope', async () => {
+    asClient(true);
+    listClientMetaAccounts.mockResolvedValue([{ id: 'mapping-a', metaAdAccountId: 'act_a', active: true }]);
+    const res = await get('?clientId=client-acme&metaAdAccountId=act_b');
+    expect(res.status).toBe(404);
+    expect(getMetaSpendSummary).not.toHaveBeenCalled();
+    expect(getMetaCampaignSummaries).not.toHaveBeenCalled();
   });
 
   it('internal + ownerScope=internal returns only internal reporting', async () => {

@@ -276,7 +276,7 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/meta-repo (real PostgreSQ
       expect(await getMetaCampaignSummaries({ clientId: client.id })).toEqual([]);
     });
 
-    it('aggregates daily rows into a period spend summary with null-safe CTR/CPL', async () => {
+    it('aggregates daily rows into a period summary with null-safe CTR/CPC/CPL', async () => {
       const client = await makeClient();
       await upsertMetaCampaignDailyMetrics(client.id, null, [
         { metaCampaignId: 'camp-1', campaignName: 'Camp 1', status: 'active', date: '2026-06-01', spend: 100, impressions: 1000, clicks: 50, leads: 5, reach: 800 },
@@ -287,13 +287,16 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/meta-repo (real PostgreSQ
       const summary = await getMetaSpendSummary({ clientId: client.id });
       expect(summary).toMatchObject({ spend: 250, impressions: 2500, clicks: 100, leads: 10 });
       expect(summary?.ctr).toBeCloseTo(100 / 2500);
+      expect(summary?.cpc).toBeCloseTo(2.5);
       expect(summary?.cpl).toBeCloseTo(25);
+      expect(summary?.reach).toBe(1600); // additive daily reach, explicitly labelled as such in the UI
 
       const campaigns = await getMetaCampaignSummaries({ clientId: client.id });
       const camp1 = campaigns.find((c) => c.metaCampaignId === 'camp-1');
       const camp2 = campaigns.find((c) => c.metaCampaignId === 'camp-2');
       expect(camp1).toMatchObject({ spend: 200, impressions: 2000, clicks: 100, leads: 10 });
       expect(camp2?.cpl).toBeNull(); // zero leads (the denominator) -> null, never a fabricated 0
+      expect(camp2?.cpc).toBeNull(); // zero clicks -> unknown CPC, never infinity or a fabricated 0
       expect(camp2?.ctr).toBe(0); // zero clicks over nonzero impressions IS a real 0% CTR, not "unknown"
     });
 
