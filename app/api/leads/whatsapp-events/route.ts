@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import { checkMakeEventsAuth, type MakeEventsAuthFailureReason } from '@/lib/server/make-events-auth';
-import { LeadNotFoundError, appendWhatsAppEvent } from '@/lib/server/leads-repo';
+import {
+  AmbiguousWhatsAppLeadError,
+  LeadNotFoundError,
+  UnmappedWhatsAppBusinessNumberError,
+  WhatsAppIdempotencyConflictError,
+  WhatsAppWabaMismatchError,
+  appendWhatsAppEvent,
+} from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { WhatsAppEventBodySchema } from '@/lib/server/schemas';
 import type { LeadEventSource } from '@/lib/leads';
@@ -46,9 +53,9 @@ const DEFAULT_SUMMARY: Record<WhatsAppEventType, string> = {
  * both directions (see the WhatsApp + Lead Lifecycle V1 architecture note):
  *  - outbound: Make sent a message it initiated — addresses the lead by
  *    `leadId`, which Make already has from POST /api/ingest/leads' response.
- *  - inbound: Make relays a delivery receipt or reply from the WhatsApp
- *    Business Cloud webhook it owns — addresses the lead by
- *    `whatsappNumber`, since that's all Make's webhook gives it.
+ *  - inbound: Make relays a reply from WhatsApp Business Cloud with both
+ *    the sender `whatsappNumber` and destination `phoneNumberId`. REKREOS
+ *    resolves ownership from the destination before matching the sender.
  *
  * REKREATIVE OS stays the source of truth for Lead/LeadEvent state; Make
  * stays the orchestration layer. This route deliberately does not receive
@@ -69,15 +76,28 @@ export async function POST(request: Request): Promise<Response> {
   const summary = body.summary ?? DEFAULT_SUMMARY[body.type];
 
   try {
-    const result = await appendWhatsAppEvent({
-      ...('leadId' in body ? { leadId: body.leadId } : { whatsappNumber: body.whatsappNumber }),
-      type: body.type,
-      source,
-      externalEventId: body.externalEventId,
-      summary,
-      details: body.details ?? null,
-      occurredAt: body.occurredAt,
-    });
+    const result =
+      body.type === 'lead_replied'
+        ? await appendWhatsAppEvent({
+            type: body.type,
+            whatsappNumber: body.whatsappNumber,
+            phoneNumberId: body.phoneNumberId,
+            wabaId: body.wabaId,
+            source,
+            externalEventId: body.externalEventId,
+            summary,
+            details: body.details ?? null,
+            occurredAt: body.occurredAt,
+          })
+        : await appendWhatsAppEvent({
+            type: body.type,
+            leadId: body.leadId,
+            source,
+            externalEventId: body.externalEventId,
+            summary,
+            details: body.details ?? null,
+            occurredAt: body.occurredAt,
+          });
 
     if (!result.matched) {
       // Unmatched WhatsApp number: a safe no-op for Make, never fabricated
@@ -86,7 +106,7 @@ export async function POST(request: Request): Promise<Response> {
       console.warn(
         `[api] POST /api/leads/whatsapp-events: no lead matched the given whatsappNumber for type=${body.type}`,
       );
-      return NextResponse.json({ ok: true, matched: false });
+      return NextResponse.json({ ok: true, matched: false, reason: 'lead_not_found' });
     }
 
     return NextResponse.json(
@@ -95,6 +115,12 @@ export async function POST(request: Request): Promise<Response> {
     );
   } catch (error) {
     if (error instanceof LeadNotFoundError) return jsonError(404, 'lead not found');
+    if (error instanceof UnmappedWhatsAppBusinessNumberError) {
+      return jsonError(422, 'unmapped or inactive WhatsApp business number');
+    }
+    if (error instanceof WhatsAppWabaMismatchError) return jsonError(422, 'WhatsApp account mismatch');
+    if (error instanceof AmbiguousWhatsAppLeadError) return jsonError(409, 'ambiguous WhatsApp lead match');
+    if (error instanceof WhatsAppIdempotencyConflictError) return jsonError(409, 'WhatsApp message ownership conflict');
     return unexpectedError('POST /api/leads/whatsapp-events', error);
   }
 }

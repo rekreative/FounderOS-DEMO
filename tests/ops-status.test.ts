@@ -3,6 +3,7 @@ import { closePool, query } from '@/lib/server/db';
 import { createClient } from '@/lib/server/clients-repo';
 import { appendCommercialEvent, appendWhatsAppEvent, createLead, ingestLeadTransactional } from '@/lib/server/leads-repo';
 import { createClientMetaAccount, recordSyncRun } from '@/lib/server/meta-repo';
+import { createWhatsAppBusinessNumber } from '@/lib/server/whatsapp-repo';
 import { getClientOpsSnapshot, getOpsSnapshot } from '@/lib/server/ops-status';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
@@ -16,6 +17,7 @@ const TEST_DATABASE_URL = installTestDatabaseUrl();
 describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/ops-status (real PostgreSQL)', () => {
   const createdClientIds: string[] = [];
   const createdLeadIds: string[] = [];
+  const createdWhatsAppNumberIds: string[] = [];
 
   async function makeClient(overrides: Partial<Parameters<typeof createClient>[0]> = {}) {
     const client = await createClient({
@@ -37,6 +39,9 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/ops-status (real PostgreS
     if (leadIds.length > 0) {
       await query('DELETE FROM lead_events WHERE lead_id = ANY($1)', [leadIds]);
       await query('DELETE FROM leads WHERE id = ANY($1)', [leadIds]);
+    }
+    if (createdWhatsAppNumberIds.length > 0) {
+      await query('DELETE FROM whatsapp_business_numbers WHERE id = ANY($1)', [createdWhatsAppNumberIds.splice(0)]);
     }
     for (const id of createdClientIds.splice(0)) {
       await query('DELETE FROM meta_campaign_daily_metrics WHERE client_id = $1', [id]);
@@ -216,6 +221,13 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/ops-status (real PostgreS
     const phone = `+3460011${Math.floor(Math.random() * 9000 + 1000)}`;
     const { lead } = await createLead({ scope: 'client', clientId: client.id, name: 'WhatsApp Evidence Lead', whatsapp: phone });
     createdLeadIds.push(lead.id);
+    const businessNumber = await createWhatsAppBusinessNumber({
+      ownerScope: 'client',
+      clientId: client.id,
+      phoneNumberId: `100${Date.now()}`,
+      validFrom: '2026-01-01T00:00:00.000Z',
+    });
+    createdWhatsAppNumberIds.push(businessNumber.id);
 
     await appendWhatsAppEvent({
       leadId: lead.id,
@@ -226,10 +238,12 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/ops-status (real PostgreS
     });
     await appendWhatsAppEvent({
       whatsappNumber: phone,
+      phoneNumberId: businessNumber.phoneNumberId,
       type: 'lead_replied',
       source: 'whatsapp',
       externalEventId: `wa-reply-${Date.now()}`,
       summary: 'Lead replied',
+      occurredAt: '2026-09-03T08:00:00.000Z',
     });
 
     const snapshot = await getOpsSnapshot();

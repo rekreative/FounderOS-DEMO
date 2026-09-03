@@ -13,6 +13,7 @@ import {
 } from '@/lib/leads';
 import { query, withTransaction } from './db';
 import { normalizePhoneDigits } from '../phone';
+import { resolveWhatsAppBusinessNumberOnClient } from './whatsapp-repo';
 
 /**
  * Server-only PostgreSQL repository for Leads + LeadEvents (Backend V1).
@@ -153,6 +154,7 @@ export type LeadEventRow = {
   summary: string;
   details: Record<string, unknown> | null;
   external_event_id?: string | null;
+  whatsapp_business_number_id?: string | null;
 };
 
 export function rowToLead(row: LeadRow): ServerLead {
@@ -296,12 +298,16 @@ async function insertLeadEventIdempotent(
     details?: Record<string, unknown> | null;
     occurredAt: Date;
     externalEventId: string;
+    whatsappBusinessNumberId?: string | null;
   },
 ): Promise<{ event: LeadEvent; deduped: boolean }> {
   const id = generateEventId();
   const inserted = await client.query<LeadEventRow>(
-    `INSERT INTO lead_events (id, lead_id, type, source, occurred_at, summary, details, external_event_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO lead_events (
+       id, lead_id, type, source, occurred_at, summary, details,
+       external_event_id, whatsapp_business_number_id
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT (type, external_event_id) WHERE external_event_id IS NOT NULL DO NOTHING
      RETURNING *`,
     [
@@ -313,6 +319,7 @@ async function insertLeadEventIdempotent(
       input.summary,
       input.details ? JSON.stringify(input.details) : null,
       input.externalEventId,
+      input.whatsappBusinessNumberId ?? null,
     ],
   );
 
@@ -766,21 +773,6 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
 // WhatsApp Cloud adapter can call appendWhatsAppEvent the same way without
 // any change here.
 
-const WHATSAPP_NUMBER_LOOKUP_SQL = `regexp_replace(whatsapp, '\\D', '', 'g') = $1`;
-
-/** Resolves a lead by WhatsApp number, comparing digits only (see
- *  lib/phone.ts's normalizePhoneDigits) so formatting differences between
- *  what a lead's whatsapp field holds and what the provider sends don't
- *  cause a false miss. Null for an unparseable number or no match — never
- *  throws, since "no lead has this number yet" is an expected outcome, not
- *  an error. */
-export async function findByWhatsapp(whatsappNumber: string): Promise<ServerLead | null> {
-  const digits = normalizePhoneDigits(whatsappNumber);
-  if (!digits) return null;
-  const result = await query<LeadRow>(`SELECT * FROM leads WHERE ${WHATSAPP_NUMBER_LOOKUP_SQL} LIMIT 1`, [digits]);
-  return result.rowCount === 0 ? null : rowToLead(result.rows[0]);
-}
-
 type WhatsAppEventCommon = {
   type: 'whatsapp_sent' | 'whatsapp_delivered' | 'lead_replied';
   source: LeadEventSource;
@@ -795,16 +787,56 @@ type WhatsAppEventCommon = {
 // analysis doesn't reliably distribute an `in` check across an
 // intersection-with-a-union shape.
 export type AppendWhatsAppEventInput =
-  | (WhatsAppEventCommon & { leadId: string; whatsappNumber?: undefined })
-  | (WhatsAppEventCommon & { leadId?: undefined; whatsappNumber: string });
+  | (WhatsAppEventCommon & {
+      type: 'whatsapp_sent' | 'whatsapp_delivered';
+      leadId: string;
+      whatsappNumber?: undefined;
+    })
+  | (WhatsAppEventCommon & {
+      type: 'lead_replied';
+      leadId?: undefined;
+      whatsappNumber: string;
+      phoneNumberId: string;
+      wabaId?: string;
+      occurredAt: string;
+    });
 
 export type AppendWhatsAppEventResult =
   | { matched: true; lead: ServerLead; event: LeadEvent; deduped: boolean }
   | { matched: false };
 
+export class UnmappedWhatsAppBusinessNumberError extends Error {
+  constructor(public readonly phoneNumberId: string) {
+    super('Unmapped or inactive WhatsApp business number');
+    this.name = 'UnmappedWhatsAppBusinessNumberError';
+  }
+}
+
+export class WhatsAppWabaMismatchError extends Error {
+  constructor() {
+    super('WhatsApp WABA does not match the registered business number');
+    this.name = 'WhatsAppWabaMismatchError';
+  }
+}
+
+export class AmbiguousWhatsAppLeadError extends Error {
+  constructor() {
+    super('More than one lead matches this WhatsApp number inside the resolved owner');
+    this.name = 'AmbiguousWhatsAppLeadError';
+  }
+}
+
+export class WhatsAppIdempotencyConflictError extends Error {
+  constructor() {
+    super('The WhatsApp message id is already associated with another lead');
+    this.name = 'WhatsAppIdempotencyConflictError';
+  }
+}
+
 /**
- * Atomic: resolve the target lead (by id for outbound events, by WhatsApp
- * number for inbound ones) → idempotently append the event → for
+ * Atomic: resolve the target lead (by id for outbound events, or by the
+ * destination Phone Number ID owner plus sender number for inbound ones),
+ * then idempotently append the event. For
  * whatsapp_sent only, advance stage new→contacted through the exact same
  * setLeadStageOnClient core the UI's setLeadStage uses (never a bespoke
  * stage write, never backwards, never past an already-further-along
@@ -814,7 +846,8 @@ export type AppendWhatsAppEventResult =
  *
  * leadId not found → throws LeadNotFoundError (Make already has a real id
  * from ingestion, so an unknown one is a genuine integration error — same
- * convention as appendLeadEvent). whatsappNumber not found → returns
+ * convention as appendLeadEvent). An inbound number not found inside its
+ * resolved owner returns
  * { matched: false }, a safe no-op: the phone/lead mapping gap is expected
  * (e.g. an inbound message from a number no ingested lead carries yet),
  * never grounds for fabricating a lead.
@@ -824,29 +857,38 @@ export async function appendWhatsAppEvent(input: AppendWhatsAppEventInput): Prom
   // TS's 'in' narrowing on a union-typed parameter doesn't reliably survive
   // capture inside a nested async callback, so the branch is settled here
   // instead of re-narrowing `input` itself inside withTransaction.
-  const leadId = 'leadId' in input ? input.leadId : null;
-  const whatsappNumber = 'whatsappNumber' in input ? input.whatsappNumber : null;
-
   return withTransaction(async (client) => {
     let lead: ServerLead;
+    let whatsappBusinessNumberId: string | null = null;
 
-    if (leadId) {
-      const found = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1 FOR UPDATE', [leadId]);
-      if (found.rowCount === 0) throw new LeadNotFoundError(leadId);
-      lead = rowToLead(found.rows[0]);
-    } else if (whatsappNumber) {
-      const digits = normalizePhoneDigits(whatsappNumber);
-      if (!digits) return { matched: false };
-      const found = await client.query<LeadRow>(
-        `SELECT * FROM leads WHERE ${WHATSAPP_NUMBER_LOOKUP_SQL} FOR UPDATE LIMIT 1`,
-        [digits],
-      );
-      if (found.rowCount === 0) return { matched: false };
+    if (input.type !== 'lead_replied') {
+      const found = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1 FOR UPDATE', [input.leadId]);
+      if (found.rowCount === 0) throw new LeadNotFoundError(input.leadId);
       lead = rowToLead(found.rows[0]);
     } else {
-      // Unreachable given AppendWhatsAppEventInput's type — satisfies
-      // control flow analysis without a non-null assertion.
-      return { matched: false };
+      const occurredAt = new Date(input.occurredAt);
+      const mapping = await resolveWhatsAppBusinessNumberOnClient(client, input.phoneNumberId, occurredAt);
+      if (!mapping) throw new UnmappedWhatsAppBusinessNumberError(input.phoneNumberId);
+      if (mapping.wabaId && input.wabaId && mapping.wabaId !== input.wabaId) {
+        throw new WhatsAppWabaMismatchError();
+      }
+      const digits = normalizePhoneDigits(input.whatsappNumber);
+      if (!digits) return { matched: false };
+      const ownerClause =
+        mapping.ownerScope === 'internal'
+          ? "scope = 'internal' AND client_id IS NULL"
+          : "scope = 'client' AND client_id = $2";
+      const params = mapping.ownerScope === 'internal' ? [digits] : [digits, mapping.clientId];
+      const found = await client.query<LeadRow>(
+        `SELECT * FROM leads
+         WHERE whatsapp_normalized = $1 AND ${ownerClause}
+         LIMIT 2 FOR UPDATE`,
+        params,
+      );
+      if (found.rowCount === 0) return { matched: false };
+      if ((found.rowCount ?? 0) > 1) throw new AmbiguousWhatsAppLeadError();
+      lead = rowToLead(found.rows[0]);
+      whatsappBusinessNumberId = mapping.id;
     }
 
     const { event, deduped } = await insertLeadEventIdempotent(client, {
@@ -857,7 +899,13 @@ export async function appendWhatsAppEvent(input: AppendWhatsAppEventInput): Prom
       details: input.details ?? null,
       occurredAt: input.occurredAt ? new Date(input.occurredAt) : new Date(),
       externalEventId: input.externalEventId,
+      whatsappBusinessNumberId,
     });
+
+    if (deduped) {
+      if (event.leadId !== lead.id) throw new WhatsAppIdempotencyConflictError();
+      return { matched: true, lead, event, deduped: true };
+    }
 
     // Approved V1 rule: whatsapp_sent advances new→contacted only. Never
     // lead_replied→qualified (a reply isn't necessarily commercial
