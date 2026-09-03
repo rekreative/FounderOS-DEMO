@@ -223,15 +223,86 @@ const whatsAppEventCommonFields = {
 /**
  * POST /api/leads/whatsapp-events request shape. Exactly one of `leadId`
  * (outbound — Make already has this from POST /api/ingest/leads' response)
- * or `whatsappNumber` (inbound — all Make's WhatsApp Business Cloud webhook
- * gives it) must be present. Each branch is `.strict()`, so a body carrying
- * both keys fails every branch and the union — mutual exclusivity is
- * enforced by shape, not a separate refine.
+ * or the tenant-aware inbound identity (`whatsappNumber`, `phoneNumberId`,
+ * and `occurredAt`) is accepted. Ownership is never caller-controlled.
  */
-export const WhatsAppEventBodySchema = z.union([
-  z.object({ ...whatsAppEventCommonFields, leadId: z.string().trim().min(1) }).strict(),
-  z.object({ ...whatsAppEventCommonFields, whatsappNumber: z.string().trim().min(1) }).strict(),
+export const WhatsAppEventBodySchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      ...whatsAppEventCommonFields,
+      type: z.literal('whatsapp_sent'),
+      leadId: z.string().trim().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...whatsAppEventCommonFields,
+      type: z.literal('whatsapp_delivered'),
+      leadId: z.string().trim().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...whatsAppEventCommonFields,
+      type: z.literal('lead_replied'),
+      whatsappNumber: z.string().trim().min(1),
+      phoneNumberId: z.string().trim().regex(/^\d+$/, 'phoneNumberId must contain digits only'),
+      wabaId: z.string().trim().regex(/^\d+$/, 'wabaId must contain digits only').optional(),
+      occurredAt: isoDateTime,
+    })
+    .strict(),
 ]);
+
+// WhatsApp business number ownership. Phone Number ID and ownership are
+// immutable; a transfer closes one interval and creates a new mapping.
+export const WhatsAppOwnerScopeSchema = z.enum(['internal', 'client']);
+
+export const CreateWhatsAppBusinessNumberBodySchema = z
+  .object({
+    ownerScope: WhatsAppOwnerScopeSchema,
+    clientId: z.string().trim().min(1).nullable().optional(),
+    phoneNumberId: z.string().trim().regex(/^\d+$/, 'phoneNumberId must contain digits only'),
+    wabaId: z.string().trim().regex(/^\d+$/, 'wabaId must contain digits only').nullable().optional(),
+    displayPhoneNumber: z.string().trim().min(1).nullable().optional(),
+    label: z.string().trim().min(1).max(200).nullable().optional(),
+    validFrom: isoDateTime.optional(),
+    validTo: isoDateTime.nullable().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.ownerScope === 'internal' && value.clientId != null) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['clientId'], message: 'clientId must be null for an internal WhatsApp number' });
+    }
+    if (value.ownerScope === 'client' && !value.clientId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['clientId'], message: 'clientId is required for a client WhatsApp number' });
+    }
+    if (value.validFrom && value.validTo && value.validTo < value.validFrom) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['validTo'], message: 'validTo must not be before validFrom' });
+    }
+  });
+
+export const UpdateWhatsAppBusinessNumberBodySchema = z
+  .object({
+    wabaId: z.string().trim().regex(/^\d+$/, 'wabaId must contain digits only').nullable(),
+    displayPhoneNumber: z.string().trim().min(1).nullable(),
+    label: z.string().trim().min(1).max(200).nullable(),
+    validTo: isoDateTime.nullable(),
+  })
+  .strict()
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, 'at least one field is required');
+
+export const ListWhatsAppBusinessNumbersQuerySchema = z
+  .object({
+    ownerScope: WhatsAppOwnerScopeSchema.optional(),
+    clientId: z.string().trim().min(1).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.ownerScope === 'internal' && value.clientId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['clientId'], message: 'clientId is not valid for internal WhatsApp numbers' });
+    }
+  });
 
 // Commercial lifecycle event types Make and the manual UI may report — a
 // deliberate subset of LeadEventTypeSchema, same convention as

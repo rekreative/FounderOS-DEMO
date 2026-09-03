@@ -381,7 +381,32 @@ describe('migration file discovery', () => {
       '0009_sqlite_installations.sql',
       '0010_meta_internal_owner.sql',
       '0011_internal_business_workspace.sql',
+      '0012_whatsapp_tenant_routing.sql',
     ]);
+  });
+});
+
+describe('0012_whatsapp_tenant_routing.sql contains the tenant-routing invariants', () => {
+  const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, '0012_whatsapp_tenant_routing.sql'), 'utf8');
+
+  it('creates an effective-dated Phone Number ID ownership mapping', () => {
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS whatsapp_business_numbers/);
+    expect(sql).toMatch(/phone_number_id\s+TEXT NOT NULL/);
+    expect(sql).toMatch(/owner_scope\s+TEXT NOT NULL/);
+    expect(sql).toMatch(/valid_from\s+TIMESTAMPTZ NOT NULL/);
+    expect(sql).toMatch(/valid_to\s+TIMESTAMPTZ NULL/);
+    expect(sql).toMatch(/EXCLUDE USING gist/);
+  });
+
+  it('enforces internal and client ownership structurally', () => {
+    expect(sql).toMatch(/owner_scope = 'internal' AND client_id IS NULL/);
+    expect(sql).toMatch(/owner_scope = 'client' AND client_id IS NOT NULL/);
+  });
+
+  it('adds canonical WhatsApp matching and event traceability', () => {
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS whatsapp_normalized TEXT/);
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS whatsapp_business_number_id TEXT NULL/);
+    expect(sql).toMatch(/REFERENCES whatsapp_business_numbers\(id\) ON DELETE RESTRICT/);
   });
 });
 
