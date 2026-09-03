@@ -1,6 +1,7 @@
 import type {
   Lead as LeadBase,
   LeadAiAnalysis,
+  ConversionPaymentPlan,
   LeadEvent,
   LeadEventSource,
   LeadEventType,
@@ -18,6 +19,7 @@ import { apiFetch, nullOn404 } from './http';
  */
 
 export type { LeadEvent, LeadEventSource, LeadEventType, LeadScope, LeadStage, LeadAiAnalysis };
+export type { ConversionPaymentPlan };
 
 // The server returns ingestion metadata alongside every Lead row (always
 // null for manual/API-created leads) — mirrors ServerLead in
@@ -141,7 +143,14 @@ export type CommercialEventType = 'appointment_booked' | 'appointment_completed'
 export type AppendCommercialEventInput =
   | { type: 'appointment_booked'; appointmentDate: string; summary?: string }
   | { type: 'appointment_completed'; summary?: string }
-  | { type: 'converted'; conversionValue?: number; summary?: string }
+  | {
+      type: 'converted';
+      conversionValue?: number;
+      serviceId?: string;
+      paymentPlan?: ConversionPaymentPlan;
+      initialPayment?: number;
+      summary?: string;
+    }
   | { type: 'disqualified'; summary?: string };
 
 /** Manual commercial quick actions (Cita agendada / Cita realizada /

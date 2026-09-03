@@ -324,6 +324,32 @@ const commercialEventSharedFields = {
   summary: z.string().trim().min(1).optional(),
 };
 
+export const ConversionPaymentPlanSchema = z.enum(['full', 'two_payments', 'monthly', 'custom']);
+
+const conversionTermsFields = {
+  conversionValue: z.number().finite().nonnegative().optional(),
+  serviceId: z.string().trim().min(1).optional(),
+  paymentPlan: ConversionPaymentPlanSchema.optional(),
+  initialPayment: z.number().finite().nonnegative().optional(),
+};
+
+function validateConversionTerms(
+  value: { conversionValue?: number; serviceId?: string; paymentPlan?: string; initialPayment?: number },
+  ctx: z.RefinementCtx,
+) {
+  const hasTerms = value.serviceId !== undefined || value.paymentPlan !== undefined || value.initialPayment !== undefined;
+  if (hasTerms) {
+    for (const field of ['conversionValue', 'serviceId', 'paymentPlan', 'initialPayment'] as const) {
+      if (value[field] === undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: 'complete commercial terms are required' });
+      }
+    }
+  }
+  if (value.initialPayment !== undefined && value.conversionValue !== undefined && value.initialPayment > value.conversionValue) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['initialPayment'], message: 'initial payment cannot exceed agreed value' });
+  }
+}
+
 /**
  * POST /api/leads/commercial-events request shape (Make). Always addressed
  * by `leadId` — unlike WhatsAppEventBodySchema, there is no
@@ -366,7 +392,7 @@ export const CommercialEventBodySchema = z.discriminatedUnion('type', [
       type: z.literal('converted'),
       leadId: z.string().trim().min(1),
       externalEventId: z.string().trim().min(1),
-      conversionValue: z.number().finite().nonnegative().optional(),
+      ...conversionTermsFields,
       occurredAt: isoDateTime.optional(),
       details: z.record(z.unknown()).optional(),
       ...commercialEventSharedFields,
@@ -382,7 +408,9 @@ export const CommercialEventBodySchema = z.discriminatedUnion('type', [
       ...commercialEventSharedFields,
     })
     .strict(),
-]);
+]).superRefine((value, ctx) => {
+  if (value.type === 'converted') validateConversionTerms(value, ctx);
+});
 
 /**
  * POST /api/leads/[id]/commercial-events request shape (manual UI quick
@@ -399,12 +427,14 @@ export const ManualCommercialEventBodySchema = z.discriminatedUnion('type', [
   z
     .object({
       type: z.literal('converted'),
-      conversionValue: z.number().finite().nonnegative().optional(),
+      ...conversionTermsFields,
       ...commercialEventSharedFields,
     })
     .strict(),
   z.object({ type: z.literal('disqualified'), ...commercialEventSharedFields }).strict(),
-]);
+]).superRefine((value, ctx) => {
+  if (value.type === 'converted') validateConversionTerms(value, ctx);
+});
 
 /**
  * POST /api/ingest/leads request shape. Deliberately has NO `stage` field —

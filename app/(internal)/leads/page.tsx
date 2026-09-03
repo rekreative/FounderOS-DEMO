@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { useClientsRegistry } from '@/components/ClientsProvider';
+import { getInternalBusinessWorkspace } from '@/lib/api/business';
+import type { InternalBusinessService } from '@/lib/business';
 import {
   LEAD_SCOPE_OPTIONS,
   LEAD_STAGE_OPTIONS,
@@ -21,6 +23,7 @@ import {
   setLeadStage,
   updateLead,
   type CommercialEventType,
+  type ConversionPaymentPlan,
   type Lead,
   type LeadEvent,
 } from '@/lib/api/leads';
@@ -59,6 +62,13 @@ type DraftLead = {
   appointmentDate: string;
   /** Raw numeric-string input, or '' when unset. */
   conversionValue: string;
+};
+
+type ConversionPayload = {
+  conversionValue: number;
+  serviceId: string;
+  paymentPlan: ConversionPaymentPlan;
+  initialPayment: number;
 };
 
 const emptyDraft = (clientId = ''): DraftLead => ({
@@ -133,6 +143,7 @@ function eventLabel(type: LeadEvent['type']): string {
 function LeadMobileCard({
   lead,
   clients,
+  services,
   events,
   eventsLoading,
   showClient,
@@ -141,9 +152,11 @@ function LeadMobileCard({
   onStageChange,
   onEdit,
   onAddNote,
+  onCommercialEvent,
 }: {
   lead: Lead;
   clients: { id: string; name: string }[];
+  services: InternalBusinessService[];
   events: LeadEvent[];
   eventsLoading: boolean;
   showClient: boolean;
@@ -152,10 +165,27 @@ function LeadMobileCard({
   onStageChange: (nextStage: LeadStage) => void;
   onEdit: () => void;
   onAddNote: () => void;
+  onCommercialEvent: (type: CommercialEventType, payload?: ConversionPayload) => void;
 }) {
   const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
   const contact = lead.email || lead.phone || lead.whatsapp || 'Sin contacto';
+  const [showConversion, setShowConversion] = useState(false);
+  const [serviceId, setServiceId] = useState('');
+  const [agreedValue, setAgreedValue] = useState('');
+  const [initialPayment, setInitialPayment] = useState('0');
+  const [paymentPlan, setPaymentPlan] = useState<ConversionPaymentPlan>('full');
+  const selectedService = services.find((service) => service.id === serviceId) ?? null;
+
+  const openConversion = () => {
+    const service = services.find((item) => item.id === lead.conversionSnapshot?.serviceId) ?? services[0];
+    if (!service) return;
+    setServiceId(service.id);
+    setAgreedValue(String(lead.conversionValue ?? service.price));
+    setInitialPayment(String(lead.conversionSnapshot?.initialPayment ?? 0));
+    setPaymentPlan(lead.conversionSnapshot?.paymentPlan ?? (service.billingType === 'monthly' ? 'monthly' : service.allowTwoPayments ? 'two_payments' : 'full'));
+    setShowConversion(true);
+  };
 
   return (
     <article className="min-w-0 border border-os-border bg-os-surface p-4">
@@ -245,9 +275,19 @@ function LeadMobileCard({
       )}
 
       <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-os-border pt-3">
+        <button type="button" disabled={services.length === 0} onClick={openConversion} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:opacity-40">{lead.conversionSnapshot ? 'Editar conversión' : 'Registrar conversión'}</button>
         <button type="button" onClick={onAddNote} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Añadir nota</button>
         <button type="button" onClick={onEdit} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted">Editar</button>
       </div>
+      {showConversion && selectedService && (
+        <div className="mt-3 space-y-3 border border-os-border bg-os-surface2 p-3">
+          <label className="block"><span className="font-mono text-[8.5px] uppercase text-os-dim">Servicio contratado</span><select value={serviceId} onChange={(event) => { const service = services.find((item) => item.id === event.target.value); if (!service) return; setServiceId(service.id); setAgreedValue(String(service.price)); setPaymentPlan(service.billingType === 'monthly' ? 'monthly' : service.allowTwoPayments ? 'two_payments' : 'full'); }} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-2 text-[12px] text-os-text">{services.map((service) => <option key={service.id} value={service.id}>{service.name} · {service.price.toLocaleString('es-ES')} €</option>)}</select></label>
+          <div className="grid grid-cols-2 gap-2"><label><span className="font-mono text-[8.5px] uppercase text-os-dim">Valor acordado</span><input type="number" min="0" step="0.01" value={agreedValue} onChange={(event) => setAgreedValue(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-2 text-[12px] text-os-text" /></label><label><span className="font-mono text-[8.5px] uppercase text-os-dim">Cobrado</span><input type="number" min="0" step="0.01" value={initialPayment} onChange={(event) => setInitialPayment(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-2 text-[12px] text-os-text" /></label></div>
+          <label className="block"><span className="font-mono text-[8.5px] uppercase text-os-dim">Modalidad</span><select value={paymentPlan} onChange={(event) => setPaymentPlan(event.target.value as ConversionPaymentPlan)} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-2 text-[12px] text-os-text">{selectedService.billingType === 'one_off' && <option value="full">Pago completo</option>}{selectedService.allowTwoPayments && <option value="two_payments">Dos pagos</option>}{selectedService.billingType === 'monthly' && <option value="monthly">Mensual</option>}<option value="custom">Personalizado</option></select></label>
+          <div className="flex items-center justify-between"><span className="font-mono text-[9px] uppercase text-os-dim">Importe pendiente</span><span className="text-sm text-os-text">{Math.max(0, Number(agreedValue || 0) - Number(initialPayment || 0)).toLocaleString('es-ES')} €</span></div>
+          <div className="flex justify-end gap-2"><button type="button" onClick={() => setShowConversion(false)} className="border border-os-border px-2 py-1.5 font-mono text-[9px] uppercase text-os-muted">Cancelar</button><button type="button" onClick={() => { const value = Number(agreedValue); const paid = Number(initialPayment); if (!Number.isFinite(value) || !Number.isFinite(paid) || value < 0 || paid < 0 || paid > value) return; onCommercialEvent('converted', { conversionValue: value, serviceId, paymentPlan, initialPayment: paid }); setShowConversion(false); }} className="border border-os-accent bg-os-accent px-2 py-1.5 font-mono text-[9px] uppercase text-os-bg">Confirmar</button></div>
+        </div>
+      )}
     </article>
   );
 }
@@ -255,6 +295,7 @@ function LeadMobileCard({
 function LeadRow({
   lead,
   clients,
+  services,
   events,
   eventsLoading,
   showClientColumn,
@@ -268,6 +309,7 @@ function LeadRow({
 }: {
   lead: Lead;
   clients: { id: string; name: string }[];
+  services: InternalBusinessService[];
   events: LeadEvent[];
   eventsLoading: boolean;
   /** REKREATIVE scope: every row is already known to be internal, so the
@@ -281,7 +323,7 @@ function LeadRow({
   onStageChange: (nextStage: LeadStage) => void;
   onEdit: () => void;
   onAddNote: () => void;
-  onCommercialEvent: (type: CommercialEventType, payload?: { appointmentDate?: string; conversionValue?: number }) => void;
+  onCommercialEvent: (type: CommercialEventType, payload?: { appointmentDate?: string } | ConversionPayload) => void;
 }) {
   const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
@@ -291,9 +333,25 @@ function LeadRow({
   // lead's own stored value changes (e.g. after a successful booking), so a
   // collapsed/reopened row always starts from the lead's real current state.
   const [appointmentDraft, setAppointmentDraft] = useState(() => toDatetimeLocalValue(lead.appointmentDate));
-  const [conversionDraft, setConversionDraft] = useState(() => (lead.conversionValue != null ? String(lead.conversionValue) : ''));
+  const [showConversion, setShowConversion] = useState(false);
+  const [serviceId, setServiceId] = useState('');
+  const [agreedValue, setAgreedValue] = useState('');
+  const [initialPayment, setInitialPayment] = useState('0');
+  const [paymentPlan, setPaymentPlan] = useState<ConversionPaymentPlan>('full');
   useEffect(() => setAppointmentDraft(toDatetimeLocalValue(lead.appointmentDate)), [lead.appointmentDate]);
-  useEffect(() => setConversionDraft(lead.conversionValue != null ? String(lead.conversionValue) : ''), [lead.conversionValue]);
+
+  const selectedService = services.find((service) => service.id === serviceId) ?? null;
+  const openConversion = () => {
+    const service = services.find((item) => item.id === lead.conversionSnapshot?.serviceId) ?? services[0];
+    if (!service) return;
+    setServiceId(service.id);
+    setAgreedValue(String(lead.conversionValue ?? service.price));
+    setInitialPayment(String(lead.conversionSnapshot?.initialPayment ?? 0));
+    setPaymentPlan(
+      lead.conversionSnapshot?.paymentPlan ?? (service.billingType === 'monthly' ? 'monthly' : service.allowTwoPayments ? 'two_payments' : 'full'),
+    );
+    setShowConversion(true);
+  };
 
   return (
     <>
@@ -552,26 +610,13 @@ function LeadRow({
               >
                 Cita realizada
               </button>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Valor (€, opcional)"
-                value={conversionDraft}
-                onChange={(event) => setConversionDraft(event.target.value)}
-                className="w-32 border border-os-border bg-os-surface2 px-2 py-1 font-mono text-[10px] text-os-text outline-none"
-              />
               <button
                 type="button"
-                onClick={() => {
-                  const trimmed = conversionDraft.trim();
-                  const conversionValue = trimmed ? Number(trimmed) : undefined;
-                  if (trimmed && (!Number.isFinite(conversionValue) || (conversionValue as number) < 0)) return;
-                  onCommercialEvent('converted', conversionValue !== undefined ? { conversionValue } : undefined);
-                }}
+                disabled={services.length === 0}
+                onClick={openConversion}
                 className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent"
               >
-                Convertido
+                {lead.conversionSnapshot ? 'Editar conversión' : 'Registrar conversión'}
               </button>
               <button
                 type="button"
@@ -581,6 +626,33 @@ function LeadRow({
                 Descartado
               </button>
             </div>
+            {lead.conversionSnapshot && lead.conversionValue != null && (
+              <div className="mt-3 grid grid-cols-2 gap-2 border border-os-border bg-os-surface2 p-3 sm:grid-cols-4">
+                <div><div className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Servicio contratado</div><div className="mt-1 text-[11px] text-os-text">{lead.conversionSnapshot.serviceName}</div></div>
+                <div><div className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Valor acordado</div><div className="mt-1 text-[11px] text-os-text">{lead.conversionValue.toLocaleString('es-ES')} €</div></div>
+                <div><div className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Cobrado inicialmente</div><div className="mt-1 text-[11px] text-os-text">{lead.conversionSnapshot.initialPayment.toLocaleString('es-ES')} €</div></div>
+                <div><div className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Importe pendiente</div><div className="mt-1 text-[11px] text-os-text">{Math.max(0, lead.conversionValue - lead.conversionSnapshot.initialPayment).toLocaleString('es-ES')} €</div></div>
+              </div>
+            )}
+            {showConversion && selectedService && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-label="Registrar conversión">
+                <div className="w-full max-w-xl border border-os-border-strong bg-os-surface p-4">
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <div><div className="font-mono text-[9.5px] uppercase tracking-[0.22em] text-os-dim">Cierre comercial</div><h2 className="mt-1 text-lg font-semibold text-os-text">Registrar conversión</h2></div>
+                    <button type="button" onClick={() => setShowConversion(false)} className="font-mono text-xs text-os-dim hover:text-os-text">Cerrar</button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label className="sm:col-span-2"><span className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Servicio contratado</span><select value={serviceId} onChange={(event) => { const service = services.find((item) => item.id === event.target.value); if (!service) return; setServiceId(service.id); setAgreedValue(String(service.price)); setPaymentPlan(service.billingType === 'monthly' ? 'monthly' : service.allowTwoPayments ? 'two_payments' : 'full'); }} className="mt-1 w-full border border-os-border bg-os-surface2 px-3 py-2 text-sm text-os-text outline-none">{services.map((service) => <option key={service.id} value={service.id}>{service.name} · {service.price.toLocaleString('es-ES')} €{service.billingType === 'monthly' ? '/mes' : ''}</option>)}</select></label>
+                    <label><span className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Valor acordado</span><input type="number" min="0" step="0.01" value={agreedValue} onChange={(event) => setAgreedValue(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface2 px-3 py-2 text-sm text-os-text outline-none" /></label>
+                    <label><span className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Modalidad de pago</span><select value={paymentPlan} onChange={(event) => setPaymentPlan(event.target.value as ConversionPaymentPlan)} className="mt-1 w-full border border-os-border bg-os-surface2 px-3 py-2 text-sm text-os-text outline-none">{selectedService.billingType === 'one_off' && <option value="full">Pago completo</option>}{selectedService.allowTwoPayments && <option value="two_payments">Dos pagos</option>}{selectedService.billingType === 'monthly' && <option value="monthly">Mensual</option>}<option value="custom">Personalizado</option></select></label>
+                    <label><span className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Cobrado inicialmente</span><input type="number" min="0" step="0.01" value={initialPayment} onChange={(event) => setInitialPayment(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface2 px-3 py-2 text-sm text-os-text outline-none" /></label>
+                    <div><span className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Importe pendiente</span><div className="mt-1 border border-os-border bg-os-surface2 px-3 py-2 text-sm text-os-text">{Math.max(0, Number(agreedValue || 0) - Number(initialPayment || 0)).toLocaleString('es-ES')} €</div></div>
+                  </div>
+                  {selectedService.secondPaymentTrigger && paymentPlan === 'two_payments' && <p className="mt-3 text-[11px] text-os-muted">Segundo pago: {selectedService.secondPaymentTrigger}</p>}
+                  <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setShowConversion(false)} className="border border-os-border px-3 py-2 font-mono text-[10px] uppercase text-os-muted">Cancelar</button><button type="button" onClick={() => { const value = Number(agreedValue); const paid = Number(initialPayment); if (!Number.isFinite(value) || !Number.isFinite(paid) || value < 0 || paid < 0 || paid > value) return; onCommercialEvent('converted', { conversionValue: value, serviceId, paymentPlan, initialPayment: paid }); setShowConversion(false); }} className="border border-os-accent bg-os-accent px-3 py-2 font-mono text-[10px] uppercase text-os-bg">Confirmar conversión</button></div>
+                </div>
+              </div>
+            )}
           </td>
         </tr>
       )}
@@ -591,6 +663,7 @@ function LeadRow({
 export default function LeadsPage() {
   const { clients } = useClientsRegistry();
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [services, setServices] = useState<InternalBusinessService[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   // Primary scope: REKREATIVE's own leads vs. client leads — conceptually
@@ -608,6 +681,12 @@ export default function LeadsPage() {
   const [noteLeadId, setNoteLeadId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [draft, setDraft] = useState<DraftLead>(emptyDraft());
+
+  useEffect(() => {
+    getInternalBusinessWorkspace()
+      .then((workspace) => setServices(workspace.services.filter((service) => service.active)))
+      .catch(() => setServices([]));
+  }, []);
 
   // In REKREATIVE scope the client selector is hidden and irrelevant, so
   // always load the full set (internal leads have no clientId to filter
@@ -833,14 +912,16 @@ export default function LeadsPage() {
   const handleCommercialEvent = async (
     leadId: string,
     type: CommercialEventType,
-    payload?: { appointmentDate?: string; conversionValue?: number },
+    payload?: { appointmentDate?: string } | ConversionPayload,
   ) => {
     try {
       if (type === 'appointment_booked') {
-        if (!payload?.appointmentDate) return;
-        await appendCommercialEvent(leadId, { type, appointmentDate: payload.appointmentDate });
+        const appointmentDate = payload && 'appointmentDate' in payload ? payload.appointmentDate : undefined;
+        if (!appointmentDate) return;
+        await appendCommercialEvent(leadId, { type, appointmentDate });
       } else if (type === 'converted') {
-        await appendCommercialEvent(leadId, { type, conversionValue: payload?.conversionValue });
+        const conversion = payload && 'conversionValue' in payload ? payload : undefined;
+        await appendCommercialEvent(leadId, { type, ...conversion });
       } else {
         await appendCommercialEvent(leadId, { type });
       }
@@ -971,6 +1052,7 @@ export default function LeadsPage() {
             key={lead.id}
             lead={lead}
             clients={clients}
+            services={lead.scope === 'internal' ? services : []}
             events={eventsByLeadId[lead.id] ?? []}
             eventsLoading={Boolean(eventsLoadingId[lead.id])}
             showClient={showClientColumn}
@@ -979,6 +1061,7 @@ export default function LeadsPage() {
             onStageChange={(nextStage) => handleStageChange(lead.id, nextStage)}
             onEdit={() => openEditForm(lead)}
             onAddNote={() => handleAddManualNote(lead.id)}
+            onCommercialEvent={(type, payload) => handleCommercialEvent(lead.id, type, payload)}
           />
         ))}
       </div>
@@ -1018,6 +1101,7 @@ export default function LeadsPage() {
                   key={lead.id}
                   lead={lead}
                   clients={clients}
+                  services={lead.scope === 'internal' ? services : []}
                   events={eventsByLeadId[lead.id] ?? []}
                   eventsLoading={Boolean(eventsLoadingId[lead.id])}
                   showClientColumn={showClientColumn}

@@ -382,6 +382,7 @@ describe('migration file discovery', () => {
       '0010_meta_internal_owner.sql',
       '0011_internal_business_workspace.sql',
       '0012_whatsapp_tenant_routing.sql',
+      '0013_commercial_conversion_v1.sql',
     ]);
   });
 });

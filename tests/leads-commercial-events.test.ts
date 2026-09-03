@@ -18,6 +18,7 @@ const TEST_KEY = 'test-commercial-events-key-for-vitest';
 describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V1 (real PostgreSQL)', () => {
   const originalKey = process.env.MAKE_EVENTS_API_KEY;
   const createdLeadIds: string[] = [];
+  const createdServiceIds: string[] = [];
 
   beforeAll(() => {
     process.env.MAKE_EVENTS_API_KEY = TEST_KEY;
@@ -35,6 +36,8 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
       await query('DELETE FROM lead_events WHERE lead_id = ANY($1)', [ids]);
       await query('DELETE FROM leads WHERE id = ANY($1)', [ids]);
     }
+    const serviceIds = createdServiceIds.splice(0);
+    if (serviceIds.length > 0) await query('DELETE FROM internal_business_services WHERE id = ANY($1)', [serviceIds]);
   });
 
   async function makeLead(overrides: Partial<Parameters<typeof createLead>[0]> = {}) {
@@ -241,6 +244,37 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
       });
       expect(result.lead.conversionValue).toBe(2500);
       expect(result.lead.stage).toBe('converted');
+    });
+
+    it('converted snapshots the selected service and payment agreement', async () => {
+      const lead = await makeLead();
+      const serviceId = `service-conversion-${Date.now()}`;
+      createdServiceIds.push(serviceId);
+      await query(
+        `INSERT INTO internal_business_services
+           (id, name, description, price, billing_type, allow_two_payments, second_payment_trigger, active, sort_order)
+         VALUES ($1, 'Meta Ads launch', NULL, 600, 'one_off', true, 'At campaign launch', true, 0)`,
+        [serviceId],
+      );
+      const result = await appendCommercialEvent({
+        leadId: lead.id,
+        type: 'converted',
+        source: 'manual',
+        summary: 'Lead converted',
+        conversionValue: 550,
+        serviceId,
+        paymentPlan: 'two_payments',
+        initialPayment: 275,
+      });
+      expect(result.lead.conversionValue).toBe(550);
+      expect(result.lead.conversionSnapshot).toMatchObject({
+        serviceId,
+        serviceName: 'Meta Ads launch',
+        standardPrice: 600,
+        paymentPlan: 'two_payments',
+        initialPayment: 275,
+      });
+      expect(result.event.details).toMatchObject({ outstandingAmount: 275 });
     });
 
     it('converted without conversionValue succeeds and does not clear an existing value', async () => {

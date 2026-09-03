@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { LeadNotFoundError, appendCommercialEvent, type CommercialEventType } from '@/lib/server/leads-repo';
+import { CommercialConversionValidationError, LeadNotFoundError, appendCommercialEvent, type CommercialEventType } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { ManualCommercialEventBodySchema } from '@/lib/server/schemas';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
@@ -41,11 +41,15 @@ export async function POST(request: Request, { params }: { params: { id: string 
       summary,
       appointmentDate: body.type === 'appointment_booked' ? body.appointmentDate : undefined,
       conversionValue: body.type === 'converted' ? body.conversionValue : undefined,
+      serviceId: body.type === 'converted' ? body.serviceId : undefined,
+      paymentPlan: body.type === 'converted' ? body.paymentPlan : undefined,
+      initialPayment: body.type === 'converted' ? body.initialPayment : undefined,
     });
 
     return NextResponse.json({ lead: result.lead, event: result.event }, { status: 201 });
   } catch (error) {
     if (error instanceof LeadNotFoundError) return jsonError(404, 'lead not found');
+    if (error instanceof CommercialConversionValidationError) return jsonError(422, error.message);
     return unexpectedError('POST /api/leads/[id]/commercial-events', error);
   }
 }

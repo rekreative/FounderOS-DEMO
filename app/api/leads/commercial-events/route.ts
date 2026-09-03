@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { checkMakeEventsAuth, type MakeEventsAuthFailureReason } from '@/lib/server/make-events-auth';
-import { LeadNotFoundError, appendCommercialEvent, type CommercialEventType } from '@/lib/server/leads-repo';
+import { CommercialConversionValidationError, LeadNotFoundError, appendCommercialEvent, type CommercialEventType } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { CommercialEventBodySchema } from '@/lib/server/schemas';
 
@@ -60,6 +60,9 @@ export async function POST(request: Request): Promise<Response> {
       occurredAt: body.occurredAt,
       appointmentDate: body.type === 'appointment_booked' ? body.appointmentDate : undefined,
       conversionValue: body.type === 'converted' ? body.conversionValue : undefined,
+      serviceId: body.type === 'converted' ? body.serviceId : undefined,
+      paymentPlan: body.type === 'converted' ? body.paymentPlan : undefined,
+      initialPayment: body.type === 'converted' ? body.initialPayment : undefined,
     });
 
     return NextResponse.json(
@@ -68,6 +71,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   } catch (error) {
     if (error instanceof LeadNotFoundError) return jsonError(404, 'lead not found');
+    if (error instanceof CommercialConversionValidationError) return jsonError(422, error.message);
     return unexpectedError('POST /api/leads/commercial-events', error);
   }
 }

@@ -3,6 +3,7 @@ import {
   LEAD_STAGE_OPTIONS,
   type Lead as LeadBase,
   type LeadAiAnalysis,
+  type ConversionPaymentPlan,
   type LeadEvent,
   type LeadEventSource,
   type LeadEventType,
@@ -52,6 +53,13 @@ export class LeadNotFoundError extends Error {
   constructor(id: string) {
     super(`Lead ${id} not found`);
     this.name = 'LeadNotFoundError';
+  }
+}
+
+export class CommercialConversionValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CommercialConversionValidationError';
   }
 }
 
@@ -134,6 +142,14 @@ export type LeadRow = {
   qualification_answers: Record<string, string> | null;
   appointment_date: Date | null;
   conversion_value: string | null;
+  conversion_service_id: string | null;
+  conversion_service_name: string | null;
+  conversion_service_billing_type: string | null;
+  conversion_service_standard_price: string | null;
+  conversion_payment_plan: string | null;
+  conversion_initial_payment: string | null;
+  conversion_second_payment_trigger: string | null;
+  conversion_recorded_at: Date | null;
   ingestion_source: string | null;
   external_lead_id: string | null;
   ingest_delivery_id: string | null;
@@ -188,6 +204,20 @@ export function rowToLead(row: LeadRow): ServerLead {
     qualificationAnswers: row.qualification_answers,
     appointmentDate: row.appointment_date ? row.appointment_date.toISOString() : null,
     conversionValue: row.conversion_value === null ? null : Number(row.conversion_value),
+    conversionSnapshot:
+      row.conversion_service_name && row.conversion_service_billing_type && row.conversion_service_standard_price !== null &&
+      row.conversion_payment_plan && row.conversion_initial_payment !== null && row.conversion_recorded_at
+        ? {
+            serviceId: row.conversion_service_id,
+            serviceName: row.conversion_service_name,
+            billingType: row.conversion_service_billing_type as 'one_off' | 'monthly',
+            standardPrice: Number(row.conversion_service_standard_price),
+            paymentPlan: row.conversion_payment_plan as ConversionPaymentPlan,
+            initialPayment: Number(row.conversion_initial_payment),
+            secondPaymentTrigger: row.conversion_second_payment_trigger,
+            recordedAt: row.conversion_recorded_at.toISOString(),
+          }
+        : null,
     ingestionSource: row.ingestion_source,
     externalLeadId: row.external_lead_id,
     deliveryId: row.ingest_delivery_id,
@@ -973,6 +1003,9 @@ export type AppendCommercialEventInput = {
   /** Optional for converted only; omitted (not null) means "leave the
    *  lead's existing conversionValue untouched" — never clears it. */
   conversionValue?: number;
+  serviceId?: string;
+  paymentPlan?: ConversionPaymentPlan;
+  initialPayment?: number;
 };
 
 export type AppendCommercialEventResult = {
@@ -1003,6 +1036,67 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
     const existing = rowToLead(found.rows[0]);
 
     const occurredAt = input.occurredAt ? new Date(input.occurredAt) : new Date();
+    let eventDetails = input.details ?? null;
+    let serviceSnapshot: {
+      id: string;
+      name: string;
+      price: number;
+      billingType: 'one_off' | 'monthly';
+      secondPaymentTrigger: string | null;
+    } | null = null;
+
+    if (input.type === 'converted' && input.serviceId) {
+      if (input.conversionValue === undefined || input.paymentPlan === undefined || input.initialPayment === undefined) {
+        throw new CommercialConversionValidationError('complete commercial terms are required');
+      }
+      if (input.initialPayment > input.conversionValue) {
+        throw new CommercialConversionValidationError('initial payment cannot exceed agreed value');
+      }
+      if (existing.scope !== 'internal') {
+        throw new CommercialConversionValidationError('internal services can only be assigned to internal leads');
+      }
+      const serviceResult = await client.query<{
+        id: string;
+        name: string;
+        price: string;
+        billing_type: string;
+        allow_two_payments: boolean;
+        second_payment_trigger: string | null;
+      }>(
+        'SELECT id, name, price, billing_type, allow_two_payments, second_payment_trigger FROM internal_business_services WHERE id = $1 AND active = true',
+        [input.serviceId],
+      );
+      if (serviceResult.rowCount === 0) throw new CommercialConversionValidationError('service not found or inactive');
+      const service = serviceResult.rows[0];
+      if (input.paymentPlan === 'two_payments' && !service.allow_two_payments) {
+        throw new CommercialConversionValidationError('service does not allow two payments');
+      }
+      if (input.paymentPlan === 'monthly' && service.billing_type !== 'monthly') {
+        throw new CommercialConversionValidationError('monthly plan requires a monthly service');
+      }
+      if (!['monthly', 'custom'].includes(input.paymentPlan) && service.billing_type === 'monthly') {
+        throw new CommercialConversionValidationError('monthly service requires a monthly plan');
+      }
+      serviceSnapshot = {
+        id: service.id,
+        name: service.name,
+        price: Number(service.price),
+        billingType: service.billing_type as 'one_off' | 'monthly',
+        secondPaymentTrigger: service.second_payment_trigger,
+      };
+      eventDetails = {
+        ...(input.details ?? {}),
+        serviceId: service.id,
+        serviceName: service.name,
+        standardPrice: Number(service.price),
+        billingType: service.billing_type,
+        paymentPlan: input.paymentPlan,
+        agreedValue: input.conversionValue,
+        initialPayment: input.initialPayment,
+        outstandingAmount: Math.max(0, (input.conversionValue ?? 0) - (input.initialPayment ?? 0)),
+        secondPaymentTrigger: service.second_payment_trigger,
+      };
+    }
     let event: LeadEvent;
     let deduped = false;
 
@@ -1012,7 +1106,7 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
         type: input.type,
         source: input.source,
         summary: input.summary,
-        details: input.details ?? null,
+        details: eventDetails,
         occurredAt,
         externalEventId: input.externalEventId,
       });
@@ -1024,7 +1118,7 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
         type: input.type,
         source: input.source,
         summary: input.summary,
-        details: input.details ?? null,
+        details: eventDetails,
         occurredAt,
       });
     }
@@ -1040,6 +1134,33 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
     }
     if (input.type === 'converted' && input.conversionValue !== undefined) {
       await client.query('UPDATE leads SET conversion_value = $2 WHERE id = $1', [input.leadId, input.conversionValue]);
+    }
+    if (input.type === 'converted' && serviceSnapshot) {
+      await client.query(
+        `UPDATE leads SET
+           conversion_value = $2,
+           conversion_service_id = $3,
+           conversion_service_name = $4,
+           conversion_service_billing_type = $5,
+           conversion_service_standard_price = $6,
+           conversion_payment_plan = $7,
+           conversion_initial_payment = $8,
+           conversion_second_payment_trigger = $9,
+           conversion_recorded_at = $10
+         WHERE id = $1`,
+        [
+          input.leadId,
+          input.conversionValue,
+          serviceSnapshot.id,
+          serviceSnapshot.name,
+          serviceSnapshot.billingType,
+          serviceSnapshot.price,
+          input.paymentPlan,
+          input.initialPayment,
+          serviceSnapshot.secondPaymentTrigger,
+          occurredAt,
+        ],
+      );
     }
 
     if (!TERMINAL_STAGES.has(existing.stage)) {

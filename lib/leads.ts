@@ -25,6 +25,18 @@ export const LEAD_STAGE_OPTIONS = [
 export type LeadStage = (typeof LEAD_STAGE_OPTIONS)[number]['id'];
 export type LeadIntent = 'cold' | 'warm' | 'hot';
 export type LeadPriority = 'low' | 'medium' | 'high';
+export type ConversionPaymentPlan = 'full' | 'two_payments' | 'monthly' | 'custom';
+
+export type LeadConversionSnapshot = {
+  serviceId: string | null;
+  serviceName: string;
+  billingType: 'one_off' | 'monthly';
+  standardPrice: number;
+  paymentPlan: ConversionPaymentPlan;
+  initialPayment: number;
+  secondPaymentTrigger: string | null;
+  recordedAt: string;
+};
 
 export type LeadAiAnalysis = {
   summary: string | null;
@@ -62,6 +74,7 @@ export type Lead = {
   qualificationAnswers: Record<string, string> | null;
   appointmentDate: string | null;
   conversionValue: number | null;
+  conversionSnapshot?: LeadConversionSnapshot | null;
 };
 
 export type LeadEventType =
