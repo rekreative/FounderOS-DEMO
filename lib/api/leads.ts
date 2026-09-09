@@ -134,13 +134,14 @@ export async function appendLeadEvent(id: string, input: { summary: string }): P
   return event;
 }
 
-export type CommercialEventType = 'appointment_booked' | 'appointment_completed' | 'converted' | 'disqualified';
+export type CommercialEventType = 'qualified' | 'appointment_booked' | 'appointment_completed' | 'converted' | 'disqualified';
 
 // Mirrors ManualCommercialEventBodySchema exactly — no leadId (the URL
 // param), no externalEventId (manual actions are never deduped), no
 // stage/source (always server-controlled). See
 // app/api/leads/[id]/commercial-events/route.ts.
 export type AppendCommercialEventInput =
+  | { type: 'qualified'; summary?: string }
   | { type: 'appointment_booked'; appointmentDate: string; summary?: string }
   | { type: 'appointment_completed'; summary?: string }
   | {
@@ -153,8 +154,8 @@ export type AppendCommercialEventInput =
     }
   | { type: 'disqualified'; summary?: string };
 
-/** Manual commercial quick actions (Cita agendada / Cita realizada /
- *  Convertido / Descartado) — the manual-facing counterpart to Make's
+/** Manual commercial quick actions (Cualificado / Cita agendada /
+ *  Cita realizada / Convertido / No cualificado), the manual-facing counterpart to Make's
  *  POST /api/leads/commercial-events, same appendCommercialEvent primitive
  *  underneath, source 'manual'. */
 export async function appendCommercialEvent(

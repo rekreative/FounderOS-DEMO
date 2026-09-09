@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
-import { CommercialConversionValidationError, LeadNotFoundError, appendCommercialEvent, type CommercialEventType } from '@/lib/server/leads-repo';
+import {
+  CommercialConversionValidationError,
+  LeadNotFoundError,
+  LeadStageTransitionError,
+  appendCommercialEvent,
+  type CommercialEventType,
+} from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { ManualCommercialEventBodySchema } from '@/lib/server/schemas';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
@@ -7,6 +13,7 @@ import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 export const dynamic = 'force-dynamic';
 
 const DEFAULT_SUMMARY: Record<CommercialEventType, string> = {
+  qualified: 'Lead qualified',
   appointment_booked: 'Appointment booked',
   appointment_completed: 'Appointment completed',
   converted: 'Lead converted',
@@ -49,6 +56,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     return NextResponse.json({ lead: result.lead, event: result.event }, { status: 201 });
   } catch (error) {
     if (error instanceof LeadNotFoundError) return jsonError(404, 'lead not found');
+    if (error instanceof LeadStageTransitionError) return jsonError(409, error.message);
     if (error instanceof CommercialConversionValidationError) return jsonError(422, error.message);
     return unexpectedError('POST /api/leads/[id]/commercial-events', error);
   }

@@ -84,6 +84,7 @@ export type LeadEventType =
   | 'whatsapp_delivered'
   | 'lead_replied'
   | 'commercial_contacted'
+  | 'qualified'
   | 'appointment_booked'
   | 'appointment_completed'
   | 'converted'

@@ -257,6 +257,16 @@ describe('buildLeadFunnel', () => {
     expect(counts.converted).toBe(0);
   });
 
+  it('qualified: explicit semantic event remains a historical milestone after appointment and conversion', () => {
+    const lead = makeLead({ id: 'l1', clientId: 'c1', stage: 'converted', createdAt: '2026-08-01T00:00:00.000Z' });
+    const events = [
+      makeEvent({ leadId: 'l1', type: 'qualified' }),
+      makeEvent({ leadId: 'l1', type: 'appointment_booked' }),
+      makeEvent({ leadId: 'l1', type: 'converted' }),
+    ];
+    expect(buildLeadFunnel([lead], events)).toMatchObject({ qualified: 1, appointments: 1, converted: 1 });
+  });
+
   it('mirrors the seeded lib/leads.ts inconsistency: converted event with no intermediate stage_changed events still counts at every earlier stage', () => {
     // Same shape as lead-demo-5 in lib/leads.ts: current stage 'new', but a
     // 'converted' LeadEvent on record.

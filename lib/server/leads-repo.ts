@@ -63,6 +63,31 @@ export class CommercialConversionValidationError extends Error {
   }
 }
 
+export class LeadStageTransitionError extends Error {
+  constructor(
+    public readonly from: LeadStage,
+    public readonly to: LeadStage,
+  ) {
+    super(`Lead stage cannot transition from ${from} to ${to}`);
+    this.name = 'LeadStageTransitionError';
+  }
+}
+
+export class CommercialEventIdempotencyConflictError extends Error {
+  constructor() {
+    super('The commercial event identity is already associated with another lead');
+    this.name = 'CommercialEventIdempotencyConflictError';
+  }
+}
+
+const TERMINAL_STAGES: ReadonlySet<LeadStage> = new Set(['converted', 'disqualified']);
+
+function assertStageTransitionAllowed(current: LeadStage, next: LeadStage): void {
+  if (TERMINAL_STAGES.has(current) && current !== next) {
+    throw new LeadStageTransitionError(current, next);
+  }
+}
+
 export type CreateLeadInput = {
   scope: LeadScope;
   clientId?: string | null;
@@ -580,6 +605,8 @@ async function setLeadStageOnClient(
     return { lead: existing, event: null };
   }
 
+  assertStageTransitionAllowed(existing.stage, nextStage);
+
   await client.query('UPDATE leads SET stage = $2 WHERE id = $1', [id, nextStage]);
 
   const event = await insertLeadEvent(client, {
@@ -951,8 +978,9 @@ export async function appendWhatsAppEvent(input: AppendWhatsAppEventInput): Prom
 }
 
 // ── Commercial event reporting (Make + manual → REKREATIVE OS) ───────────
-// Shared primitive for the four commercial-lifecycle event types
-// (appointment_booked, appointment_completed, converted, disqualified),
+// Shared primitive for the five commercial-lifecycle event types
+// (qualified, appointment_booked, appointment_completed, converted,
+// disqualified),
 // used by both POST /api/leads/commercial-events (Make, source 'make',
 // externalEventId required — durable idempotency) and
 // POST /api/leads/[id]/commercial-events (manual UI, source 'manual',
@@ -960,31 +988,45 @@ export async function appendWhatsAppEvent(input: AppendWhatsAppEventInput): Prom
 // or source directly through their request body; this function is the only
 // place that decides both, same discipline as appendWhatsAppEvent.
 
-export type CommercialEventType = 'appointment_booked' | 'appointment_completed' | 'converted' | 'disqualified';
+export type CommercialEventType = 'qualified' | 'appointment_booked' | 'appointment_completed' | 'converted' | 'disqualified';
 
-// Every commercial event's target stage, applied only if the lead isn't
-// already in a terminal stage (see TERMINAL_STAGES below). appointment_booked
+// Every commercial event's target stage. Incompatible transitions out of a
+// terminal stage are rejected before any event or field is written.
+// appointment_booked
 // and appointment_completed intentionally share the same target: a completed
 // appointment implies a booked one even if the booked webhook was missed —
 // there is deliberately no separate "appointment completed" stage (Results'
 // funnel derives attendance from the appointment_completed EVENT, never from
 // stage — see lib/results.ts's maxReachedStageRank).
 const COMMERCIAL_EVENT_TARGET_STAGE: Record<CommercialEventType, LeadStage> = {
+  qualified: 'qualified',
   appointment_booked: 'appointment',
   appointment_completed: 'appointment',
   converted: 'converted',
   disqualified: 'disqualified',
 };
 
-// Once a lead reaches either terminal stage, no commercial event — automated
-// or manual — may move it again: 'converted' must never be downgraded to
+// Once a lead reaches either terminal stage, no commercial event, automated
+// or manual, may move it again: 'converted' must never be downgraded to
 // 'disqualified' by a later signal (e.g. a clawback), and 'disqualified'
 // must never be silently "revived" by a stray appointment/conversion event.
-// The event itself is still recorded either way (see appendCommercialEvent
-// below) — only the stage write is skipped. 'no_response' is deliberately
-// NOT in this set: it's a soft "hasn't engaged yet" state, not terminal, so
+// The incompatible event is rejected before insertion. 'no_response' is
+// deliberately NOT terminal: it's a soft "hasn't engaged yet" state, so
 // a later appointment/conversion event still advances it normally.
-const TERMINAL_STAGES: ReadonlySet<LeadStage> = new Set(['converted', 'disqualified']);
+const COMMERCIAL_STAGE_RANK: Partial<Record<LeadStage, number>> = {
+  new: 0,
+  contacted: 1,
+  qualified: 2,
+  appointment: 3,
+  converted: 4,
+  no_response: -1,
+};
+
+function shouldApplyCommercialStage(current: LeadStage, target: LeadStage): boolean {
+  if (current === target) return false;
+  if (target === 'disqualified') return true;
+  return (COMMERCIAL_STAGE_RANK[target] ?? -1) > (COMMERCIAL_STAGE_RANK[current] ?? -1);
+}
 
 export type AppendCommercialEventInput = {
   leadId: string;
@@ -1034,6 +1076,26 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
     const found = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1 FOR UPDATE', [input.leadId]);
     if (found.rowCount === 0) throw new LeadNotFoundError(input.leadId);
     const existing = rowToLead(found.rows[0]);
+
+    // Resolve a completed delivery before validating today's stage. A valid
+    // retry must remain idempotent even if the lead has since advanced to a
+    // terminal stage. The lead lock serializes same-lead deliveries; the
+    // unique index and post-insert ownership check below cover cross-lead
+    // races, whose rows are locked independently.
+    if (input.externalEventId) {
+      const prior = await client.query<LeadEventRow>(
+        'SELECT * FROM lead_events WHERE type = $1 AND external_event_id = $2',
+        [input.type, input.externalEventId],
+      );
+      if (prior.rowCount && prior.rowCount > 0) {
+        const event = rowToLeadEvent(prior.rows[0]);
+        if (event.leadId !== input.leadId) throw new CommercialEventIdempotencyConflictError();
+        return { lead: existing, event, deduped: true };
+      }
+    }
+
+    const targetStage = COMMERCIAL_EVENT_TARGET_STAGE[input.type];
+    assertStageTransitionAllowed(existing.stage, targetStage);
 
     const occurredAt = input.occurredAt ? new Date(input.occurredAt) : new Date();
     let eventDetails = input.details ?? null;
@@ -1126,6 +1188,7 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
     // A retried Make delivery resolved to an already-existing event — never
     // re-apply the field/stage side effects a second time.
     if (deduped) {
+      if (event.leadId !== input.leadId) throw new CommercialEventIdempotencyConflictError();
       return { lead: existing, event, deduped: true };
     }
 
@@ -1163,8 +1226,8 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
       );
     }
 
-    if (!TERMINAL_STAGES.has(existing.stage)) {
-      await setLeadStageOnClient(client, input.leadId, COMMERCIAL_EVENT_TARGET_STAGE[input.type], input.source);
+    if (shouldApplyCommercialStage(existing.stage, targetStage)) {
+      await setLeadStageOnClient(client, input.leadId, targetStage, input.source);
     }
 
     const finalRow = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1', [input.leadId]);

@@ -46,7 +46,7 @@ const ALL_LEAD_EVENT_TYPES_FOR_META = ['lead_received'];
 const AI_ANALYZED = ['ai_analyzed'];
 const WHATSAPP_SENT = ['whatsapp_sent'];
 const WHATSAPP_REPLIED = ['lead_replied'];
-const COMMERCIAL_TYPES = ['appointment_booked', 'appointment_completed', 'converted', 'disqualified'];
+const COMMERCIAL_TYPES = ['qualified', 'appointment_booked', 'appointment_completed', 'converted', 'disqualified'];
 
 type EvidenceRow = { client_id: string | null; client_name: string | null; last_activity: Date };
 

@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import { checkMakeEventsAuth, type MakeEventsAuthFailureReason } from '@/lib/server/make-events-auth';
-import { CommercialConversionValidationError, LeadNotFoundError, appendCommercialEvent, type CommercialEventType } from '@/lib/server/leads-repo';
+import {
+  CommercialConversionValidationError,
+  CommercialEventIdempotencyConflictError,
+  LeadNotFoundError,
+  LeadStageTransitionError,
+  appendCommercialEvent,
+  type CommercialEventType,
+} from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { CommercialEventBodySchema } from '@/lib/server/schemas';
 
@@ -21,6 +28,7 @@ const AUTH_ERROR_MESSAGE: Record<MakeEventsAuthFailureReason, string> = {
 };
 
 const DEFAULT_SUMMARY: Record<CommercialEventType, string> = {
+  qualified: 'Lead qualified',
   appointment_booked: 'Appointment booked',
   appointment_completed: 'Appointment completed',
   converted: 'Lead converted',
@@ -71,6 +79,8 @@ export async function POST(request: Request): Promise<Response> {
     );
   } catch (error) {
     if (error instanceof LeadNotFoundError) return jsonError(404, 'lead not found');
+    if (error instanceof CommercialEventIdempotencyConflictError) return jsonError(409, error.message);
+    if (error instanceof LeadStageTransitionError) return jsonError(409, error.message);
     if (error instanceof CommercialConversionValidationError) return jsonError(422, error.message);
     return unexpectedError('POST /api/leads/commercial-events', error);
   }

@@ -130,6 +130,7 @@ function eventLabel(type: LeadEvent['type']): string {
     whatsapp_delivered: 'WhatsApp entregado',
     lead_replied: 'Lead respondió',
     commercial_contacted: 'Contacto comercial',
+    qualified: 'Cualificado',
     appointment_booked: 'Cita reservada',
     appointment_completed: 'Cita completada',
     converted: 'Convertido',
@@ -170,6 +171,7 @@ function LeadMobileCard({
   const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
   const contact = lead.email || lead.phone || lead.whatsapp || 'Sin contacto';
+  const isTerminal = lead.stage === 'converted' || lead.stage === 'disqualified';
   const [showConversion, setShowConversion] = useState(false);
   const [serviceId, setServiceId] = useState('');
   const [agreedValue, setAgreedValue] = useState('');
@@ -216,6 +218,7 @@ function LeadMobileCard({
           <select
             value={lead.stage}
             onChange={(event) => onStageChange(event.target.value as LeadStage)}
+            disabled={isTerminal}
             className="mt-1 w-full min-w-0 border border-os-border bg-os-surface2 px-2 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-text outline-none"
           >
             {LEAD_STAGE_OPTIONS.map((stage) => <option key={stage.id} value={stage.id}>{stage.label}</option>)}
@@ -275,7 +278,9 @@ function LeadMobileCard({
       )}
 
       <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-os-border pt-3">
-        <button type="button" disabled={services.length === 0} onClick={openConversion} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:opacity-40">{lead.conversionSnapshot ? 'Editar conversión' : 'Registrar conversión'}</button>
+        <button type="button" disabled={isTerminal} onClick={() => onCommercialEvent('qualified')} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:cursor-not-allowed disabled:opacity-40">Cualificar</button>
+        <button type="button" disabled={isTerminal} onClick={() => onCommercialEvent('disqualified')} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:cursor-not-allowed disabled:opacity-40">No cualificado</button>
+        <button type="button" disabled={services.length === 0 || lead.stage === 'disqualified'} onClick={openConversion} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:opacity-40">{lead.conversionSnapshot ? 'Editar conversión' : 'Registrar conversión'}</button>
         <button type="button" onClick={onAddNote} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Añadir nota</button>
         <button type="button" onClick={onEdit} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted">Editar</button>
       </div>
@@ -327,6 +332,7 @@ function LeadRow({
 }) {
   const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
+  const isTerminal = lead.stage === 'converted' || lead.stage === 'disqualified';
 
   // Quick-action drafts — local, ephemeral UI state scoped to this row, same
   // shape as the "Añadir nota" draft one level up. Re-synced whenever the
@@ -378,6 +384,7 @@ function LeadRow({
           <select
             value={lead.stage}
             onChange={(event) => onStageChange(event.target.value as LeadStage)}
+            disabled={isTerminal}
             className="w-full min-w-[120px] border border-os-border bg-os-surface px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-os-text outline-none"
           >
             {LEAD_STAGE_OPTIONS.map((stage) => (
@@ -586,6 +593,14 @@ function LeadRow({
                 regardless of whether it originated in Make or here. */}
             <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-os-border pt-3">
               <span className="mr-1 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Acciones comerciales</span>
+              <button
+                type="button"
+                disabled={isTerminal}
+                onClick={() => onCommercialEvent('qualified')}
+                className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Cualificar
+              </button>
               <input
                 type="datetime-local"
                 value={appointmentDraft}
@@ -594,7 +609,7 @@ function LeadRow({
               />
               <button
                 type="button"
-                disabled={!appointmentDraft}
+                disabled={!appointmentDraft || isTerminal}
                 onClick={() => {
                   const iso = fromDatetimeLocalValue(appointmentDraft);
                   if (iso) onCommercialEvent('appointment_booked', { appointmentDate: iso });
@@ -605,14 +620,15 @@ function LeadRow({
               </button>
               <button
                 type="button"
+                disabled={isTerminal}
                 onClick={() => onCommercialEvent('appointment_completed')}
-                className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent"
+                className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Cita realizada
               </button>
               <button
                 type="button"
-                disabled={services.length === 0}
+                disabled={services.length === 0 || lead.stage === 'disqualified'}
                 onClick={openConversion}
                 className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent"
               >
@@ -620,10 +636,11 @@ function LeadRow({
               </button>
               <button
                 type="button"
+                disabled={isTerminal}
                 onClick={() => onCommercialEvent('disqualified')}
-                className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-err"
+                className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-err disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Descartado
+                No cualificado
               </button>
             </div>
             {lead.conversionSnapshot && lead.conversionValue != null && (
@@ -857,10 +874,15 @@ export default function LeadsPage() {
           conversionValue,
         });
         if (existing && existing.stage !== draft.stage) {
-          await setLeadStage(editingLeadId, draft.stage);
+          if (draft.stage === 'qualified' || draft.stage === 'disqualified') {
+            await appendCommercialEvent(editingLeadId, { type: draft.stage });
+          } else {
+            await setLeadStage(editingLeadId, draft.stage);
+          }
         }
       } else {
-        await createLead({
+        const semanticStage = draft.stage === 'qualified' || draft.stage === 'disqualified' ? draft.stage : null;
+        const created = await createLead({
           scope,
           clientId,
           name,
@@ -871,10 +893,13 @@ export default function LeadsPage() {
           campaign,
           adCreative,
           form,
-          stage: draft.stage,
+          stage: semanticStage ? 'new' : draft.stage,
           appointmentDate,
           conversionValue,
         });
+        if (semanticStage) {
+          await appendCommercialEvent(created.lead.id, { type: semanticStage });
+        }
       }
       await reloadLeads();
       closeForm();
@@ -885,7 +910,11 @@ export default function LeadsPage() {
 
   const handleStageChange = async (leadId: string, nextStage: LeadStage) => {
     try {
-      await setLeadStage(leadId, nextStage);
+      if (nextStage === 'qualified' || nextStage === 'disqualified') {
+        await appendCommercialEvent(leadId, { type: nextStage });
+      } else {
+        await setLeadStage(leadId, nextStage);
+      }
       await reloadLeads();
       await refreshEventsForLead(leadId);
     } catch (error) {

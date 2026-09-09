@@ -46,6 +46,8 @@ export function maxReachedStageRank(lead: Lead, events: LeadEvent[]): number {
       const to = (event.details as { to?: string } | null | undefined)?.to;
       const rank = to ? STAGE_RANK[to as LeadStage] : undefined;
       if (rank != null && rank > max) max = rank;
+    } else if (event.type === 'qualified') {
+      if (STAGE_RANK.qualified > max) max = STAGE_RANK.qualified;
     } else if (event.type === 'converted') {
       if (STAGE_RANK.converted > max) max = STAGE_RANK.converted;
     } else if (event.type === 'appointment_booked' || event.type === 'appointment_completed') {

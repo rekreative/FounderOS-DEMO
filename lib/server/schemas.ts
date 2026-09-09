@@ -91,6 +91,7 @@ export const LeadEventTypeSchema = z.enum([
   'whatsapp_delivered',
   'lead_replied',
   'commercial_contacted',
+  'qualified',
   'appointment_booked',
   'appointment_completed',
   'converted',
@@ -314,6 +315,7 @@ export const ListWhatsAppBusinessNumbersQuerySchema = z
 // Neither body ever carries `stage` either — stage is derived server-side by
 // lib/server/leads-repo.ts's appendCommercialEvent.
 export const CommercialEventTypeSchema = z.enum([
+  'qualified',
   'appointment_booked',
   'appointment_completed',
   'converted',
@@ -366,6 +368,16 @@ function validateConversionTerms(
  * domain rules need them (see appendCommercialEvent).
  */
 export const CommercialEventBodySchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('qualified'),
+      leadId: z.string().trim().min(1),
+      externalEventId: z.string().trim().min(1),
+      occurredAt: isoDateTime.optional(),
+      details: z.record(z.unknown()).optional(),
+      ...commercialEventSharedFields,
+    })
+    .strict(),
   z
     .object({
       type: z.literal('appointment_booked'),
@@ -422,6 +434,7 @@ export const CommercialEventBodySchema = z.discriminatedUnion('type', [
  * stage/source discipline as the Make schema above.
  */
 export const ManualCommercialEventBodySchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('qualified'), ...commercialEventSharedFields }).strict(),
   z.object({ type: z.literal('appointment_booked'), appointmentDate: isoDateTime, ...commercialEventSharedFields }).strict(),
   z.object({ type: z.literal('appointment_completed'), ...commercialEventSharedFields }).strict(),
   z

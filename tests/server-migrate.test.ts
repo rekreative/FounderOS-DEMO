@@ -383,7 +383,19 @@ describe('migration file discovery', () => {
       '0011_internal_business_workspace.sql',
       '0012_whatsapp_tenant_routing.sql',
       '0013_commercial_conversion_v1.sql',
+      '0014_qualification_v1.sql',
     ]);
+  });
+});
+
+describe('0014_qualification_v1.sql promotes qualified to a semantic event', () => {
+  const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, '0014_qualification_v1.sql'), 'utf8');
+
+  it('replaces the event-type check and includes qualified without adding a second state', () => {
+    expect(sql).toMatch(/DROP CONSTRAINT IF EXISTS lead_events_type_check/);
+    expect(sql).toMatch(/ADD CONSTRAINT lead_events_type_check CHECK/);
+    expect(sql).toContain("'qualified'");
+    expect(sql).not.toMatch(/qualification_status/i);
   });
 });
 

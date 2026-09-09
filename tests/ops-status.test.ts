@@ -449,11 +449,11 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/ops-status — getClientO
 
   it('[D] commercial lifecycle: source=manual never produces activity_observed for this client, source=make does', async () => {
     const client = await makeClient();
-    const { lead } = await createLead({ scope: 'client', clientId: client.id, name: 'Commercial Lifecycle Client Lead' });
-    createdLeadIds.push(lead.id);
+    const { lead: manualLead } = await createLead({ scope: 'client', clientId: client.id, name: 'Manual Commercial Lead' });
+    createdLeadIds.push(manualLead.id);
 
     await appendCommercialEvent({
-      leadId: lead.id,
+      leadId: manualLead.id,
       type: 'converted',
       source: 'manual',
       summary: 'Converted manually by an operator',
@@ -463,8 +463,13 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/ops-status — getClientO
     let commercial = snapshot.automations.find((a) => a.id === 'commercial_lifecycle')!;
     expect(commercial.status).not.toBe('activity_observed');
 
+    // Terminal leads cannot be moved backwards. Use a second lead to prove
+    // Make evidence for the same client without constructing an invalid
+    // converted-to-appointment transition.
+    const { lead: makeLead } = await createLead({ scope: 'client', clientId: client.id, name: 'Make Commercial Lead' });
+    createdLeadIds.push(makeLead.id);
     await appendCommercialEvent({
-      leadId: lead.id,
+      leadId: makeLead.id,
       type: 'appointment_booked',
       source: 'make',
       summary: 'Booked by Make',

@@ -1,6 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { closePool, query } from '@/lib/server/db';
 import {
+  CommercialEventIdempotencyConflictError,
+  LeadStageTransitionError,
   LeadNotFoundError,
   appendCommercialEvent,
   createLead,
@@ -69,6 +71,72 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
 
   // ── Repository primitive — direct coverage of the stage rules ──────────
   describe('appendCommercialEvent (repository)', () => {
+    it.each(['new', 'contacted', 'no_response'] as const)('%s → qualified creates the semantic event and advances stage', async (startStage) => {
+      const lead = await makeLead();
+      if (startStage !== 'new') await setLeadStage(lead.id, startStage);
+
+      const result = await appendCommercialEvent({
+        leadId: lead.id,
+        type: 'qualified',
+        source: 'make',
+        summary: 'Lead qualified',
+        externalEventId: `qualified-${startStage}`,
+      });
+
+      expect(result.lead.stage).toBe('qualified');
+      expect(result.event.type).toBe('qualified');
+      const events = await listLeadEvents(lead.id);
+      expect(events.slice(-2).map((event) => event.type)).toEqual(['qualified', 'stage_changed']);
+    });
+
+    it('qualified → appointment → converted preserves the approved lifecycle', async () => {
+      const lead = await makeLead();
+      await appendCommercialEvent({
+        leadId: lead.id,
+        type: 'qualified',
+        source: 'make',
+        summary: 'Lead qualified',
+        externalEventId: 'qualified-sequence',
+      });
+      const appointment = await appendCommercialEvent({
+        leadId: lead.id,
+        type: 'appointment_booked',
+        source: 'make',
+        summary: 'Appointment booked',
+        externalEventId: 'appointment-sequence',
+        appointmentDate: '2026-09-15T10:00:00.000Z',
+      });
+      expect(appointment.lead.stage).toBe('appointment');
+
+      const converted = await appendCommercialEvent({
+        leadId: lead.id,
+        type: 'converted',
+        source: 'make',
+        summary: 'Lead converted',
+        externalEventId: 'converted-sequence',
+      });
+      expect(converted.lead.stage).toBe('converted');
+    });
+
+    it('qualified → disqualified remains supported', async () => {
+      const lead = await makeLead();
+      await appendCommercialEvent({
+        leadId: lead.id,
+        type: 'qualified',
+        source: 'make',
+        summary: 'Lead qualified',
+        externalEventId: 'qualified-before-disqualified',
+      });
+      const result = await appendCommercialEvent({
+        leadId: lead.id,
+        type: 'disqualified',
+        source: 'make',
+        summary: 'Lead disqualified',
+        externalEventId: 'disqualified-after-qualified',
+      });
+      expect(result.lead.stage).toBe('disqualified');
+    });
+
     it('appointment_booked stores appointmentDate and moves new → appointment', async () => {
       const lead = await makeLead();
       const appointmentDate = new Date('2026-09-01T10:00:00.000Z').toISOString();
@@ -106,7 +174,7 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
       },
     );
 
-    it('appointment_booked does not move an already-converted lead', async () => {
+    it('appointment_booked is rejected for an already-converted lead', async () => {
       const lead = await makeLead();
       await appendCommercialEvent({
         leadId: lead.id,
@@ -115,20 +183,21 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
         summary: 'Lead converted',
         externalEventId: 'conv-1',
       });
-      const result = await appendCommercialEvent({
-        leadId: lead.id,
-        type: 'appointment_booked',
-        source: 'make',
-        summary: 'Appointment booked',
-        externalEventId: 'booking-late',
-        appointmentDate: new Date().toISOString(),
-      });
-      expect(result.lead.stage).toBe('converted');
+      await expect(
+        appendCommercialEvent({
+          leadId: lead.id,
+          type: 'appointment_booked',
+          source: 'make',
+          summary: 'Appointment booked',
+          externalEventId: 'booking-late',
+          appointmentDate: new Date().toISOString(),
+        }),
+      ).rejects.toBeInstanceOf(LeadStageTransitionError);
       const events = await listLeadEvents(lead.id);
-      expect(events.some((e) => e.type === 'appointment_booked')).toBe(true);
+      expect(events.some((e) => e.type === 'appointment_booked')).toBe(false);
     });
 
-    it('appointment_booked does not move an already-disqualified lead', async () => {
+    it('appointment_booked is rejected for an already-disqualified lead', async () => {
       const lead = await makeLead();
       await appendCommercialEvent({
         leadId: lead.id,
@@ -137,15 +206,17 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
         summary: 'Lead disqualified',
         externalEventId: 'dq-1',
       });
-      const result = await appendCommercialEvent({
-        leadId: lead.id,
-        type: 'appointment_booked',
-        source: 'make',
-        summary: 'Appointment booked',
-        externalEventId: 'booking-late',
-        appointmentDate: new Date().toISOString(),
-      });
-      expect(result.lead.stage).toBe('disqualified');
+      await expect(
+        appendCommercialEvent({
+          leadId: lead.id,
+          type: 'appointment_booked',
+          source: 'make',
+          summary: 'Appointment booked',
+          externalEventId: 'booking-late',
+          appointmentDate: new Date().toISOString(),
+        }),
+      ).rejects.toBeInstanceOf(LeadStageTransitionError);
+      expect((await getLeadById(lead.id))?.stage).toBe('disqualified');
     });
 
     it('reschedule with a NEW externalEventId updates appointmentDate and keeps both events', async () => {
@@ -306,7 +377,7 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
       },
     );
 
-    it('converted does not automatically revive a disqualified lead', async () => {
+    it('converted is rejected for a disqualified lead without recording fields or events', async () => {
       const lead = await makeLead();
       await appendCommercialEvent({
         leadId: lead.id,
@@ -315,19 +386,19 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
         summary: 'Lead disqualified',
         externalEventId: 'dq-1',
       });
-      const result = await appendCommercialEvent({
-        leadId: lead.id,
-        type: 'converted',
-        source: 'make',
-        summary: 'Lead converted',
-        externalEventId: 'conv-late',
-        conversionValue: 100,
-      });
-      expect(result.lead.stage).toBe('disqualified');
-      // Event/field still recorded for audit purposes.
-      expect(result.lead.conversionValue).toBe(100);
+      await expect(
+        appendCommercialEvent({
+          leadId: lead.id,
+          type: 'converted',
+          source: 'make',
+          summary: 'Lead converted',
+          externalEventId: 'conv-late',
+          conversionValue: 100,
+        }),
+      ).rejects.toBeInstanceOf(LeadStageTransitionError);
+      expect((await getLeadById(lead.id))?.conversionValue).toBeNull();
       const events = await listLeadEvents(lead.id);
-      expect(events.some((e) => e.type === 'converted')).toBe(true);
+      expect(events.some((e) => e.type === 'converted')).toBe(false);
     });
 
     it.each(['new', 'contacted', 'qualified', 'appointment', 'no_response'] as const)(
@@ -346,7 +417,7 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
       },
     );
 
-    it('disqualified never moves an already-converted lead', async () => {
+    it('disqualified is rejected for an already-converted lead', async () => {
       const lead = await makeLead();
       await appendCommercialEvent({
         leadId: lead.id,
@@ -355,19 +426,21 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
         summary: 'Lead converted',
         externalEventId: 'conv-1',
       });
-      const result = await appendCommercialEvent({
-        leadId: lead.id,
-        type: 'disqualified',
-        source: 'make',
-        summary: 'Lead disqualified',
-        externalEventId: 'dq-late',
-      });
-      expect(result.lead.stage).toBe('converted');
+      await expect(
+        appendCommercialEvent({
+          leadId: lead.id,
+          type: 'disqualified',
+          source: 'make',
+          summary: 'Lead disqualified',
+          externalEventId: 'dq-late',
+        }),
+      ).rejects.toBeInstanceOf(LeadStageTransitionError);
+      expect((await getLeadById(lead.id))?.stage).toBe('converted');
       const events = await listLeadEvents(lead.id);
-      expect(events.some((e) => e.type === 'disqualified')).toBe(true);
+      expect(events.some((e) => e.type === 'disqualified')).toBe(false);
     });
 
-    it('duplicates are idempotent across all four event types', async () => {
+    it('commercial event retries remain idempotent', async () => {
       const lead = await makeLead();
       const first = await appendCommercialEvent({
         leadId: lead.id,
@@ -388,6 +461,108 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
       expect(second.event.id).toBe(first.event.id);
       const events = await listLeadEvents(lead.id);
       expect(events.filter((e) => e.type === 'disqualified')).toHaveLength(1);
+    });
+
+    it('qualified retry with the same externalEventId and lead is idempotent', async () => {
+      const lead = await makeLead();
+      const input = {
+        leadId: lead.id,
+        type: 'qualified' as const,
+        source: 'make' as const,
+        summary: 'Lead qualified',
+        externalEventId: 'qualified-retry',
+      };
+      const first = await appendCommercialEvent(input);
+      const second = await appendCommercialEvent(input);
+      expect(first.deduped).toBe(false);
+      expect(second.deduped).toBe(true);
+      expect(second.event.id).toBe(first.event.id);
+    });
+
+    it('qualified retry remains idempotent after the same lead later converts', async () => {
+      const lead = await makeLead();
+      const qualifiedInput = {
+        leadId: lead.id,
+        type: 'qualified' as const,
+        source: 'make' as const,
+        summary: 'Lead qualified',
+        externalEventId: 'qualified-before-conversion-retry',
+      };
+      const first = await appendCommercialEvent(qualifiedInput);
+      await appendCommercialEvent({
+        leadId: lead.id,
+        type: 'converted',
+        source: 'make',
+        summary: 'Lead converted',
+        externalEventId: 'conversion-after-qualified',
+      });
+
+      const retry = await appendCommercialEvent(qualifiedInput);
+      expect(retry.deduped).toBe(true);
+      expect(retry.event.id).toBe(first.event.id);
+      expect(retry.lead.stage).toBe('converted');
+    });
+
+    it('rejects reuse of type + externalEventId by another lead without mutating it', async () => {
+      const firstLead = await makeLead({ name: 'First lead' });
+      const secondLead = await makeLead({ name: 'Second lead' });
+      await appendCommercialEvent({
+        leadId: firstLead.id,
+        type: 'qualified',
+        source: 'make',
+        summary: 'Lead qualified',
+        externalEventId: 'qualified-cross-lead',
+      });
+
+      await expect(
+        appendCommercialEvent({
+          leadId: secondLead.id,
+          type: 'qualified',
+          source: 'make',
+          summary: 'Lead qualified',
+          externalEventId: 'qualified-cross-lead',
+        }),
+      ).rejects.toBeInstanceOf(CommercialEventIdempotencyConflictError);
+      expect((await getLeadById(secondLead.id))?.stage).toBe('new');
+      expect((await listLeadEvents(secondLead.id)).map((event) => event.type)).toEqual(['lead_received']);
+    });
+
+    it.each([
+      ['converted', 'disqualified'],
+      ['disqualified', 'converted'],
+    ] as const)('rejects the incompatible terminal transition %s → %s before recording an event', async (startStage, eventType) => {
+      const lead = await makeLead();
+      await appendCommercialEvent({
+        leadId: lead.id,
+        type: startStage,
+        source: 'make',
+        summary: `Lead ${startStage}`,
+        externalEventId: `terminal-${startStage}`,
+      });
+      const before = await listLeadEvents(lead.id);
+
+      await expect(
+        appendCommercialEvent({
+          leadId: lead.id,
+          type: eventType,
+          source: 'make',
+          summary: `Lead ${eventType}`,
+          externalEventId: `terminal-conflict-${eventType}`,
+        }),
+      ).rejects.toBeInstanceOf(LeadStageTransitionError);
+      expect(await listLeadEvents(lead.id)).toEqual(before);
+    });
+
+    it('the generic manual stage path cannot reopen a terminal lead', async () => {
+      const lead = await makeLead();
+      await appendCommercialEvent({
+        leadId: lead.id,
+        type: 'converted',
+        source: 'manual',
+        summary: 'Lead converted',
+      });
+      await expect(setLeadStage(lead.id, 'qualified')).rejects.toBeInstanceOf(LeadStageTransitionError);
+      expect((await getLeadById(lead.id))?.stage).toBe('converted');
     });
 
     it('the same externalEventId is allowed across different event types', async () => {
@@ -445,6 +620,21 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
 
   // ── POST /api/leads/commercial-events (Make) ────────────────────────────
   describe('POST /api/leads/commercial-events (Make)', () => {
+    it('accepts an authenticated qualified event and rejects cross-lead key reuse with 409', async () => {
+      const firstLead = await makeLead({ name: 'First API lead' });
+      const secondLead = await makeLead({ name: 'Second API lead' });
+      const body = { type: 'qualified', externalEventId: 'route-qualified-cross-lead' };
+
+      const first = await postMake({ ...body, leadId: firstLead.id });
+      expect(first.status).toBe(201);
+      const retry = await postMake({ ...body, leadId: firstLead.id });
+      expect(retry.status).toBe(200);
+      expect((await retry.json()).deduped).toBe(true);
+      const conflict = await postMake({ ...body, leadId: secondLead.id });
+      expect(conflict.status).toBe(409);
+      expect((await getLeadById(secondLead.id))?.stage).toBe('new');
+    });
+
     it('accepts an authenticated appointment_booked, sourced "make"', async () => {
       const lead = await makeLead();
       const res = await postMake({
@@ -517,6 +707,15 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
 
   // ── POST /api/leads/[id]/commercial-events (manual) ─────────────────────
   describe('POST /api/leads/[id]/commercial-events (manual)', () => {
+    it('qualified creates a semantic event sourced manual', async () => {
+      const lead = await makeLead();
+      const res = await postManual(lead.id, { type: 'qualified' });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { lead: { stage: string }; event: { source: string; type: string } };
+      expect(body.lead.stage).toBe('qualified');
+      expect(body.event).toMatchObject({ type: 'qualified', source: 'manual' });
+    });
+
     it('appointment_booked creates a semantic event sourced "manual"', async () => {
       const lead = await makeLead();
       const res = await postManual(lead.id, {

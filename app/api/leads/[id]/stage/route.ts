@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { setLeadStage } from '@/lib/server/leads-repo';
+import { LeadStageTransitionError, setLeadStage } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { StageChangeBodySchema } from '@/lib/server/schemas';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
@@ -21,6 +21,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     if (!result) return jsonError(404, 'lead not found');
     return NextResponse.json({ lead: result.lead, event: result.event });
   } catch (error) {
+    if (error instanceof LeadStageTransitionError) return jsonError(409, error.message);
     return unexpectedError('POST /api/leads/[id]/stage', error);
   }
 }
