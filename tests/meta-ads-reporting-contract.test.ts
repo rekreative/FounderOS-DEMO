@@ -51,4 +51,11 @@ describe('Meta Ads Reporting V1 contract', () => {
     expect(page).toContain("paused: 'Pausada'");
     expect(page).toContain('campaignStatusLabel(campaign.status)');
   });
+
+  it('opens on REKREATIVE internal and uses campaign cards instead of a wide table on mobile', () => {
+    expect(page).toContain("useState<'all' | 'internal' | string>('internal')");
+    expect(page).toContain('aria-label="Campañas en móvil y tablet"');
+    expect(page).toContain('className="space-y-2 xl:hidden"');
+    expect(page).toContain('className="hidden overflow-x-auto border border-os-border bg-os-surface xl:block"');
+  });
 });

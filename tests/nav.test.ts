@@ -60,6 +60,12 @@ describe('shared nav config', () => {
     expect(connections?.href).toBe('/connections');
   });
 
+  test('the mobile primary bar links directly to Meta Ads instead of Más', () => {
+    const src = readFileSync(path.join(process.cwd(), 'components', 'MobileNav.tsx'), 'utf8');
+    expect(src).toContain("{ href: '/meta-ads', label: 'Meta Ads'");
+    expect(src).not.toContain("{ href: '/connections', label: 'Más'");
+  });
+
   test('digit shortcuts (1–9) map to the first 9 REKREATIVE views in visible order', () => {
     expect(DIGIT_VIEWS).toEqual(NAV_ORDER.slice(0, 9));
     expect(DIGIT_VIEWS).toHaveLength(9);

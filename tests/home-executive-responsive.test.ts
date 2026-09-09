@@ -15,6 +15,7 @@ describe('Home Executive responsive contract', () => {
     expect(home).not.toContain("from '@/lib/content-items'");
     expect(home).not.toContain('localStorage');
     expect(home).not.toContain('demo');
+    expect(home).toContain("getMetaAdsCampaigns({ ownerScope: 'internal', preset: 'all' })");
   });
 
   test('puts priorities, KPIs, funnel, clients and the operational agenda in one hierarchy', () => {
@@ -25,6 +26,9 @@ describe('Home Executive responsive contract', () => {
     expect(home).toContain('Pulso operativo');
     expect(home).toContain('Agenda operativa');
     expect(home).toContain('Necesita atención');
+    expect(home).toContain('Rendimiento REKREATIVE');
+    expect(home).toContain('ROAS');
+    expect(home).toContain('CAC');
   });
 
   test('groups the dashboard into dense responsive panels', () => {
@@ -66,7 +70,9 @@ describe('Home Executive responsive contract', () => {
     expect(mobileNav).toContain("href: '/clients'");
     expect(mobileNav).toContain("href: '/leads'");
     expect(mobileNav).toContain("href: '/results'");
-    expect(mobileNav).toContain("href: '/connections'");
+    expect(mobileNav).toContain("href: '/meta-ads'");
+    expect(mobileNav).toContain("label: 'Meta Ads'");
+    expect(mobileNav).not.toContain("label: 'Más'");
   });
 
 });

@@ -86,6 +86,7 @@ export type ResultsHomeResponse = {
   recentActivity: RecentActivityEntry[];
   valueGenerated: { total: number | null; average: number | null; count: number; days: number };
   clientSnapshot: ClientOperationalSnapshot[];
+  internalPerformance: ResultsComputation;
 };
 
 export async function getResultsHomeSnapshot(options: { limit?: number; days?: number } = {}): Promise<ResultsHomeResponse> {

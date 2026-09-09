@@ -104,6 +104,7 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('app/api/results routes (real Postgre
     expect(body).toHaveProperty('recentActivity');
     expect(body).toHaveProperty('valueGenerated');
     expect(body).toHaveProperty('clientSnapshot');
+    expect(body).toHaveProperty('internalPerformance');
   });
 
   it('GET /api/results/home respects a custom limit', async () => {

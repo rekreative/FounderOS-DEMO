@@ -228,6 +228,21 @@ export async function getResults(options: ResultsQueryOptions): Promise<ResultsR
   return { period, overall, byClient };
 }
 
+/**
+ * REKREATIVE's own all-time commercial and paid-media performance. Internal
+ * leads and internal Meta mappings are resolved independently from every
+ * client tenant, so Home can show the operator's real CAC/ROAS without
+ * blending the client portfolio into the calculation.
+ */
+export async function getInternalPerformanceSnapshot(): Promise<ResultsComputation> {
+  const period = resolveResultsPeriod('all');
+  const [{ leads, eventsByLead }, metaSummary] = await Promise.all([
+    loadCohort({ scope: 'internal' }),
+    getMetaSpendSummary({ ownerScope: 'internal' }),
+  ]);
+  return computeCohortResult(null, leads, eventsByLead, period, metaSummary);
+}
+
 // ── Home (operational, current-activity — event-time semantics) ──────────
 // Deliberately NOT cohort/created_at-filtered: Home answers "what is
 // happening right now", not "what happened to leads acquired in a period".

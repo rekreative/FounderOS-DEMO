@@ -51,6 +51,10 @@ function formatDateShort(value: string | null): string {
   return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
 }
 
+function formatPreciseEUR(value: number): string {
+  return `${value.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+}
+
 function StatTile({ href, label, value, unit, detail, icon: Icon, className = '' }: {
   href: string; label: string; value: ReactNode; unit: string; detail: string; icon: LucideIcon; className?: string;
 }) {
@@ -173,7 +177,7 @@ export default function HomePage() {
 
   useEffect(() => {
     let cancelled = false;
-    getMetaAdsCampaigns({ preset: 'all' })
+    getMetaAdsCampaigns({ ownerScope: 'internal', preset: 'all' })
       .then((response) => {
         if (cancelled) return;
         setMetaAdsCampaignCounts({
@@ -227,6 +231,7 @@ export default function HomePage() {
   const upcomingAppointments = homeSnapshot?.upcomingAppointments ?? [];
   const recentActivity = homeSnapshot?.recentActivity ?? [];
   const valueGenerated = homeSnapshot?.valueGenerated ?? null;
+  const internalPerformance = homeSnapshot?.internalPerformance ?? null;
   const operationalAutomations = opsSnapshot?.automations.filter((item) =>
     item.status === 'operational' || item.status === 'activity_observed').length ?? 0;
 
@@ -265,6 +270,16 @@ export default function HomePage() {
         <StatTile href="/leads" label="Próximas citas" value={upcomingAppointments.length} unit="agenda" detail="Pendientes" icon={CalendarDays} />
         <StatTile href="/results" label="Conversiones" value={convertedLeads} unit={`${funnelRate}% cierre`} detail="Sobre leads totales" icon={ArrowUpRight} />
         <StatTile href="/results" label="Valor generado" value={valueGenerated?.total == null ? 'Sin datos' : formatEUR(valueGenerated.total)} unit={`${valueGenerated?.days ?? 7} días`} detail="Ingresos atribuidos" icon={CircleDollarSign} className="col-span-2 md:col-span-1" />
+      </section>
+
+      <SectionHead label="Rendimiento REKREATIVE" link="Ver Meta Ads" href="/meta-ads" />
+      <section aria-label="Rendimiento REKREATIVE" className="mb-5 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+        <StatTile href="/meta-ads" label="Gasto Meta" value={internalPerformance?.meta.spend == null ? '—' : formatPreciseEUR(internalPerformance.meta.spend)} unit="invertidos" detail="Solo cuentas internas" icon={Megaphone} />
+        <StatTile href="/results" label="Valor generado" value={internalPerformance?.value.total == null ? '—' : formatEUR(internalPerformance.value.total)} unit="atribuido" detail="Conversiones REKREATIVE" icon={CircleDollarSign} />
+        <StatTile href="/results" label="ROAS" value={internalPerformance?.meta.roas == null ? '—' : internalPerformance.meta.roas.toLocaleString('es-ES', { maximumFractionDigits: 2 })} unit="x retorno" detail="Valor / gasto Meta" icon={ArrowUpRight} />
+        <StatTile href="/results" label="CAC" value={internalPerformance?.meta.cac == null ? '—' : formatPreciseEUR(internalPerformance.meta.cac)} unit="por cierre" detail="Gasto / conversiones" icon={Target} />
+        <StatTile href="/results" label="CPL CRM" value={internalPerformance?.meta.cplCrm == null ? '—' : formatPreciseEUR(internalPerformance.meta.cplCrm)} unit="por lead" detail="Gasto / leads REKREOS" icon={Users} />
+        <StatTile href="/meta-ads" label="CTR Meta" value={internalPerformance?.meta.ctr == null ? '—' : `${(internalPerformance.meta.ctr * 100).toLocaleString('es-ES', { maximumFractionDigits: 2 })}%`} unit="tasa" detail="Clics / impresiones" icon={Megaphone} />
       </section>
 
       <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-12">

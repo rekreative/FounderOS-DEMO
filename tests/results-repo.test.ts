@@ -6,6 +6,7 @@ import { upsertMetaCampaignDailyMetrics } from '@/lib/server/meta-repo';
 import {
   getClientOperationalSnapshot,
   getHighPriorityLeads,
+  getInternalPerformanceSnapshot,
   getLeadsAwaitingFirstContact,
   getRecentActivity,
   getRecentConversions,
@@ -373,6 +374,18 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/results-repo (real Postgr
       expect(row?.leads).toBe(2);
       expect(row?.conversions).toBe(1);
       expect(row?.valueGenerated).toBe(650);
+    });
+  });
+
+  describe('getInternalPerformanceSnapshot', () => {
+    it('counts only REKREATIVE internal leads and never blends in a client tenant', async () => {
+      const before = await getInternalPerformanceSnapshot();
+      const client = await makeClient();
+      await makeLead({ scope: 'client', clientId: client.id, name: 'Client-only Lead' });
+      await makeLead({ scope: 'internal', clientId: null, name: 'Internal-only Lead' });
+
+      const after = await getInternalPerformanceSnapshot();
+      expect(after.funnel.leads).toBe(before.funnel.leads + 1);
     });
   });
 

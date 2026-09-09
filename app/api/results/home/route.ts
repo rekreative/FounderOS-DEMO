@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import {
   getClientOperationalSnapshot,
   getHighPriorityLeads,
+  getInternalPerformanceSnapshot,
   getLeadsAwaitingFirstContact,
   getRecentActivity,
   getRecentConversions,
@@ -42,7 +43,7 @@ export async function GET(request: Request): Promise<Response> {
   const days = parsed.data.days ? Number(parsed.data.days) : DEFAULT_VALUE_WINDOW_DAYS;
 
   try {
-    const [recentLeads, highPriorityLeads, awaitingFirstContact, upcomingAppointments, recentConversions, recentActivity, valueGenerated, clientSnapshot] =
+    const [recentLeads, highPriorityLeads, awaitingFirstContact, upcomingAppointments, recentConversions, recentActivity, valueGenerated, clientSnapshot, internalPerformance] =
       await Promise.all([
         getRecentLeads(limit),
         getHighPriorityLeads(limit),
@@ -52,6 +53,7 @@ export async function GET(request: Request): Promise<Response> {
         getRecentActivity(limit),
         getValueGeneratedRecently(days),
         getClientOperationalSnapshot(),
+        getInternalPerformanceSnapshot(),
       ]);
 
     return NextResponse.json({
@@ -63,6 +65,7 @@ export async function GET(request: Request): Promise<Response> {
       recentActivity,
       valueGenerated: { ...valueGenerated, days },
       clientSnapshot,
+      internalPerformance,
     });
   } catch (error) {
     return unexpectedError('GET /api/results/home', error);

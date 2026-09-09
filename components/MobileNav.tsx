@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { BarChart3, Home, PlugZap, Target, Users } from 'lucide-react';
+import { BarChart3, Home, LayoutGrid, Target, Users } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 
 const ITEMS = [
@@ -9,7 +9,7 @@ const ITEMS = [
   { href: '/clients', label: 'Clientes', icon: Users },
   { href: '/leads', label: 'Leads', icon: Target },
   { href: '/results', label: 'Resultados', icon: BarChart3 },
-  { href: '/connections', label: 'Más', icon: PlugZap },
+  { href: '/meta-ads', label: 'Meta Ads', icon: LayoutGrid },
 ] as const;
 
 export function MobileNav() {

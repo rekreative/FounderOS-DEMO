@@ -170,7 +170,6 @@ function LeadMobileCard({
 }) {
   const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
-  const contact = lead.email || lead.phone || lead.whatsapp || 'Sin contacto';
   const isTerminal = lead.stage === 'converted' || lead.stage === 'disqualified';
   const [showConversion, setShowConversion] = useState(false);
   const [serviceId, setServiceId] = useState('');
@@ -194,7 +193,11 @@ function LeadMobileCard({
       <div className="flex min-w-0 items-start justify-between gap-3">
         <button type="button" onClick={onToggle} className="min-w-0 flex-1 text-left">
           <span className="block break-words text-[14px] font-semibold text-os-text">{lead.name}</span>
-          <span className="mt-1 block break-all font-mono text-[10px] text-os-dim">{contact}</span>
+          <span className="mt-1 block space-y-0.5 font-mono text-[10px] text-os-dim">
+            {lead.email && <span className="block break-all">{lead.email}</span>}
+            {(lead.phone || lead.whatsapp) && <span className="block break-all">{lead.phone || lead.whatsapp}</span>}
+            {!lead.email && !lead.phone && !lead.whatsapp && <span className="block">Sin contacto</span>}
+          </span>
         </button>
         <button
           type="button"

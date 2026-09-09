@@ -61,7 +61,7 @@ function campaignStatusLabel(status: string): string {
 
 export default function MetaAdsPage() {
   const { clients } = useClientsRegistry();
-  const [clientFilter, setClientFilter] = useState<'all' | 'internal' | string>('all');
+  const [clientFilter, setClientFilter] = useState<'all' | 'internal' | string>('internal');
   const [accountFilter, setAccountFilter] = useState<'all' | string>('all');
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
   const initialRange = useMemo(initialCustomRange, []);
@@ -130,7 +130,7 @@ export default function MetaAdsPage() {
   ];
 
   return (
-    <div className="p-4">
+    <div className="min-w-0 p-3 sm:p-4">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="font-mono text-[9.5px] uppercase tracking-[0.24em] text-os-dim">REKREATIVE PUBLICIDAD</div>
@@ -143,7 +143,7 @@ export default function MetaAdsPage() {
       </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-3 border border-os-border bg-os-surface p-3">
-        <label className="flex min-w-[190px] flex-col gap-1.5">
+        <label className="flex w-full min-w-0 flex-col gap-1.5 sm:w-auto sm:min-w-[190px]">
           <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Propietario</span>
           <select value={clientFilter} onChange={(event) => { setClientFilter(event.target.value); setAccountFilter('all'); }} className="border border-os-border bg-os-bg px-2.5 py-2 text-[12px] text-os-text">
             <option value="all">Todos los clientes</option>
@@ -152,7 +152,7 @@ export default function MetaAdsPage() {
           </select>
         </label>
 
-        <label className="flex min-w-[210px] flex-col gap-1.5">
+        <label className="flex w-full min-w-0 flex-col gap-1.5 sm:w-auto sm:min-w-[210px]">
           <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">Cuenta Meta</span>
           <select value={accountFilter} onChange={(event) => setAccountFilter(event.target.value)} disabled={activeAccounts.length === 0} className="border border-os-border bg-os-bg px-2.5 py-2 text-[12px] text-os-text disabled:opacity-50">
             <option value="all">Todas las cuentas</option>
@@ -209,7 +209,41 @@ export default function MetaAdsPage() {
         <div className="mb-4 overflow-x-auto border border-os-border bg-os-surface"><table className="w-full min-w-[640px] border-collapse text-left text-sm"><thead><tr className="bg-os-surface2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim"><th className="px-3 py-2 font-normal">Cliente</th><th className="px-3 py-2 font-normal">Gasto</th><th className="px-3 py-2 font-normal">Leads Meta</th><th className="px-3 py-2 font-normal">CPL</th><th className="px-3 py-2 font-normal">CTR</th></tr></thead><tbody>{data.byClient.slice().sort((a, b) => b.summary.spend - a.summary.spend).map((row) => <tr key={row.clientId} className="border-t border-os-border"><td className="px-3 py-2.5 text-[13px] font-semibold text-os-text">{clientNameById.get(row.clientId) ?? row.clientId}</td><td className="px-3 py-2.5 font-mono text-[10.5px] text-os-text">{formatCurrency(row.summary.spend)}</td><td className="px-3 py-2.5 font-mono text-[10.5px] text-os-text">{formatNumber(row.summary.leads)}</td><td className="px-3 py-2.5 font-mono text-[10.5px] text-os-text">{formatMoneyRate(row.summary.cpl)}</td><td className="px-3 py-2.5 font-mono text-[10.5px] text-os-muted">{formatPercent(row.summary.ctr)}</td></tr>)}</tbody></table></div>
       )}
 
-      <div className="overflow-x-auto border border-os-border bg-os-surface">
+      <div aria-label="Campañas en móvil y tablet" className="space-y-2 xl:hidden">
+        {loading ? (
+          <div className="border border-os-border bg-os-surface px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">Cargando…</div>
+        ) : error ? (
+          <div className="border border-os-border bg-os-surface px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">Informe no disponible.</div>
+        ) : !data || data.campaigns.length === 0 ? (
+          <div className="border border-os-border bg-os-surface px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">{emptyCampaignMessage}</div>
+        ) : data.campaigns.map((campaign) => (
+          <article key={`${campaign.metaAdAccountId ?? 'legacy'}:${campaign.metaCampaignId}`} className="min-w-0 border border-os-border bg-os-surface p-3">
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <h2 className="min-w-0 break-words text-[13px] font-semibold text-os-text">{campaign.campaignName}</h2>
+              <Badge tone={STATUS_TONE[campaign.status.trim().toLowerCase()] ?? 'default'}>{campaignStatusLabel(campaign.status)}</Badge>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-px bg-os-border">
+              {[
+                ['Gasto', formatCurrency(campaign.spend)],
+                ['Leads Meta', formatNumber(campaign.leads)],
+                ['Impresiones', formatNumber(campaign.impressions)],
+                ['Alcance diario*', campaign.reach == null ? '—' : formatNumber(campaign.reach)],
+                ['Clics', formatNumber(campaign.clicks)],
+                ['CTR', formatPercent(campaign.ctr)],
+                ['CPC', formatMoneyRate(campaign.cpc)],
+                ['CPL', formatMoneyRate(campaign.cpl)],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0 bg-os-surface2 px-2.5 py-2">
+                  <div className="break-words font-mono text-[8px] uppercase tracking-wide text-os-dim">{label}</div>
+                  <div className="mt-1 break-words font-mono text-[11px] text-os-text">{value}</div>
+                </div>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <div className="hidden overflow-x-auto border border-os-border bg-os-surface xl:block">
         <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
           <thead><tr className="bg-os-surface2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim"><th className="px-3 py-2 font-normal">Campaña</th><th className="px-3 py-2 font-normal">Estado</th><th className="px-3 py-2 font-normal">Gasto</th><th className="px-3 py-2 font-normal">Impresiones</th><th className="px-3 py-2 font-normal">Alcance diario*</th><th className="px-3 py-2 font-normal">Clics</th><th className="px-3 py-2 font-normal">CTR</th><th className="px-3 py-2 font-normal">CPC</th><th className="px-3 py-2 font-normal">Leads Meta</th><th className="px-3 py-2 font-normal">CPL</th></tr></thead>
           <tbody>
