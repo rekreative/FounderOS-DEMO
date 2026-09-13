@@ -153,8 +153,9 @@ function computeCohortResult(
 }
 
 export type ResultsQueryOptions = {
-  /** Omitted = global REKREATIVE view (every client, plus a byClient breakdown). */
+  /** Omitted = client portfolio. Internal is always isolated. */
   clientId?: string;
+  ownerScope?: 'internal' | 'client';
   preset: ResultsPeriodPreset;
   customStart?: string;
   customEnd?: string;
@@ -203,13 +204,22 @@ export async function getResults(options: ResultsQueryOptions): Promise<ResultsR
     return { period, overall: computation, byClient: [computation] };
   }
 
+  if (options.ownerScope === 'internal') {
+    const [{ leads, eventsByLead }, metaSummary] = await Promise.all([
+      loadCohort({ scope: 'internal', createdFrom, createdTo }),
+      getMetaSpendSummary({ ownerScope: 'internal', dateFrom: metaDateFrom, dateTo: metaDateTo }),
+    ]);
+    const computation = computeCohortResult(null, leads, eventsByLead, period, metaSummary);
+    return { period, overall: computation, byClient: [] };
+  }
+
   // Global view — REKREATIVE's own internal leads (scope 'internal',
   // clientId null) never belong to a client cohort, same exclusion the
   // client-side computeClientResults already applied via `lead.clientId ===
   // clientId`; fetching only scope 'client' here is the SQL-side equivalent.
   const [{ leads, eventsByLead }, overallMetaSummary, metaByClient] = await Promise.all([
     loadCohort({ scope: 'client', createdFrom, createdTo }),
-    getMetaSpendSummary({ dateFrom: metaDateFrom, dateTo: metaDateTo }),
+    getMetaSpendSummary({ ownerScope: 'client', dateFrom: metaDateFrom, dateTo: metaDateTo }),
     getMetaSpendSummaryByClient({ dateFrom: metaDateFrom, dateTo: metaDateTo }),
   ]);
 

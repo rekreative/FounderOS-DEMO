@@ -89,6 +89,7 @@ export const LeadEventTypeSchema = z.enum([
   'ai_analyzed',
   'whatsapp_sent',
   'whatsapp_delivered',
+  'whatsapp_failed',
   'lead_replied',
   'commercial_contacted',
   'qualified',
@@ -207,7 +208,7 @@ const ingestLeadAiAnalysisSchema = z
 // server-side from `type` (see app/api/leads/whatsapp-events/route.ts),
 // never caller-supplied, so a request can't spoof provenance the same way
 // a caller-supplied `stage` could bypass setLeadStage's event semantics.
-export const WhatsAppEventTypeSchema = z.enum(['whatsapp_sent', 'whatsapp_delivered', 'lead_replied']);
+export const WhatsAppEventTypeSchema = z.enum(['whatsapp_sent', 'whatsapp_delivered', 'whatsapp_failed', 'lead_replied']);
 
 const whatsAppEventCommonFields = {
   type: WhatsAppEventTypeSchema,
@@ -239,6 +240,13 @@ export const WhatsAppEventBodySchema = z.discriminatedUnion('type', [
     .object({
       ...whatsAppEventCommonFields,
       type: z.literal('whatsapp_delivered'),
+      leadId: z.string().trim().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      ...whatsAppEventCommonFields,
+      type: z.literal('whatsapp_failed'),
       leadId: z.string().trim().min(1),
     })
     .strict(),
@@ -470,6 +478,7 @@ export const ResultsPeriodPresetSchema = z.enum(['all', 'this_month', 'last_mont
 export const ResultsQuerySchema = z
   .object({
     clientId: z.string().trim().min(1).optional(),
+    ownerScope: z.enum(['internal', 'client']).optional(),
     preset: ResultsPeriodPresetSchema.optional(),
     start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'start must be YYYY-MM-DD').optional(),
     end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'end must be YYYY-MM-DD').optional(),
@@ -521,7 +530,10 @@ export const IngestLeadBodySchema = z
     ingestionSource: z.string().trim().min(1),
     externalLeadId: z.string().trim().min(1).nullable().optional(),
     leadSource: z.string().trim().min(1),
-    scope: LeadScopeSchema,
+    // Optional during the migration to canonical Meta form routing. When
+    // metaFormId resolves to one active mapping, REKREOS derives ownership;
+    // existing Make payloads may keep sending scope temporarily.
+    scope: LeadScopeSchema.optional(),
     clientId: z.string().trim().min(1).nullable().optional(),
     name: z.string().trim().min(1),
     email: z.string().trim().email().nullable().optional(),
@@ -539,6 +551,7 @@ export const IngestLeadBodySchema = z
     metaAdsetId: z.string().trim().min(1).nullable().optional(),
     metaAdId: z.string().trim().min(1).nullable().optional(),
     metaFormId: z.string().trim().min(1).nullable().optional(),
+    metaPageId: z.string().trim().min(1).nullable().optional(),
     qualificationAnswers: z.record(z.string()).nullable().optional(),
     aiAnalysis: ingestLeadAiAnalysisSchema.nullable().optional(),
   })

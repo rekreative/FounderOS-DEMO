@@ -32,6 +32,18 @@ function formatRelativeSync(value: string | null): string {
   return `hace ${Math.round(diffHours / 24)}d`;
 }
 
+function formatMetricDate(value: string | null | undefined): string {
+  if (!value) return 'Sin datos';
+  const [year, month, day] = value.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function metricDataIsStale(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const last = new Date(`${value}T00:00:00Z`);
+  return Date.now() - last.getTime() > 48 * 60 * 60 * 1000;
+}
+
 function inputDate(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -118,6 +130,7 @@ export default function MetaAdsPage() {
       : 'No hay datos en el periodo seleccionado.';
 
   const summary = data?.summary ?? null;
+  const staleMetrics = metricDataIsStale(data?.coverage?.lastDate);
   const kpis = [
     { label: 'Gasto', value: summary ? formatCurrency(summary.spend) : '—' },
     { label: 'Impresiones', value: summary ? formatNumber(summary.impressions) : '—' },
@@ -136,9 +149,11 @@ export default function MetaAdsPage() {
           <div className="font-mono text-[9.5px] uppercase tracking-[0.24em] text-os-dim">REKREATIVE PUBLICIDAD</div>
           <h1 className="mt-1 text-[25px] font-bold uppercase tracking-[0.06em] text-os-text">Meta Ads</h1>
         </div>
-        <div className="font-mono text-[9.5px] uppercase tracking-wide text-os-dim">
-          Última sincronización: {formatRelativeSync(data?.lastSync?.finishedAt ?? data?.lastSync?.startedAt ?? null)}
-          {data?.lastSync && <span className="ml-2"><Badge tone={SYNC_TONE[data.lastSync.status]}>{SYNC_LABEL[data.lastSync.status]}</Badge></span>}
+        <div className="space-y-1 text-right font-mono text-[9.5px] uppercase tracking-wide text-os-dim">
+          <div>Última sincronización: {formatRelativeSync(data?.lastSync?.finishedAt ?? data?.lastSync?.startedAt ?? null)}
+            {data?.lastSync && <span className="ml-2"><Badge tone={SYNC_TONE[data.lastSync.status]}>{SYNC_LABEL[data.lastSync.status]}</Badge></span>}
+          </div>
+          <div>Datos hasta: {formatMetricDate(data?.coverage?.lastDate)} {staleMetrics && <span className="ml-2"><Badge tone="warn">Datos atrasados</Badge></span>}</div>
         </div>
       </div>
 

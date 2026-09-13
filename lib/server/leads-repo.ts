@@ -13,7 +13,7 @@ import {
   type LeadStage,
 } from '@/lib/leads';
 import { query, withTransaction } from './db';
-import { normalizePhoneDigits } from '../phone';
+import { assessPhoneQuality, normalizePhoneDigits } from '../phone';
 import { resolveWhatsAppBusinessNumberOnClient } from './whatsapp-repo';
 
 /**
@@ -37,6 +37,7 @@ export type ServerLead = LeadBase & {
   metaAdsetId: string | null;
   metaAdId: string | null;
   metaFormId: string | null;
+  metaPageId: string | null;
 };
 
 export class LeadValidationError extends Error {
@@ -53,6 +54,16 @@ export class LeadNotFoundError extends Error {
   constructor(id: string) {
     super(`Lead ${id} not found`);
     this.name = 'LeadNotFoundError';
+  }
+}
+
+export class MetaLeadRoutingError extends Error {
+  constructor(
+    message: string,
+    public readonly code: 'META_FORM_UNMAPPED' | 'META_FORM_AMBIGUOUS' | 'META_OWNER_MISMATCH',
+  ) {
+    super(message);
+    this.name = 'MetaLeadRoutingError';
   }
 }
 
@@ -182,6 +193,11 @@ export type LeadRow = {
   meta_adset_id: string | null;
   meta_ad_id: string | null;
   meta_form_id: string | null;
+  meta_page_id: string | null;
+  whatsapp_event_type?: string | null;
+  whatsapp_event_occurred_at?: Date | null;
+  whatsapp_event_summary?: string | null;
+  whatsapp_event_details?: Record<string, unknown> | null;
   created_at: Date;
   last_activity_at: Date;
 };
@@ -250,6 +266,26 @@ export function rowToLead(row: LeadRow): ServerLead {
     metaAdsetId: row.meta_adset_id,
     metaAdId: row.meta_ad_id,
     metaFormId: row.meta_form_id,
+    metaPageId: row.meta_page_id,
+    phoneQuality: assessPhoneQuality(row.whatsapp ?? row.phone),
+    whatsappStatus: {
+      state:
+        row.whatsapp_event_type === 'whatsapp_failed'
+          ? 'failed'
+          : row.whatsapp_event_type === 'lead_replied'
+            ? 'replied'
+            : row.whatsapp_event_type === 'whatsapp_delivered'
+              ? 'delivered'
+              : row.whatsapp_event_type === 'whatsapp_sent'
+                ? 'accepted'
+                : 'not_sent',
+      occurredAt: row.whatsapp_event_occurred_at?.toISOString() ?? null,
+      summary: row.whatsapp_event_summary ?? null,
+      errorCode:
+        typeof row.whatsapp_event_details?.errorCode === 'string'
+          ? row.whatsapp_event_details.errorCode
+          : null,
+    },
   };
 }
 
@@ -423,12 +459,47 @@ export async function listLeads(options: ListLeadsOptions = {}): Promise<ServerL
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const result = await query<LeadRow>(`SELECT * FROM leads ${where} ORDER BY last_activity_at DESC`, params);
+  const result = await query<LeadRow>(
+    `SELECT l.*,
+       wa.type AS whatsapp_event_type,
+       wa.occurred_at AS whatsapp_event_occurred_at,
+       wa.summary AS whatsapp_event_summary,
+       wa.details AS whatsapp_event_details
+     FROM leads l
+     LEFT JOIN LATERAL (
+       SELECT type, occurred_at, summary, details, created_at
+       FROM lead_events
+       WHERE lead_id = l.id
+         AND type IN ('whatsapp_sent', 'whatsapp_delivered', 'whatsapp_failed', 'lead_replied')
+       ORDER BY occurred_at DESC, created_at DESC
+       LIMIT 1
+     ) wa ON true
+     ${where}
+     ORDER BY l.last_activity_at DESC`,
+    params,
+  );
   return result.rows.map(rowToLead);
 }
 
 export async function getLeadById(id: string): Promise<ServerLead | null> {
-  const result = await query<LeadRow>('SELECT * FROM leads WHERE id = $1', [id]);
+  const result = await query<LeadRow>(
+    `SELECT l.*,
+       wa.type AS whatsapp_event_type,
+       wa.occurred_at AS whatsapp_event_occurred_at,
+       wa.summary AS whatsapp_event_summary,
+       wa.details AS whatsapp_event_details
+     FROM leads l
+     LEFT JOIN LATERAL (
+       SELECT type, occurred_at, summary, details, created_at
+       FROM lead_events
+       WHERE lead_id = l.id
+         AND type IN ('whatsapp_sent', 'whatsapp_delivered', 'whatsapp_failed', 'lead_replied')
+       ORDER BY occurred_at DESC, created_at DESC
+       LIMIT 1
+     ) wa ON true
+     WHERE l.id = $1`,
+    [id],
+  );
   return result.rowCount === 0 ? null : rowToLead(result.rows[0]);
 }
 
@@ -678,7 +749,9 @@ export async function findByExternalIdentity(ingestionSource: string, externalLe
   return result.rowCount === 0 ? null : rowToLead(result.rows[0]);
 }
 
-export type IngestLeadInput = CreateLeadInput & {
+export type IngestLeadInput = Omit<CreateLeadInput, 'scope' | 'clientId'> & {
+  scope?: LeadScope;
+  clientId?: string | null;
   /** Idempotency key 1: the same Make execution retried must never duplicate. */
   deliveryId: string;
   /** e.g. 'meta'. Paired with externalLeadId as idempotency key 2. */
@@ -689,6 +762,7 @@ export type IngestLeadInput = CreateLeadInput & {
   metaAdsetId?: string | null;
   metaAdId?: string | null;
   metaFormId?: string | null;
+  metaPageId?: string | null;
 };
 
 export type IngestLeadResult = {
@@ -708,12 +782,81 @@ export type IngestLeadResult = {
  * Only a genuinely new lead gets its lead_received event appended.
  */
 export async function ingestLeadTransactional(input: IngestLeadInput): Promise<IngestLeadResult> {
-  // See createLead's identical comment: never pre-null clientId for scope
-  // 'internal' — assertScopeInvariant must see the real value to reject it.
-  const clientId = input.clientId ?? null;
-
   return withTransaction(async (client) => {
-    await assertScopeInvariant(client, input.scope, clientId);
+    let scope = input.scope;
+    let clientId = input.clientId ?? null;
+    let resolvedFromMeta = false;
+
+    if (input.metaFormId) {
+      const mappings = await client.query<{ owner_scope: LeadScope; client_id: string | null }>(
+        `SELECT DISTINCT owner_scope, client_id
+         FROM client_meta_accounts
+         WHERE active = true
+           AND valid_from <= CURRENT_DATE
+           AND (valid_to IS NULL OR CURRENT_DATE < valid_to)
+           AND meta_form_ids ? $1
+           AND ($2::text IS NULL OR meta_page_id IS NULL OR meta_page_id = $2)
+         LIMIT 2`,
+        [input.metaFormId, input.metaPageId ?? null],
+      );
+      if ((mappings.rowCount ?? 0) > 1) {
+        throw new MetaLeadRoutingError('More than one active owner matches this Meta form', 'META_FORM_AMBIGUOUS');
+      }
+      if (mappings.rowCount === 1) {
+        const resolved = mappings.rows[0];
+        if ((scope && scope !== resolved.owner_scope) || (input.clientId != null && input.clientId !== resolved.client_id)) {
+          throw new MetaLeadRoutingError('Caller ownership conflicts with the registered Meta form', 'META_OWNER_MISMATCH');
+        }
+        scope = resolved.owner_scope;
+        clientId = resolved.client_id;
+        resolvedFromMeta = true;
+      }
+    }
+
+    // Forms change frequently between campaigns and ad sets. The Page ID is
+    // the stable provider identity for ownership, while Form ID remains
+    // attribution. When an exact form is not registered, resolve the unique
+    // owner of the destination page. DISTINCT deliberately permits one owner
+    // to have several Meta ad-account mappings for the same page.
+    if (!resolvedFromMeta && input.metaPageId) {
+      const mappings = await client.query<{ owner_scope: LeadScope; client_id: string | null }>(
+        `SELECT DISTINCT owner_scope, client_id
+         FROM client_meta_accounts
+         WHERE active = true
+           AND valid_from <= CURRENT_DATE
+           AND (valid_to IS NULL OR CURRENT_DATE < valid_to)
+           AND meta_page_id = $1
+         LIMIT 2`,
+        [input.metaPageId],
+      );
+      if ((mappings.rowCount ?? 0) > 1) {
+        throw new MetaLeadRoutingError('More than one active owner matches this Meta page', 'META_FORM_AMBIGUOUS');
+      }
+      if (mappings.rowCount === 1) {
+        const resolved = mappings.rows[0];
+        if ((input.scope && input.scope !== resolved.owner_scope) || (input.clientId != null && input.clientId !== resolved.client_id)) {
+          throw new MetaLeadRoutingError('Caller ownership conflicts with the registered Meta page', 'META_OWNER_MISMATCH');
+        }
+        scope = resolved.owner_scope;
+        clientId = resolved.client_id;
+        resolvedFromMeta = true;
+      }
+    }
+
+    // A payload that identifies its Meta page must never fall back to a
+    // caller-supplied scope. Otherwise a cloned Make scenario retaining
+    // `scope: internal` could silently route a client's lead to REKREATIVE.
+    if (input.metaPageId && !resolvedFromMeta) {
+      throw new MetaLeadRoutingError('Meta page is not mapped to an active owner', 'META_FORM_UNMAPPED');
+    }
+
+    // Backwards compatibility is restricted to legacy payloads that carry no
+    // Page ID. New Meta scenarios must provide metaPageId and let REKREOS be
+    // the sole owner resolver.
+    if (!scope) {
+      throw new MetaLeadRoutingError('Meta form is not mapped to an active owner', 'META_FORM_UNMAPPED');
+    }
+    await assertScopeInvariant(client, scope, clientId);
 
     const id = generateLeadId();
     const now = new Date();
@@ -734,14 +877,14 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
            ai_intent, ai_priority, ai_summary, ai_qualification, ai_analyzed_at,
            qualification_answers, appointment_date, conversion_value,
            ingestion_source, external_lead_id, ingest_delivery_id,
-           meta_campaign_id, meta_adset_id, meta_ad_id, meta_form_id,
+           meta_campaign_id, meta_adset_id, meta_ad_id, meta_form_id, meta_page_id,
            created_at, last_activity_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
          ON CONFLICT (ingest_delivery_id) WHERE ingest_delivery_id IS NOT NULL DO NOTHING
          RETURNING *`,
         [
           id,
-          input.scope,
+          scope,
           clientId,
           input.name.trim(),
           nullableTrim(input.email),
@@ -767,6 +910,7 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
           nullableTrim(input.metaAdsetId),
           nullableTrim(input.metaAdId),
           nullableTrim(input.metaFormId),
+          nullableTrim(input.metaPageId),
           now,
           now,
         ],
@@ -793,7 +937,14 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
       type: 'lead_received',
       source: 'make',
       summary: `${input.name.trim()} was received via automated ingestion`,
-      details: { source, campaign, ingestionSource: input.ingestionSource, externalLeadId: input.externalLeadId ?? null },
+      details: {
+        source,
+        campaign,
+        ingestionSource: input.ingestionSource,
+        externalLeadId: input.externalLeadId ?? null,
+        metaFormId: input.metaFormId ?? null,
+        metaPageId: input.metaPageId ?? null,
+      },
       occurredAt: now,
     });
 
@@ -831,7 +982,7 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
 // any change here.
 
 type WhatsAppEventCommon = {
-  type: 'whatsapp_sent' | 'whatsapp_delivered' | 'lead_replied';
+  type: 'whatsapp_sent' | 'whatsapp_delivered' | 'whatsapp_failed' | 'lead_replied';
   source: LeadEventSource;
   externalEventId: string;
   summary: string;
@@ -845,7 +996,7 @@ type WhatsAppEventCommon = {
 // intersection-with-a-union shape.
 export type AppendWhatsAppEventInput =
   | (WhatsAppEventCommon & {
-      type: 'whatsapp_sent' | 'whatsapp_delivered';
+      type: 'whatsapp_sent' | 'whatsapp_delivered' | 'whatsapp_failed';
       leadId: string;
       whatsappNumber?: undefined;
     })

@@ -124,6 +124,8 @@ export type MetaAccountSync = {
   lastSync: MetaSyncRun | null;
 };
 
+export type MetaMetricCoverage = { firstDate: string; lastDate: string; dayCount: number };
+
 export type MetaAdsCampaignsResponse = {
   period: { preset: ResultsPeriodPreset; start: string | null; end: string | null };
   /** Whether the client (or, unscoped, ANY client) has at least one ACTIVE
@@ -137,6 +139,7 @@ export type MetaAdsCampaignsResponse = {
   accounts: ClientMetaAccount[];
   summary: MetaSpendSummary | null;
   campaigns: MetaCampaignSummary[];
+  coverage: MetaMetricCoverage | null;
   lastSync: MetaSyncRun | null;
   accountSyncs: MetaAccountSync[];
   /** Populated only for the unscoped (global) call. */

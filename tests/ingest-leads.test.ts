@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { checkIngestAuth } from '@/lib/server/ingest-auth';
 import { closePool, query } from '@/lib/server/db';
 import { createClient } from '@/lib/server/clients-repo';
+import { createClientMetaAccount } from '@/lib/server/meta-repo';
 import { POST } from '@/app/api/ingest/leads/route';
 import { installTestDatabaseUrl } from './helpers/pg-test-env';
 
@@ -52,6 +53,7 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('POST /api/ingest/leads (real Postgre
   const originalKey = process.env.INGEST_API_KEY;
   const createdLeadIds: string[] = [];
   const createdClientIds: string[] = [];
+  const createdMetaAccountIds: string[] = [];
 
   beforeAll(() => {
     process.env.INGEST_API_KEY = TEST_INGEST_KEY;
@@ -68,6 +70,10 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('POST /api/ingest/leads (real Postgre
     if (leadIds.length > 0) {
       await query('DELETE FROM lead_events WHERE lead_id = ANY($1)', [leadIds]);
       await query('DELETE FROM leads WHERE id = ANY($1)', [leadIds]);
+    }
+    const metaAccountIds = createdMetaAccountIds.splice(0);
+    if (metaAccountIds.length > 0) {
+      await query('DELETE FROM client_meta_accounts WHERE id = ANY($1)', [metaAccountIds]);
     }
     for (const id of createdClientIds.splice(0)) {
       await query('DELETE FROM lead_events WHERE lead_id IN (SELECT id FROM leads WHERE client_id = $1)', [id]);
@@ -92,6 +98,12 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('POST /api/ingest/leads (real Postgre
     });
     createdClientIds.push(client.id);
     return client;
+  }
+
+  async function makeMetaAccount(input: Parameters<typeof createClientMetaAccount>[0]) {
+    const mapping = await createClientMetaAccount(input);
+    createdMetaAccountIds.push(mapping.id);
+    return mapping;
   }
 
   const rand = () => Math.random().toString(36).slice(2);
@@ -178,6 +190,64 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('POST /api/ingest/leads (real Postgre
 
     it('400s on an arbitrary unknown field — Make can never choose a stage', async () => {
       expect((await post(baseBody({ stage: 'converted' }))).status).toBe(400);
+    });
+  });
+
+  describe('Meta owner routing', () => {
+    it('rejects an identified but unmapped Meta page even when a cloned scenario still sends scope=internal', async () => {
+      const { res, json } = await postAndTrack(
+        baseBody({
+          metaPageId: `unmapped-page-${rand()}`,
+          metaFormId: `unmapped-form-${rand()}`,
+          scope: 'internal',
+          name: 'Must Not Fall Back To Internal',
+        }),
+      );
+      expect(res.status).toBe(422);
+      expect(json).toMatchObject({ code: 'META_FORM_UNMAPPED' });
+    });
+
+    it('resolves a new form through the unique owner of its Meta page', async () => {
+      const owner = await makeClient();
+      const pageId = `page-${rand()}`;
+      await makeMetaAccount({
+        ownerScope: 'client',
+        clientId: owner.id,
+        metaAdAccountId: `ad-account-${rand()}`,
+        metaPageId: pageId,
+        metaFormIds: ['older-form'],
+        label: 'Page fallback fixture',
+      });
+
+      const { res, json } = await postAndTrack(
+        baseBody({
+          scope: undefined,
+          metaPageId: pageId,
+          metaFormId: `new-form-${rand()}`,
+          name: 'Page Routed Client Lead',
+        }),
+      );
+      expect(res.status).toBe(201);
+      const row = await query('SELECT scope, client_id, meta_page_id, meta_form_id FROM leads WHERE id = $1', [json.leadId]);
+      expect(row.rows[0]).toMatchObject({ scope: 'client', client_id: owner.id, meta_page_id: pageId });
+    });
+
+    it('rejects caller ownership that conflicts with the owner registered for the Meta page', async () => {
+      const owner = await makeClient();
+      const pageId = `page-${rand()}`;
+      await makeMetaAccount({
+        ownerScope: 'client',
+        clientId: owner.id,
+        metaAdAccountId: `ad-account-${rand()}`,
+        metaPageId: pageId,
+        label: 'Mismatch fixture',
+      });
+
+      const { res, json } = await postAndTrack(
+        baseBody({ scope: 'internal', metaPageId: pageId, metaFormId: `form-${rand()}`, name: 'Wrong Caller Owner' }),
+      );
+      expect(res.status).toBe(422);
+      expect(json).toMatchObject({ code: 'META_OWNER_MISMATCH' });
     });
   });
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { checkIngestAuth, type IngestAuthFailureReason } from '@/lib/server/ingest-auth';
-import { LeadValidationError, ingestLeadTransactional } from '@/lib/server/leads-repo';
+import { LeadValidationError, MetaLeadRoutingError, ingestLeadTransactional } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { IngestLeadBodySchema } from '@/lib/server/schemas';
 
@@ -69,11 +69,12 @@ export async function POST(request: Request): Promise<Response> {
         : null,
     });
     return NextResponse.json(
-      { ok: true, leadId: result.lead.id, deduped: result.deduped },
+      { ok: true, leadId: result.lead.id, deduped: result.deduped, phoneQuality: result.lead.phoneQuality },
       { status: result.deduped ? 200 : 201 },
     );
   } catch (error) {
     if (error instanceof LeadValidationError) return jsonError(422, error.message, { code: error.code });
+    if (error instanceof MetaLeadRoutingError) return jsonError(422, error.message, { code: error.code });
     return unexpectedError('POST /api/ingest/leads', error);
   }
 }

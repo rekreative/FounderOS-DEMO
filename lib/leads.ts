@@ -74,7 +74,24 @@ export type Lead = {
   qualificationAnswers: Record<string, string> | null;
   appointmentDate: string | null;
   conversionValue: number | null;
+  /** Operational projections only; neither field is a commercial stage. */
+  whatsappStatus?: WhatsAppOperationalStatus;
+  phoneQuality?: PhoneQuality;
   conversionSnapshot?: LeadConversionSnapshot | null;
+};
+
+export type WhatsAppOperationalState = 'not_sent' | 'accepted' | 'delivered' | 'replied' | 'failed';
+
+export type WhatsAppOperationalStatus = {
+  state: WhatsAppOperationalState;
+  occurredAt: string | null;
+  summary: string | null;
+  errorCode: string | null;
+};
+
+export type PhoneQuality = {
+  status: 'valid' | 'invalid' | 'unknown';
+  reason: 'missing' | 'invalid_characters' | 'invalid_length' | null;
 };
 
 export type LeadEventType =
@@ -82,6 +99,7 @@ export type LeadEventType =
   | 'ai_analyzed'
   | 'whatsapp_sent'
   | 'whatsapp_delivered'
+  | 'whatsapp_failed'
   | 'lead_replied'
   | 'commercial_contacted'
   | 'qualified'

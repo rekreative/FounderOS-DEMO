@@ -560,6 +560,24 @@ function buildReportingWhere(opts: MetaReportingQuery): { where: string; params:
   return { where: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '', params };
 }
 
+export type MetaMetricCoverage = { firstDate: string; lastDate: string; dayCount: number };
+
+/** Dates actually represented by metric rows. Kept separate from sync-run
+ * health because a successful job can still resend stale/lifetime data. */
+export async function getMetaMetricCoverage(opts: MetaReportingQuery = {}): Promise<MetaMetricCoverage | null> {
+  const { where, params } = buildReportingWhere(opts);
+  const result = await query<{ first_date: string | null; last_date: string | null; day_count: string }>(
+    `SELECT MIN(date)::text AS first_date, MAX(date)::text AS last_date, COUNT(DISTINCT date)::text AS day_count
+     FROM meta_campaign_daily_metrics
+     ${where}`,
+    params,
+  );
+  const row = result.rows[0];
+  return row?.first_date && row.last_date
+    ? { firstDate: row.first_date, lastDate: row.last_date, dayCount: Number(row.day_count) }
+    : null;
+}
+
 /** Per-campaign totals across the queried window, with the most recent
  *  day's name/status. Empty array (never a fabricated row) when nothing
  *  matches. */

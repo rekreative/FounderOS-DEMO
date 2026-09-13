@@ -237,6 +237,25 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('POST /api/leads/whatsapp-events (rea
     expect(after.rows[0].count).toBe(0);
   });
 
+  it('whatsapp_failed records a Make failure, remains idempotent, and never changes stage', async () => {
+    const lead = await makeLead();
+    const body = {
+      type: 'whatsapp_failed',
+      leadId: lead.id,
+      externalEventId: 'make-send-failure-1',
+      details: { errorCode: 'INVALID_RECIPIENT' },
+    };
+    const first = await postEvent(body);
+    const second = await postEvent(body);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect((await second.json()).deduped).toBe(true);
+    expect((await getLeadById(lead.id))?.stage).toBe('new');
+    const events = await listLeadEvents(lead.id);
+    expect(events.filter((event) => event.type === 'whatsapp_failed')).toHaveLength(1);
+    expect(events.find((event) => event.type === 'whatsapp_failed')?.source).toBe('make');
+  });
+
   it('routes the same sender number to the owner selected by Phone Number ID', async () => {
     const internalLead = await makeLead({ name: 'Internal same phone' });
     const client = await createClient({

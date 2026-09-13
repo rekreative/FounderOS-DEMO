@@ -224,14 +224,17 @@ export default function HomePage() {
   [highPriorityItems, awaitingContactItems]);
 
   const activeClients = clients.filter((client) => client.status === 'active').length;
-  const contactedLeads = leads.filter((lead) => lead.stage !== 'new').length;
-  const appointmentLeads = leads.filter((lead) => lead.stage === 'appointment' || lead.stage === 'converted').length;
-  const convertedLeads = leads.filter((lead) => lead.stage === 'converted').length;
-  const funnelRate = leads.length > 0 ? Math.round((convertedLeads / leads.length) * 100) : 0;
   const upcomingAppointments = homeSnapshot?.upcomingAppointments ?? [];
   const recentActivity = homeSnapshot?.recentActivity ?? [];
   const valueGenerated = homeSnapshot?.valueGenerated ?? null;
   const internalPerformance = homeSnapshot?.internalPerformance ?? null;
+  const internalFunnel = internalPerformance?.funnel;
+  const internalLeadCount = internalFunnel?.leads ?? leads.filter((lead) => lead.scope === 'internal').length;
+  const qualifiedLeads = internalFunnel?.qualified ?? 0;
+  const appointmentLeads = internalFunnel?.appointments ?? 0;
+  const attendedLeads = internalFunnel?.attended ?? 0;
+  const convertedLeads = internalFunnel?.converted ?? 0;
+  const funnelRate = internalLeadCount > 0 ? Math.round((convertedLeads / internalLeadCount) * 100) : 0;
   const operationalAutomations = opsSnapshot?.automations.filter((item) =>
     item.status === 'operational' || item.status === 'activity_observed').length ?? 0;
 
@@ -266,7 +269,7 @@ export default function HomePage() {
       <SectionHead label="Indicadores principales" />
       <section aria-label="Indicadores principales" className="mb-5 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
         <StatTile href="/clients" label="Clientes activos" value={activeClients} unit={`/ ${clients.length}`} detail="Cartera actual" icon={Users} />
-        <StatTile href="/leads" label="Leads CRM" value={leads.length} unit="totales" detail="Entrada comercial" icon={Target} />
+        <StatTile href="/leads" label="Leads CRM" value={internalLeadCount} unit="REKREATIVE" detail="Entrada comercial interna" icon={Target} />
         <StatTile href="/leads" label="Próximas citas" value={upcomingAppointments.length} unit="agenda" detail="Pendientes" icon={CalendarDays} />
         <StatTile href="/results" label="Conversiones" value={convertedLeads} unit={`${funnelRate}% cierre`} detail="Sobre leads totales" icon={ArrowUpRight} />
         <StatTile href="/results" label="Valor generado" value={valueGenerated?.total == null ? 'Sin datos' : formatEUR(valueGenerated.total)} unit={`${valueGenerated?.days ?? 7} días`} detail="Ingresos atribuidos" icon={CircleDollarSign} className="col-span-2 md:col-span-1" />
@@ -285,13 +288,14 @@ export default function HomePage() {
       <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
         <DashboardPanel className="xl:col-span-8">
           <SectionHead label="Funnel comercial" link="Ver resultados" href="/results" />
-          <div className="grid grid-cols-2 gap-0 sm:grid-cols-4">
-            <FunnelStep label="Leads" value={leads.length} detail="Entrada total" />
-            <FunnelStep label="Contactados" value={contactedLeads} detail="Con actividad" />
-            <FunnelStep label="Citas" value={appointmentLeads} detail="Reservadas o cerradas" />
+          <div className="grid grid-cols-2 gap-0 sm:grid-cols-5">
+            <FunnelStep label="Leads" value={internalLeadCount} detail="Entrada interna" />
+            <FunnelStep label="Cualificados" value={qualifiedLeads} detail="Interés validado" />
+            <FunnelStep label="Citas" value={appointmentLeads} detail="Con evento registrado" />
+            <FunnelStep label="Realizadas" value={attendedLeads} detail="Asistencia confirmada" />
             <FunnelStep label="Cierres" value={convertedLeads} detail={`${funnelRate}% del total`} last />
           </div>
-          {leads.length === 0 && (
+          {internalLeadCount === 0 && (
             <div className="mt-3 border-l-2 border-os-accent bg-os-surface2 px-3 py-2 font-mono text-[10px] text-os-dim">
               Los nuevos leads aparecerán aquí cuando conectes tu primer canal de captación.
             </div>

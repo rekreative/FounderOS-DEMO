@@ -36,6 +36,7 @@ export type Lead = LeadBase & {
   metaAdsetId: string | null;
   metaAdId: string | null;
   metaFormId: string | null;
+  metaPageId: string | null;
 };
 
 export type CreateLeadInput = {

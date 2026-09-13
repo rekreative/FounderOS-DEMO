@@ -4,6 +4,7 @@ import {
   getLatestSyncRunByOwnerScope,
   getLatestSyncRunsByMetaAccountIds,
   getMetaCampaignSummaries,
+  getMetaMetricCoverage,
   getMetaSpendSummary,
   getMetaSpendSummaryByClient,
   hasMetaMetrics,
@@ -79,9 +80,10 @@ export async function GET(request: Request): Promise<Response> {
       const selectedAccount = selectedAccountOrNull(accounts, metaAdAccountId);
       if (metaAdAccountId && !selectedAccount) return jsonError(404, 'Meta account not found');
       const scope = { clientId, metaAdAccountId, dateFrom, dateTo };
-      const [summary, campaigns, latestOverall, latestByMapping, hasAnyMetrics] = await Promise.all([
+      const [summary, campaigns, coverage, latestOverall, latestByMapping, hasAnyMetrics] = await Promise.all([
         getMetaSpendSummary(scope),
         getMetaCampaignSummaries(scope),
+        getMetaMetricCoverage(scope),
         getLatestSyncRun(clientId),
         getLatestSyncRunsByMetaAccountIds(activeAccounts(accounts).map((account) => account.id)),
         hasMetaMetrics({ clientId, metaAdAccountId }),
@@ -94,6 +96,7 @@ export async function GET(request: Request): Promise<Response> {
         accounts,
         summary,
         campaigns,
+        coverage,
         lastSync: selectedAccount ? latestByMapping.get(selectedAccount.id) ?? null : latestOverall,
         accountSyncs,
         byClient: [],
@@ -105,9 +108,10 @@ export async function GET(request: Request): Promise<Response> {
       const selectedAccount = selectedAccountOrNull(accounts, metaAdAccountId);
       if (metaAdAccountId && !selectedAccount) return jsonError(404, 'Meta account not found');
       const scope = { ownerScope: 'internal' as const, metaAdAccountId, dateFrom, dateTo };
-      const [summary, campaigns, latestOverall, latestByMapping, hasAnyMetrics] = await Promise.all([
+      const [summary, campaigns, coverage, latestOverall, latestByMapping, hasAnyMetrics] = await Promise.all([
         getMetaSpendSummary(scope),
         getMetaCampaignSummaries(scope),
+        getMetaMetricCoverage(scope),
         getLatestSyncRunByOwnerScope('internal'),
         getLatestSyncRunsByMetaAccountIds(activeAccounts(accounts).map((account) => account.id)),
         hasMetaMetrics({ ownerScope: 'internal', metaAdAccountId }),
@@ -121,6 +125,7 @@ export async function GET(request: Request): Promise<Response> {
         accounts,
         summary,
         campaigns,
+        coverage,
         lastSync: selectedAccount ? latestByMapping.get(selectedAccount.id) ?? null : latestOverall,
         accountSyncs,
         byClient: [],
@@ -131,9 +136,10 @@ export async function GET(request: Request): Promise<Response> {
     const selectedAccount = selectedAccountOrNull(accounts, metaAdAccountId);
     if (metaAdAccountId && !selectedAccount) return jsonError(404, 'Meta account not found');
     const scope = { metaAdAccountId, dateFrom, dateTo };
-    const [summary, campaigns, latestOverall, byClientMap, latestByMapping, hasAnyMetrics] = await Promise.all([
+    const [summary, campaigns, coverage, latestOverall, byClientMap, latestByMapping, hasAnyMetrics] = await Promise.all([
       getMetaSpendSummary(scope),
       getMetaCampaignSummaries(scope),
+      getMetaMetricCoverage(scope),
       getLatestSyncRunByOwnerScope('client'),
       getMetaSpendSummaryByClient(scope),
       getLatestSyncRunsByMetaAccountIds(activeAccounts(accounts).map((account) => account.id)),
@@ -149,6 +155,7 @@ export async function GET(request: Request): Promise<Response> {
       accounts,
       summary,
       campaigns,
+      coverage,
       lastSync: selectedAccount ? latestByMapping.get(selectedAccount.id) ?? null : latestOverall,
       accountSyncs: accountSyncPayload(accounts, latestByMapping),
       byClient,

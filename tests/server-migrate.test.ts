@@ -384,6 +384,7 @@ describe('migration file discovery', () => {
       '0012_whatsapp_tenant_routing.sql',
       '0013_commercial_conversion_v1.sql',
       '0014_qualification_v1.sql',
+      '0015_data_quality_v1.sql',
     ]);
   });
 });

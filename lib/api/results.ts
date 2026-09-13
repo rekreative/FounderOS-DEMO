@@ -52,6 +52,7 @@ export type ResultsResponse = {
 
 export type GetResultsOptions = {
   clientId?: string;
+  ownerScope?: 'internal' | 'client';
   preset?: ResultsPeriodPreset;
   start?: string;
   end?: string;
@@ -60,6 +61,7 @@ export type GetResultsOptions = {
 export async function getResults(options: GetResultsOptions = {}): Promise<ResultsResponse> {
   const params = new URLSearchParams();
   if (options.clientId) params.set('clientId', options.clientId);
+  if (options.ownerScope) params.set('ownerScope', options.ownerScope);
   if (options.preset) params.set('preset', options.preset);
   if (options.start) params.set('start', options.start);
   if (options.end) params.set('end', options.end);

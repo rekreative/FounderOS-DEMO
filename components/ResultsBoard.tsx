@@ -34,6 +34,7 @@ export function ResultsBoard() {
   const { clients, error: clientsError } = useClientsRegistry();
   const [resultsData, setResultsData] = useState<ResultsResponse | null>(null);
   const [resultsError, setResultsError] = useState<string | null>(null);
+  const [resultScope, setResultScope] = useState<'internal' | 'clients'>('internal');
 
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('all');
   const [customRange, setCustomRange] = useState({ start: '', end: '' });
@@ -59,7 +60,10 @@ export function ResultsBoard() {
   useEffect(() => {
     if (periodPreset === 'custom' && (!customRange.start || !customRange.end)) return;
     let cancelled = false;
+    setResultsData(null);
+    setResultsError(null);
     getResults({
+      ownerScope: resultScope === 'internal' ? 'internal' : 'client',
       preset: periodPreset,
       start: periodPreset === 'custom' ? customRange.start : undefined,
       end: periodPreset === 'custom' ? customRange.end : undefined,
@@ -73,7 +77,7 @@ export function ResultsBoard() {
     return () => {
       cancelled = true;
     };
-  }, [periodPreset, customRange]);
+  }, [periodPreset, customRange, resultScope]);
 
   const byClientMap = useMemo(() => {
     const map = new Map<string, ResultsResponse['byClient'][number]>();
@@ -120,7 +124,9 @@ export function ResultsBoard() {
       <PageHeader eyebrow="REKREATIVE OPERACIONES" title="Resultados" />
       <div className="-mt-4 mb-5 flex flex-wrap items-center gap-2.5">
         <p className="max-w-2xl text-[12px] text-os-muted">
-          Visión global del rendimiento comercial generado para los clientes de REKREATIVE, a partir de los leads y eventos reales del CRM.
+          {resultScope === 'internal'
+            ? 'Rendimiento comercial propio de REKREATIVE, aislado de cualquier cliente.'
+            : 'Visión global del rendimiento comercial generado para los clientes de REKREATIVE.'}
         </p>
       </div>
 
@@ -132,6 +138,10 @@ export function ResultsBoard() {
 
       {/* Period controls */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1.5 border-r border-os-border pr-3">
+          <button type="button" onClick={() => setResultScope('internal')} className={`border px-2.5 py-1.5 font-mono text-[10px] uppercase ${resultScope === 'internal' ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim'}`}>REKREATIVE</button>
+          <button type="button" onClick={() => setResultScope('clients')} className={`border px-2.5 py-1.5 font-mono text-[10px] uppercase ${resultScope === 'clients' ? 'border-[var(--accent-line)] bg-[var(--accent-soft)] text-os-accent' : 'border-os-border text-os-dim'}`}>Clientes</button>
+        </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {PERIOD_PRESET_OPTIONS.map((option) => {
             const active = periodPreset === option.id;
@@ -188,7 +198,7 @@ export function ResultsBoard() {
       {/* Visual portfolio summary — funnel + two client-comparison bars.
           Deliberately capped at three visualizations so the executive
           overview stays a summary, not another dense operational table. */}
-      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className={`mb-6 grid grid-cols-1 gap-4 ${resultScope === 'clients' ? 'lg:grid-cols-2' : ''}`}>
         <div className="border border-os-border bg-os-surface p-4">
           {/* "Hitos comerciales" (milestones), not a strict sequential
               funnel: these are summed across every client's own cohort, so
@@ -200,10 +210,10 @@ export function ResultsBoard() {
               dashboards keep their existing funnel + rates unchanged (a
               single client's own cohort makes that framing legitimate
               there). */}
-          <SectionHead label="Hitos comerciales · clientes" />
+          <SectionHead label={resultScope === 'internal' ? 'Embudo comercial · REKREATIVE' : 'Hitos comerciales · clientes'} />
           <FunnelBars stages={overall?.stages ?? []} showRates={false} />
         </div>
-        <div className="flex flex-col gap-4">
+        {resultScope === 'clients' && <div className="flex flex-col gap-4">
           <div className="border border-os-border bg-os-surface p-4">
             <SectionHead label="Valor generado por cliente" />
             <BarListChart rows={valueByClient} formatValue={formatEUR} emptyLabel="Sin conversiones con valor todavía." />
@@ -212,11 +222,11 @@ export function ResultsBoard() {
             <SectionHead label="Leads CRM por cliente" />
             <BarListChart rows={leadsByClient} formatValue={(value) => String(value)} emptyLabel="Sin leads todavía." />
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* Client portfolio — each card links to its dedicated dashboard. */}
-      <div>
+      {resultScope === 'clients' && <div>
         <SectionHead label="Clientes" count={clients.length} />
         {clients.length === 0 ? (
           <div className="border border-dashed border-os-border px-3 py-8 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
@@ -255,7 +265,7 @@ export function ResultsBoard() {
             ))}
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

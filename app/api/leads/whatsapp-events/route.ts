@@ -28,7 +28,7 @@ const AUTH_ERROR_MESSAGE: Record<MakeEventsAuthFailureReason, string> = {
   invalid_token: 'unauthorized',
 };
 
-type WhatsAppEventType = 'whatsapp_sent' | 'whatsapp_delivered' | 'lead_replied';
+type WhatsAppEventType = 'whatsapp_sent' | 'whatsapp_delivered' | 'whatsapp_failed' | 'lead_replied';
 
 // whatsapp_sent is reported by Make itself (the automation performed the
 // send); whatsapp_delivered and lead_replied are provider-observed facts
@@ -39,12 +39,14 @@ type WhatsAppEventType = 'whatsapp_sent' | 'whatsapp_delivered' | 'lead_replied'
 const EVENT_SOURCE: Record<WhatsAppEventType, LeadEventSource> = {
   whatsapp_sent: 'make',
   whatsapp_delivered: 'whatsapp',
+  whatsapp_failed: 'make',
   lead_replied: 'whatsapp',
 };
 
 const DEFAULT_SUMMARY: Record<WhatsAppEventType, string> = {
   whatsapp_sent: 'WhatsApp message sent',
   whatsapp_delivered: 'WhatsApp message delivered',
+  whatsapp_failed: 'WhatsApp message could not be sent',
   lead_replied: 'Lead replied on WhatsApp',
 };
 

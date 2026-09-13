@@ -39,6 +39,7 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const result = await getResults({
       clientId: parsed.data.clientId,
+      ownerScope: parsed.data.ownerScope,
       preset: parsed.data.preset ?? 'all',
       customStart: parsed.data.start,
       customEnd: parsed.data.end,

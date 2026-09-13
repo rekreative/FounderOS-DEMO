@@ -30,6 +30,31 @@ import {
 
 const STAGE_FILTERS = [{ id: 'all', label: 'Todos' }, ...LEAD_STAGE_OPTIONS];
 
+const STAGE_VISUAL: Record<LeadStage, { border: string; badge: string; dot: string }> = {
+  new: { border: 'border-l-[var(--funnel-s0)]', badge: 'border-[var(--funnel-s0)] text-os-text', dot: 'bg-[var(--funnel-s0)]' },
+  contacted: { border: 'border-l-[var(--funnel-s1)]', badge: 'border-[var(--funnel-s1)] text-os-text', dot: 'bg-[var(--funnel-s1)]' },
+  qualified: { border: 'border-l-[var(--funnel-s2)]', badge: 'border-[var(--funnel-s2)] text-os-text', dot: 'bg-[var(--funnel-s2)]' },
+  appointment: { border: 'border-l-[var(--funnel-s3)]', badge: 'border-[var(--funnel-s3)] text-os-text', dot: 'bg-[var(--funnel-s3)]' },
+  converted: { border: 'border-l-os-ok', badge: 'border-os-ok text-os-ok', dot: 'bg-os-ok' },
+  no_response: { border: 'border-l-os-warn', badge: 'border-os-warn text-os-warn', dot: 'bg-os-warn' },
+  disqualified: { border: 'border-l-os-err', badge: 'border-os-err text-os-err', dot: 'bg-os-err' },
+};
+
+function WhatsAppStatusBadge({ lead }: { lead: Lead }) {
+  if (lead.phoneQuality?.status === 'invalid') {
+    return <span className="border border-os-err bg-os-err/10 px-1.5 py-0.5 font-mono text-[8.5px] uppercase text-os-err">Teléfono inválido</span>;
+  }
+  const labels = {
+    not_sent: { text: 'Sin envío', className: 'border-os-border text-os-dim' },
+    accepted: { text: 'WA aceptado', className: 'border-os-warn bg-os-warn/10 text-os-warn' },
+    delivered: { text: 'WA entregado', className: 'border-os-ok bg-os-ok/10 text-os-ok' },
+    replied: { text: 'Respondió', className: 'border-os-ok bg-os-ok/10 text-os-ok' },
+    failed: { text: 'WA no enviado', className: 'border-os-err bg-os-err/10 text-os-err' },
+  } as const;
+  const display = labels[lead.whatsappStatus?.state ?? 'not_sent'];
+  return <span className={`border px-1.5 py-0.5 font-mono text-[8.5px] uppercase ${display.className}`}>{display.text}</span>;
+}
+
 // Presentation-only mapping — lead.aiAnalysis.intent itself is never
 // touched, just how it reads in the table. Kept explicitly separate from
 // CRM stage (the "Etapa" column/select, a few cells over).
@@ -128,6 +153,7 @@ function eventLabel(type: LeadEvent['type']): string {
     ai_analyzed: 'Analizado por IA',
     whatsapp_sent: 'WhatsApp enviado',
     whatsapp_delivered: 'WhatsApp entregado',
+    whatsapp_failed: 'WhatsApp no enviado',
     lead_replied: 'Lead respondió',
     commercial_contacted: 'Contacto comercial',
     qualified: 'Cualificado',
@@ -171,6 +197,7 @@ function LeadMobileCard({
   const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
   const isTerminal = lead.stage === 'converted' || lead.stage === 'disqualified';
+  const canQualify = lead.stage === 'new' || lead.stage === 'contacted' || lead.stage === 'no_response';
   const [showConversion, setShowConversion] = useState(false);
   const [serviceId, setServiceId] = useState('');
   const [agreedValue, setAgreedValue] = useState('');
@@ -189,10 +216,13 @@ function LeadMobileCard({
   };
 
   return (
-    <article className="min-w-0 border border-os-border bg-os-surface p-4">
+    <article className={`min-w-0 border border-l-4 border-os-border bg-os-surface p-4 ${STAGE_VISUAL[lead.stage].border}`}>
       <div className="flex min-w-0 items-start justify-between gap-3">
         <button type="button" onClick={onToggle} className="min-w-0 flex-1 text-left">
-          <span className="block break-words text-[14px] font-semibold text-os-text">{lead.name}</span>
+          <span className="flex items-center gap-2 break-words text-[14px] font-semibold text-os-text">
+            <span className={`h-2 w-2 shrink-0 rounded-full ${STAGE_VISUAL[lead.stage].dot}`} />
+            {lead.name}
+          </span>
           <span className="mt-1 block space-y-0.5 font-mono text-[10px] text-os-dim">
             {lead.email && <span className="block break-all">{lead.email}</span>}
             {(lead.phone || lead.whatsapp) && <span className="block break-all">{lead.phone || lead.whatsapp}</span>}
@@ -207,6 +237,13 @@ function LeadMobileCard({
         >
           {expanded ? '−' : '+'}
         </button>
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        <span className={`border px-1.5 py-0.5 font-mono text-[8.5px] uppercase ${STAGE_VISUAL[lead.stage].badge}`}>
+          {LEAD_STAGE_OPTIONS.find((stage) => stage.id === lead.stage)?.label ?? lead.stage}
+        </span>
+        <WhatsAppStatusBadge lead={lead} />
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-os-border pt-3">
@@ -281,12 +318,13 @@ function LeadMobileCard({
       )}
 
       <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-os-border pt-3">
-        <button type="button" disabled={isTerminal} onClick={() => onCommercialEvent('qualified')} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:cursor-not-allowed disabled:opacity-40">Cualificar</button>
+        <button type="button" disabled={!canQualify} onClick={() => onCommercialEvent('qualified')} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:cursor-not-allowed disabled:opacity-40">Cualificar</button>
         <button type="button" disabled={isTerminal} onClick={() => onCommercialEvent('disqualified')} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:cursor-not-allowed disabled:opacity-40">No cualificado</button>
         <button type="button" disabled={services.length === 0 || lead.stage === 'disqualified'} onClick={openConversion} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:opacity-40">{lead.conversionSnapshot ? 'Editar conversión' : 'Registrar conversión'}</button>
         <button type="button" onClick={onAddNote} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Añadir nota</button>
         <button type="button" onClick={onEdit} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted">Editar</button>
       </div>
+
       {showConversion && selectedService && (
         <div className="mt-3 space-y-3 border border-os-border bg-os-surface2 p-3">
           <label className="block"><span className="font-mono text-[8.5px] uppercase text-os-dim">Servicio contratado</span><select value={serviceId} onChange={(event) => { const service = services.find((item) => item.id === event.target.value); if (!service) return; setServiceId(service.id); setAgreedValue(String(service.price)); setPaymentPlan(service.billingType === 'monthly' ? 'monthly' : service.allowTwoPayments ? 'two_payments' : 'full'); }} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-2 text-[12px] text-os-text">{services.map((service) => <option key={service.id} value={service.id}>{service.name} · {service.price.toLocaleString('es-ES')} €</option>)}</select></label>
@@ -336,6 +374,7 @@ function LeadRow({
   const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
   const isTerminal = lead.stage === 'converted' || lead.stage === 'disqualified';
+  const canQualify = lead.stage === 'new' || lead.stage === 'contacted' || lead.stage === 'no_response';
 
   // Quick-action drafts — local, ephemeral UI state scoped to this row, same
   // shape as the "Añadir nota" draft one level up. Re-synced whenever the
@@ -365,7 +404,7 @@ function LeadRow({
   return (
     <>
       <tr className="border-t border-os-border align-top">
-        <td className="px-3 py-3 text-left">
+        <td className={`border-l-4 px-3 py-3 text-left ${STAGE_VISUAL[lead.stage].border}`}>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <button
@@ -376,8 +415,13 @@ function LeadRow({
                 {expanded ? '−' : '+'}
               </button>
               <div>
-                <div className="truncate text-[13px] font-semibold text-os-text">{lead.name}</div>
+                <div className="flex items-center gap-2">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${STAGE_VISUAL[lead.stage].dot}`} />
+                  <div className="truncate text-[13px] font-semibold text-os-text">{lead.name}</div>
+                </div>
                 <div className="mt-0.5 text-[10px] text-os-dim">{lead.email || lead.phone || lead.whatsapp || 'Sin contacto'}</div>
+                {(lead.phone || lead.whatsapp) && lead.email && <div className="mt-0.5 text-[10px] text-os-dim">{lead.phone || lead.whatsapp}</div>}
+                <div className="mt-1"><WhatsAppStatusBadge lead={lead} /></div>
               </div>
             </div>
           </div>
@@ -598,7 +642,7 @@ function LeadRow({
               <span className="mr-1 font-mono text-[9.5px] uppercase tracking-[0.18em] text-os-dim">Acciones comerciales</span>
               <button
                 type="button"
-                disabled={isTerminal}
+                disabled={!canQualify}
                 onClick={() => onCommercialEvent('qualified')}
                 className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent disabled:cursor-not-allowed disabled:opacity-40"
               >

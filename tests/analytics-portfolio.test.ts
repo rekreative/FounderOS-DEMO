@@ -58,6 +58,17 @@ function makeLead(overrides: Partial<Lead> & Pick<Lead, 'id' | 'clientId' | 'sta
   };
 }
 
+function makeEvent(overrides: Partial<LeadEvent> & Pick<LeadEvent, 'leadId' | 'type'>): LeadEvent {
+  return {
+    id: `event-${overrides.leadId}-${overrides.type}`,
+    source: 'system',
+    occurredAt: '2026-01-01T00:00:00.000Z',
+    summary: 'Test event',
+    details: null,
+    ...overrides,
+  };
+}
+
 function makeCampaign(overrides: Partial<MetaCampaign> & Pick<MetaCampaign, 'id' | 'clientId'>): MetaCampaign {
   return {
     scope: 'client',
@@ -247,7 +258,11 @@ describe('portfolio benchmark — aggregated-first, never averaged per-client', 
     ];
     const rows = buildClientBenchmarkRows(
       [{ id: 'client-a', name: 'A' }],
-      buildPerClientLeadFunnelCounts([{ id: 'client-a' }], leads, events),
+      buildPerClientLeadFunnelCounts(
+        [{ id: 'client-a' }],
+        leads,
+        [makeEvent({ leadId: 'l1', type: 'appointment_booked' })],
+      ),
     );
     // 1 appointment out of 2 total leads = 0.5, not 1/1 (which bookingRate,
     // Qualified -> Appointments, would give since only 1 lead ever qualified).

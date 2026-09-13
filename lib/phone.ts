@@ -10,3 +10,18 @@ export function normalizePhoneDigits(raw: string): string {
   const digits = raw.replace(/\D/g, '');
   return digits.startsWith('00') ? digits.slice(2) : digits;
 }
+
+export type PhoneQuality = {
+  status: 'valid' | 'invalid' | 'unknown';
+  reason: 'missing' | 'invalid_characters' | 'invalid_length' | null;
+};
+
+/** Conservative format check; only a provider receipt can prove delivery. */
+export function assessPhoneQuality(raw: string | null | undefined): PhoneQuality {
+  const value = raw?.trim();
+  if (!value) return { status: 'unknown', reason: 'missing' };
+  if (!/^[+\d\s().-]+$/.test(value)) return { status: 'invalid', reason: 'invalid_characters' };
+  const digits = normalizePhoneDigits(value);
+  if (digits.length < 8 || digits.length > 15) return { status: 'invalid', reason: 'invalid_length' };
+  return { status: 'valid', reason: null };
+}

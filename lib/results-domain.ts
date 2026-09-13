@@ -92,7 +92,10 @@ export function buildLeadFunnel(cohortLeads: Lead[], allEvents: LeadEvent[]): Le
     const events = eventsByLead.get(lead.id) ?? [];
     const rank = maxReachedStageRank(lead, events);
     if (rank >= STAGE_RANK.qualified) qualified += 1;
-    if (rank >= STAGE_RANK.appointment) appointments += 1;
+    // A stage-only override is not proof that a real appointment exists.
+    // Count Citas only from the canonical booked/completed commercial facts;
+    // reschedules remain one distinct lead.
+    if (events.some((event) => event.type === 'appointment_booked' || event.type === 'appointment_completed')) appointments += 1;
     if (rank >= STAGE_RANK.converted) converted += 1;
     // Attendance is its own axis — NEVER inferred from stage rank, only ever
     // from an explicit appointment_completed event.
