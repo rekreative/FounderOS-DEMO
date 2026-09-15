@@ -23,4 +23,12 @@ describe('Leads responsive layout contract', () => {
     expect(source).toContain('w-full min-w-0');
     expect(source).toContain('grid-cols-2');
   });
+
+  test('shows saved manual-note text and keeps note taking inside the lead workflow', () => {
+    expect(source).toContain("event.type === 'manual_note'");
+    expect(source).toContain('{event.summary}');
+    expect(source).toContain('Notas de {leads.find((lead) => lead.id === noteLeadId)?.name');
+    expect(source).toContain('Escribe aquí mientras hablas con el lead...');
+    expect(source).toContain(".filter((event) => event.type === 'manual_note')");
+  });
 });

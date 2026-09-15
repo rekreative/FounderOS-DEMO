@@ -307,8 +307,13 @@ function LeadMobileCard({
               ) : events.length === 0 ? (
                 <div className="font-mono text-[10px] text-os-dim">Sin eventos registrados.</div>
               ) : events.slice(-5).reverse().map((event) => (
-                <div key={event.id} className="flex min-w-0 justify-between gap-3 border border-os-border bg-os-surface2 px-2 py-1.5">
-                  <span className="min-w-0 break-words font-mono text-[9.5px] text-os-muted">{eventLabel(event.type)}</span>
+                <div key={event.id} className="flex min-w-0 items-start justify-between gap-3 border border-os-border bg-os-surface2 px-2 py-1.5">
+                  <span className="min-w-0">
+                    <span className="block break-words font-mono text-[9.5px] text-os-muted">{eventLabel(event.type)}</span>
+                    {event.type === 'manual_note' && (
+                      <span className="mt-1 block whitespace-pre-wrap break-words text-[11px] leading-relaxed text-os-text">{event.summary}</span>
+                    )}
+                  </span>
                   <span className="shrink-0 font-mono text-[8.5px] text-os-dim">{formatDateTime(event.occurredAt)}</span>
                 </div>
               ))}
@@ -321,7 +326,7 @@ function LeadMobileCard({
         <button type="button" disabled={!canQualify} onClick={() => onCommercialEvent('qualified')} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:cursor-not-allowed disabled:opacity-40">Cualificar</button>
         <button type="button" disabled={isTerminal} onClick={() => onCommercialEvent('disqualified')} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:cursor-not-allowed disabled:opacity-40">No cualificado</button>
         <button type="button" disabled={services.length === 0 || lead.stage === 'disqualified'} onClick={openConversion} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:opacity-40">{lead.conversionSnapshot ? 'Editar conversión' : 'Registrar conversión'}</button>
-        <button type="button" onClick={onAddNote} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Añadir nota</button>
+        <button type="button" onClick={onAddNote} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Notas</button>
         <button type="button" onClick={onEdit} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted">Editar</button>
       </div>
 
@@ -472,7 +477,7 @@ function LeadRow({
               onClick={onAddNote}
               className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-dim hover:border-os-border-strong hover:text-os-accent"
             >
-              Añadir nota
+              Notas
             </button>
             <button
               type="button"
@@ -620,10 +625,13 @@ function LeadRow({
                   {events.map((event, index) => (
                     <div key={event.id} className="flex shrink-0 items-center gap-1.5">
                       {index > 0 && <span className="font-mono text-[9px] text-os-dim">→</span>}
-                      <div className="flex shrink-0 flex-col gap-0.5 rounded-sm-t border border-os-border bg-os-surface2 px-2.5 py-1.5">
+                      <div className={`flex shrink-0 flex-col gap-0.5 rounded-sm-t border border-os-border bg-os-surface2 px-2.5 py-1.5 ${event.type === 'manual_note' ? 'max-w-[320px]' : ''}`}>
                         <span className="whitespace-nowrap font-mono text-[9.5px] uppercase tracking-wide text-os-text">
                           {eventLabel(event.type)}
                         </span>
+                        {event.type === 'manual_note' && (
+                          <span className="whitespace-pre-wrap break-words text-[10.5px] leading-relaxed text-os-muted">{event.summary}</span>
+                        )}
                         <span className="whitespace-nowrap font-mono text-[8.5px] text-os-dim">{formatDateTime(event.occurredAt)}</span>
                       </div>
                     </div>
@@ -744,6 +752,8 @@ export default function LeadsPage() {
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
   const [noteLeadId, setNoteLeadId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftLead>(emptyDraft());
 
   useEffect(() => {
@@ -1011,18 +1021,27 @@ export default function LeadsPage() {
   const handleAddManualNote = (leadId: string) => {
     setNoteLeadId(leadId);
     setNoteDraft('');
+    setNoteError(null);
+    setEventsLoadingId((prev) => ({ ...prev, [leadId]: true }));
+    getLeadEvents(leadId)
+      .then((events) => setEventsByLeadId((prev) => ({ ...prev, [leadId]: events })))
+      .catch(() => setNoteError('No se pudieron cargar las notas anteriores.'))
+      .finally(() => setEventsLoadingId((prev) => ({ ...prev, [leadId]: false })));
   };
 
   const submitNote = async () => {
-    if (!noteLeadId || !noteDraft.trim()) return;
+    if (!noteLeadId || !noteDraft.trim() || noteSaving) return;
+    setNoteSaving(true);
+    setNoteError(null);
     try {
       await appendLeadEvent(noteLeadId, { summary: noteDraft.trim() });
       await reloadLeads();
       await refreshEventsForLead(noteLeadId);
-      setNoteLeadId(null);
       setNoteDraft('');
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : 'No se pudo guardar la nota.');
+      setNoteError(error instanceof Error ? error.message : 'No se pudo guardar la nota.');
+    } finally {
+      setNoteSaving(false);
     }
   };
 
@@ -1360,27 +1379,57 @@ export default function LeadsPage() {
       )}
 
       {noteLeadId && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4">
-          <div className="w-full max-w-xl rounded-sm-t border border-os-border bg-os-surface p-4">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center" role="dialog" aria-modal="true" aria-label="Notas del lead">
+          <div className="flex max-h-[85vh] w-full max-w-xl flex-col rounded-sm-t border border-os-border bg-os-surface p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold uppercase tracking-wide">Añadir nota manual</h3>
+              <div>
+                <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-os-dim">Historial comercial</div>
+                <h3 className="mt-1 text-sm font-semibold text-os-text">
+                  Notas de {leads.find((lead) => lead.id === noteLeadId)?.name ?? 'este lead'}
+                </h3>
+              </div>
               <button type="button" onClick={() => setNoteLeadId(null)} className="font-mono text-[10px] uppercase tracking-wide text-os-dim hover:text-os-accent">
                 cerrar
               </button>
             </div>
+            <div className="min-h-0 flex-1 overflow-y-auto border-y border-os-border py-3">
+              {eventsLoadingId[noteLeadId] ? (
+                <div className="font-mono text-[10px] text-os-dim">Cargando notas...</div>
+              ) : (eventsByLeadId[noteLeadId] ?? []).filter((event) => event.type === 'manual_note').length === 0 ? (
+                <div className="border border-dashed border-os-border px-3 py-5 text-center font-mono text-[10px] text-os-dim">Todavía no hay notas para este lead.</div>
+              ) : (
+                <div className="space-y-2">
+                  {(eventsByLeadId[noteLeadId] ?? [])
+                    .filter((event) => event.type === 'manual_note')
+                    .slice()
+                    .reverse()
+                    .map((event) => (
+                      <article key={event.id} className="border border-os-border bg-os-surface2 px-3 py-2.5">
+                        <p className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-os-text">{event.summary}</p>
+                        <time className="mt-2 block font-mono text-[8.5px] text-os-dim">{formatDateTime(event.occurredAt)}</time>
+                      </article>
+                    ))}
+                </div>
+              )}
+            </div>
+            <label className="mt-3 block">
+              <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-os-dim">Nueva nota</span>
             <textarea
               value={noteDraft}
               onChange={(event) => setNoteDraft(event.target.value)}
-              rows={4}
-              className="w-full border border-os-border bg-os-surface2 p-2 text-sm text-os-text outline-none"
-              placeholder="Añade una breve nota sobre el lead..."
+              rows={5}
+              autoFocus
+              className="mt-1 w-full resize-y border border-os-border bg-os-surface2 p-3 text-sm leading-relaxed text-os-text outline-none focus:border-os-border-strong"
+              placeholder="Escribe aquí mientras hablas con el lead..."
             />
+            </label>
+            {noteError && <div className="mt-2 border border-os-err bg-os-err/10 px-3 py-2 font-mono text-[10px] text-os-err">{noteError}</div>}
             <div className="mt-3 flex justify-end gap-2">
               <button type="button" onClick={() => setNoteLeadId(null)} className="border border-os-border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-dim">
-                Cancelar
+                Cerrar
               </button>
-              <button type="button" onClick={submitNote} className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface">
-                Guardar nota
+              <button type="button" onClick={submitNote} disabled={!noteDraft.trim() || noteSaving} className="border border-os-border bg-os-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-os-surface disabled:cursor-not-allowed disabled:opacity-40">
+                {noteSaving ? 'Guardando...' : 'Guardar nota'}
               </button>
             </div>
           </div>
