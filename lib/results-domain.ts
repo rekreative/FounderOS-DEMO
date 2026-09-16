@@ -21,7 +21,8 @@ export const STAGE_RANK: Record<LeadStage, number> = {
   contacted: 1,
   qualified: 2,
   appointment: 3,
-  converted: 4,
+  proposal_sent: 4,
+  converted: 5,
   no_response: -1,
   disqualified: -1,
 };
@@ -48,6 +49,8 @@ export function maxReachedStageRank(lead: Lead, events: LeadEvent[]): number {
       if (rank != null && rank > max) max = rank;
     } else if (event.type === 'qualified') {
       if (STAGE_RANK.qualified > max) max = STAGE_RANK.qualified;
+    } else if (event.type === 'proposal_sent') {
+      if (STAGE_RANK.proposal_sent > max) max = STAGE_RANK.proposal_sent;
     } else if (event.type === 'converted') {
       if (STAGE_RANK.converted > max) max = STAGE_RANK.converted;
     } else if (event.type === 'appointment_booked' || event.type === 'appointment_completed') {
@@ -62,6 +65,7 @@ export type LeadFunnelCounts = {
   qualified: number;
   appointments: number; // "Citas" — booked (or beyond), not necessarily attended
   attended: number; // "Asistidas"
+  proposals: number;
   converted: number;
 };
 
@@ -85,6 +89,7 @@ export function buildLeadFunnel(cohortLeads: Lead[], allEvents: LeadEvent[]): Le
 
   let qualified = 0;
   let appointments = 0;
+  let proposals = 0;
   let converted = 0;
   let attended = 0;
 
@@ -96,13 +101,18 @@ export function buildLeadFunnel(cohortLeads: Lead[], allEvents: LeadEvent[]): Le
     // Count Citas only from the canonical booked/completed commercial facts;
     // reschedules remain one distinct lead.
     if (events.some((event) => event.type === 'appointment_booked' || event.type === 'appointment_completed')) appointments += 1;
+    // Proposals require explicit evidence; historical conversions imply none.
+    if (lead.stage === 'proposal_sent' || events.some((event) =>
+      event.type === 'proposal_sent' ||
+      (event.type === 'stage_changed' && event.details?.to === 'proposal_sent')
+    )) proposals += 1;
     if (rank >= STAGE_RANK.converted) converted += 1;
     // Attendance is its own axis — NEVER inferred from stage rank, only ever
     // from an explicit appointment_completed event.
     if (events.some((event) => event.type === 'appointment_completed')) attended += 1;
   }
 
-  return { leads: cohortLeads.length, qualified, appointments, attended, converted };
+  return { leads: cohortLeads.length, qualified, appointments, attended, proposals, converted };
 }
 
 /** Sums per-client funnel counts into an agency-wide funnel. Simple
@@ -116,13 +126,14 @@ export function sumFunnelCounts(countsList: LeadFunnelCounts[]): LeadFunnelCount
       qualified: acc.qualified + counts.qualified,
       appointments: acc.appointments + counts.appointments,
       attended: acc.attended + counts.attended,
+      proposals: acc.proposals + counts.proposals,
       converted: acc.converted + counts.converted,
     }),
-    { leads: 0, qualified: 0, appointments: 0, attended: 0, converted: 0 },
+    { leads: 0, qualified: 0, appointments: 0, attended: 0, proposals: 0, converted: 0 },
   );
 }
 
-export type FunnelStageId = 'leads' | 'qualified' | 'appointments' | 'attended' | 'converted';
+export type FunnelStageId = 'leads' | 'qualified' | 'appointments' | 'attended' | 'proposals' | 'converted';
 
 export type FunnelStageRow = {
   id: FunnelStageId;
@@ -139,6 +150,7 @@ const FUNNEL_STAGE_LABELS: Record<FunnelStageId, string> = {
   qualified: 'Cualificados',
   appointments: 'Citas',
   attended: 'Asistidas',
+  proposals: 'Propuestas enviadas',
   converted: 'Conversiones',
 };
 
@@ -148,6 +160,7 @@ export function buildFunnelStages(counts: LeadFunnelCounts): FunnelStageRow[] {
     { id: 'qualified', count: counts.qualified },
     { id: 'appointments', count: counts.appointments },
     { id: 'attended', count: counts.attended },
+    { id: 'proposals', count: counts.proposals },
     { id: 'converted', count: counts.converted },
   ];
 

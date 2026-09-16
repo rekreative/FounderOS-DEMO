@@ -78,6 +78,7 @@ export const LeadStageSchema = z.enum([
   'contacted',
   'qualified',
   'appointment',
+  'proposal_sent',
   'converted',
   'no_response',
   'disqualified',
@@ -95,6 +96,7 @@ export const LeadEventTypeSchema = z.enum([
   'qualified',
   'appointment_booked',
   'appointment_completed',
+  'proposal_sent',
   'converted',
   'disqualified',
   'manual_note',
@@ -326,6 +328,7 @@ export const CommercialEventTypeSchema = z.enum([
   'qualified',
   'appointment_booked',
   'appointment_completed',
+  'proposal_sent',
   'converted',
   'disqualified',
 ]);
@@ -388,6 +391,16 @@ export const CommercialEventBodySchema = z.discriminatedUnion('type', [
     .strict(),
   z
     .object({
+      type: z.literal('proposal_sent'),
+      leadId: z.string().trim().min(1),
+      externalEventId: z.string().trim().min(1),
+      occurredAt: isoDateTime.optional(),
+      details: z.record(z.unknown()).optional(),
+      ...commercialEventSharedFields,
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal('appointment_booked'),
       leadId: z.string().trim().min(1),
       externalEventId: z.string().trim().min(1),
@@ -435,7 +448,7 @@ export const CommercialEventBodySchema = z.discriminatedUnion('type', [
 /**
  * POST /api/leads/[id]/commercial-events request shape (manual UI quick
  * actions). No `leadId` (the URL param identifies the lead), no
- * `externalEventId` (manual actions are never deduped — see
+ * `externalEventId` (proposals are deduped per lead — see
  * appendCommercialEvent's doc comment), no `details` — kept to the smallest
  * surface the Leads UI's quick actions actually need. Same
  * `type`-discriminated shape and the same never-caller-controlled
@@ -443,6 +456,7 @@ export const CommercialEventBodySchema = z.discriminatedUnion('type', [
  */
 export const ManualCommercialEventBodySchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('qualified'), ...commercialEventSharedFields }).strict(),
+  z.object({ type: z.literal('proposal_sent'), ...commercialEventSharedFields }).strict(),
   z.object({ type: z.literal('appointment_booked'), appointmentDate: isoDateTime, ...commercialEventSharedFields }).strict(),
   z.object({ type: z.literal('appointment_completed'), ...commercialEventSharedFields }).strict(),
   z

@@ -315,22 +315,22 @@ describe('buildLeadFunnel', () => {
   it('a fresh lead with no events and stage new counts only at the leads stage', () => {
     const lead = makeLead({ id: 'l1', clientId: 'c1', stage: 'new', createdAt: '2026-08-01T00:00:00.000Z' });
     const counts = buildLeadFunnel([lead], []);
-    expect(counts).toEqual({ leads: 1, qualified: 0, appointments: 0, attended: 0, converted: 0 });
+    expect(counts).toEqual({ leads: 1, qualified: 0, appointments: 0, attended: 0, proposals: 0, converted: 0 });
   });
 
   it('handles an empty cohort without crashing (all-zero funnel)', () => {
-    expect(buildLeadFunnel([], [])).toEqual({ leads: 0, qualified: 0, appointments: 0, attended: 0, converted: 0 });
+    expect(buildLeadFunnel([], [])).toEqual({ leads: 0, qualified: 0, appointments: 0, attended: 0, proposals: 0, converted: 0 });
   });
 });
 
 describe('buildFunnelStages', () => {
   it('computes stage-to-stage rates from the previous row', () => {
-    const stages = buildFunnelStages({ leads: 100, qualified: 40, appointments: 20, attended: 15, converted: 5 });
-    expect(stages.map((s) => s.rateFromPrevious)).toEqual([null, 0.4, 0.5, 0.75, 1 / 3]);
+    const stages = buildFunnelStages({ leads: 100, qualified: 40, appointments: 20, attended: 15, proposals: 10, converted: 5 });
+    expect(stages.map((s) => s.rateFromPrevious)).toEqual([null, 0.4, 0.5, 0.75, 2 / 3, 0.5]);
   });
 
   it('rate is null (not a divide-by-zero) when the previous stage is empty', () => {
-    const stages = buildFunnelStages({ leads: 0, qualified: 0, appointments: 0, attended: 0, converted: 0 });
+    const stages = buildFunnelStages({ leads: 0, qualified: 0, appointments: 0, attended: 0, proposals: 0, converted: 0 });
     expect(stages.every((s) => s.rateFromPrevious === null)).toBe(true);
   });
 });
@@ -393,7 +393,7 @@ describe('computeCPLCrm', () => {
 });
 
 describe('funnel rate helpers', () => {
-  const zeroCounts = { leads: 0, qualified: 0, appointments: 0, attended: 0, converted: 0 };
+  const zeroCounts = { leads: 0, qualified: 0, appointments: 0, attended: 0, proposals: 0, converted: 0 };
 
   it('are all null on an all-zero funnel', () => {
     expect(qualificationRate(zeroCounts)).toBeNull();
@@ -403,7 +403,7 @@ describe('funnel rate helpers', () => {
   });
 
   it('compute correctly on a populated funnel', () => {
-    const counts = { leads: 10, qualified: 5, appointments: 4, attended: 2, converted: 1 };
+    const counts = { leads: 10, qualified: 5, appointments: 4, attended: 2, proposals: 0, converted: 1 };
     expect(qualificationRate(counts)).toBe(0.5);
     expect(bookingRate(counts)).toBe(0.8);
     expect(attendanceRate(counts)).toBe(0.5);
@@ -642,8 +642,8 @@ describe('buildClientComparison', () => {
   it('sorts rows by attributed revenue, largest first', () => {
     const clients = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }];
     const perClient = [
-      { clientId: 'a', adSpend: 100, counts: { leads: 5, qualified: 0, appointments: 0, attended: 0, converted: 1 }, attributedRevenue: 500, roas: 5, cac: 100 },
-      { clientId: 'b', adSpend: 200, counts: { leads: 10, qualified: 0, appointments: 0, attended: 0, converted: 2 }, attributedRevenue: 5000, roas: 25, cac: 100 },
+      { clientId: 'a', adSpend: 100, counts: { leads: 5, qualified: 0, appointments: 0, attended: 0, proposals: 0, converted: 1 }, attributedRevenue: 500, roas: 5, cac: 100 },
+      { clientId: 'b', adSpend: 200, counts: { leads: 10, qualified: 0, appointments: 0, attended: 0, proposals: 0, converted: 2 }, attributedRevenue: 5000, roas: 25, cac: 100 },
     ];
     const rows = buildClientComparison(clients, perClient);
     expect(rows.map((r) => r.clientId)).toEqual(['b', 'a']);
@@ -658,14 +658,14 @@ describe('buildClientComparison', () => {
 describe('sumFunnelCounts', () => {
   it('sums funnel counts field-wise across clients', () => {
     const counts = [
-      { leads: 10, qualified: 4, appointments: 3, attended: 2, converted: 1 },
-      { leads: 5, qualified: 2, appointments: 1, attended: 1, converted: 0 },
+      { leads: 10, qualified: 4, appointments: 3, attended: 2, proposals: 0, converted: 1 },
+      { leads: 5, qualified: 2, appointments: 1, attended: 1, proposals: 0, converted: 0 },
     ];
-    expect(sumFunnelCounts(counts)).toEqual({ leads: 15, qualified: 6, appointments: 4, attended: 3, converted: 1 });
+    expect(sumFunnelCounts(counts)).toEqual({ leads: 15, qualified: 6, appointments: 4, attended: 3, proposals: 0, converted: 1 });
   });
 
   it('is all-zero for an empty list', () => {
-    expect(sumFunnelCounts([])).toEqual({ leads: 0, qualified: 0, appointments: 0, attended: 0, converted: 0 });
+    expect(sumFunnelCounts([])).toEqual({ leads: 0, qualified: 0, appointments: 0, attended: 0, proposals: 0, converted: 0 });
   });
 });
 

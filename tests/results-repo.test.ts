@@ -171,6 +171,30 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/results-repo (real Postgr
     });
   });
 
+  it('counts explicit proposals separately for internal, client A and client B without adding revenue', async () => {
+    const a = await makeClient();
+    const b = await makeClient();
+    const internal = await makeLead({ scope: 'internal', name: 'Internal proposal' });
+    const clientLead = await makeLead({ scope: 'client', clientId: a.id, name: 'Client proposal' });
+    await makeLead({ scope: 'client', clientId: b.id, name: 'No proposal' });
+    for (const lead of [internal, clientLead]) {
+      await appendCommercialEvent({ leadId: lead.id, type: 'proposal_sent', source: 'manual', summary: 'Proposal' });
+      await appendCommercialEvent({ leadId: lead.id, type: 'proposal_sent', source: 'manual', summary: 'Retry' });
+    }
+    const clientA = await getResults({ clientId: a.id, preset: 'all' });
+    const clientB = await getResults({ clientId: b.id, preset: 'all' });
+    const own = await getResults({ ownerScope: 'internal', preset: 'all' });
+    expect(clientA.overall.funnel.proposals).toBe(1);
+    expect(clientB.overall.funnel.proposals).toBe(0);
+    expect(own.overall.funnel.proposals).toBe(1);
+    expect(clientA.overall.value.total).toBeNull();
+    expect(own.overall.value.total).toBeNull();
+    expect(own.byClient).toEqual([]);
+    const global = await getResults({ preset: 'all' });
+    expect(global.byClient.find(row => row.clientId === a.id)?.funnel.proposals).toBe(1);
+    expect(global.byClient.find(row => row.clientId === b.id)?.funnel.proposals).toBe(0);
+  });
+
   describe('getResults — client scoping and empty cohorts', () => {
     it('never leaks one client’s leads into another client’s scoped results', async () => {
       const clientA = await makeClient();
@@ -192,7 +216,7 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('lib/server/results-repo (real Postgr
     it('a client with zero leads returns an honest all-zero/null computation, not an error', async () => {
       const client = await makeClient();
       const result = await getResults({ clientId: client.id, preset: 'all' });
-      expect(result.overall.funnel).toEqual({ leads: 0, qualified: 0, appointments: 0, attended: 0, converted: 0 });
+      expect(result.overall.funnel).toEqual({ leads: 0, qualified: 0, appointments: 0, attended: 0, proposals: 0, converted: 0 });
       expect(result.overall.value).toEqual({ total: null, average: null, count: 0 });
     });
 

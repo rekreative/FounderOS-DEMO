@@ -31,6 +31,7 @@ function translateActivitySummary(event: LeadEvent): string {
       return to ? `Etapa cambiada a ${getStageLabel(to as LeadStage)}` : event.summary;
     }
     case 'converted': return 'Lead convertido';
+    case 'proposal_sent': return 'Propuesta enviada';
     case 'disqualified': return 'Lead descartado';
     case 'appointment_completed': return 'Cita completada';
     case 'appointment_booked': return 'Cita reservada';
@@ -232,6 +233,7 @@ export default function HomePage() {
   const internalLeadCount = internalFunnel?.leads ?? leads.filter((lead) => lead.scope === 'internal').length;
   const qualifiedLeads = internalFunnel?.qualified ?? 0;
   const appointmentLeads = internalFunnel?.appointments ?? 0;
+  const proposalLeads = internalFunnel?.proposals ?? 0;
   const attendedLeads = internalFunnel?.attended ?? 0;
   const convertedLeads = internalFunnel?.converted ?? 0;
   const funnelRate = internalLeadCount > 0 ? Math.round((convertedLeads / internalLeadCount) * 100) : 0;
@@ -288,11 +290,12 @@ export default function HomePage() {
       <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
         <DashboardPanel className="xl:col-span-8">
           <SectionHead label="Funnel comercial" link="Ver resultados" href="/results" />
-          <div className="grid grid-cols-2 gap-0 sm:grid-cols-5">
+          <div className="grid grid-cols-2 gap-0 sm:grid-cols-3 2xl:grid-cols-6">
             <FunnelStep label="Leads" value={internalLeadCount} detail="Entrada interna" />
             <FunnelStep label="Cualificados" value={qualifiedLeads} detail="Interés validado" />
             <FunnelStep label="Citas" value={appointmentLeads} detail="Con evento registrado" />
             <FunnelStep label="Realizadas" value={attendedLeads} detail="Asistencia confirmada" />
+            <FunnelStep label="Propuestas" value={proposalLeads} detail="Enviadas al lead" />
             <FunnelStep label="Cierres" value={convertedLeads} detail={`${funnelRate}% del total`} last />
           </div>
           {internalLeadCount === 0 && (

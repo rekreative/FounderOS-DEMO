@@ -28,6 +28,7 @@ const AUTH_ERROR_MESSAGE: Record<MakeEventsAuthFailureReason, string> = {
 };
 
 const DEFAULT_SUMMARY: Record<CommercialEventType, string> = {
+  proposal_sent: 'Propuesta enviada',
   qualified: 'Lead qualified',
   appointment_booked: 'Appointment booked',
   appointment_completed: 'Appointment completed',

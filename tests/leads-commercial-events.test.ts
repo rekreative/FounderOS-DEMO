@@ -69,6 +69,79 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('Appointment + Commercial Lifecycle V
     );
   }
 
+  describe('Proposal sent V1', () => {
+    it.each(['new', 'qualified', 'appointment', 'no_response'] as const)('advances %s to proposal with one semantic event', async (stage) => {
+      const lead = await makeLead({ stage });
+      const result = await postManual(lead.id, { type: 'proposal_sent' });
+      expect(result.status).toBe(201);
+      expect((await getLeadById(lead.id))?.stage).toBe('proposal_sent');
+      const events = await listLeadEvents(lead.id);
+      expect(events.filter(e => e.type === 'proposal_sent')).toHaveLength(1);
+      expect(events.some(e => e.type === 'stage_changed' && e.details?.to === 'proposal_sent')).toBe(true);
+    });
+
+    it('serializes manual double clicks and keeps retries safe after conversion', async () => {
+      const lead = await makeLead();
+      const input = { leadId: lead.id, type: 'proposal_sent' as const, source: 'manual' as const, summary: 'Propuesta enviada' };
+      const results = await Promise.all([appendCommercialEvent(input), appendCommercialEvent(input)]);
+      expect(results.filter(r => r.deduped)).toHaveLength(1);
+      expect(new Set(results.map(r => r.event.id)).size).toBe(1);
+      await appendCommercialEvent({ leadId: lead.id, type: 'converted', source: 'manual', summary: 'Convertido' });
+      expect((await appendCommercialEvent(input)).deduped).toBe(true);
+      expect((await getLeadById(lead.id))?.stage).toBe('converted');
+    });
+
+    it('creating directly at proposal stage persists its history before later conversion', async () => {
+      const lead = await makeLead({ stage: 'proposal_sent' });
+      await postManual(lead.id, { type: 'converted' });
+      expect((await listLeadEvents(lead.id)).filter(e => e.type === 'proposal_sent')).toHaveLength(1);
+    });
+
+    it('generic stage selection records the proposal without duplicating the quick action', async () => {
+      const lead = await makeLead();
+      await setLeadStage(lead.id, 'proposal_sent');
+      await postManual(lead.id, { type: 'proposal_sent' });
+      expect((await listLeadEvents(lead.id)).filter(e => e.type === 'proposal_sent')).toHaveLength(1);
+    });
+
+    it('late Calendar bookings/completions retain the proposal stage and still record the appointment', async () => {
+      const lead = await makeLead();
+      await postManual(lead.id, { type: 'proposal_sent' });
+      const appointmentDate = '2026-10-01T10:00:00.000Z';
+      for (const type of ['appointment_booked', 'appointment_completed'] as const) {
+        const result = await appendCommercialEvent({ leadId: lead.id, type, source: 'make', summary: type, appointmentDate, externalEventId: lead.id + type });
+        expect(result.lead.stage).toBe('proposal_sent');
+      }
+      expect((await getLeadById(lead.id))?.appointmentDate).toBe(appointmentDate);
+    });
+
+    it.each(['converted', 'disqualified'] as const)('rejects a new proposal on terminal %s', async (stage) => {
+      const lead = await makeLead({ stage });
+      await expect(appendCommercialEvent({ leadId: lead.id, type: 'proposal_sent', source: 'manual', summary: 'Propuesta' })).rejects.toBeInstanceOf(LeadStageTransitionError);
+      expect((await listLeadEvents(lead.id)).filter(e => e.type === 'proposal_sent')).toHaveLength(0);
+    });
+
+    it('supports Make identity retries and rejects an external identity assigned to another lead', async () => {
+      const lead = await makeLead();
+      const other = await makeLead();
+      const body = { type: 'proposal_sent', leadId: lead.id, externalEventId: 'proposal-' + lead.id };
+      expect((await postMake(body)).status).toBe(201);
+      expect((await postMake(body)).status).toBe(200);
+      expect((await postMake({ ...body, leadId: other.id })).status).toBe(409);
+      expect((await getLeadById(other.id))?.stage).toBe('new');
+      expect((await listLeadEvents(lead.id)).filter(e => e.type === 'proposal_sent')).toHaveLength(1);
+    });
+
+    it('a proposal can be discarded without generating revenue', async () => {
+      const lead = await makeLead();
+      await postManual(lead.id, { type: 'proposal_sent' });
+      await postManual(lead.id, { type: 'disqualified' });
+      const stored = await getLeadById(lead.id);
+      expect(stored?.stage).toBe('disqualified');
+      expect(stored?.conversionValue).toBeNull();
+    });
+  });
+
   // ── Repository primitive — direct coverage of the stage rules ──────────
   describe('appendCommercialEvent (repository)', () => {
     it.each(['new', 'contacted', 'no_response'] as const)('%s → qualified creates the semantic event and advances stage', async (startStage) => {

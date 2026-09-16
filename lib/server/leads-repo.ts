@@ -451,11 +451,11 @@ export async function listLeads(options: ListLeadsOptions = {}): Promise<ServerL
   }
   if (options.createdFrom) {
     params.push(options.createdFrom);
-    conditions.push(`created_at >= $${params.length}`);
+    conditions.push(`l.created_at >= $${params.length}`);
   }
   if (options.createdTo) {
     params.push(options.createdTo);
-    conditions.push(`created_at < $${params.length}`);
+    conditions.push(`l.created_at < $${params.length}`);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -594,6 +594,12 @@ export async function createLead(input: CreateLeadInput): Promise<{ lead: Server
       occurredAt: now,
     });
 
+    if (input.stage === 'proposal_sent') {
+      await insertLeadEvent(client, {
+        leadId: id, type: 'proposal_sent', source: 'manual',
+        summary: 'Propuesta enviada', occurredAt: now,
+      });
+    }
     const finalRow = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1', [id]);
     return { lead: rowToLead(finalRow.rows[0]), event };
   });
@@ -677,6 +683,21 @@ async function setLeadStageOnClient(
   }
 
   assertStageTransitionAllowed(existing.stage, nextStage);
+
+  // The generic stage selector must record the same commercial fact.
+  // appendCommercialEvent already inserts it before calling this helper.
+  if (nextStage === 'proposal_sent') {
+    const prior = await client.query(
+      "SELECT 1 FROM lead_events WHERE lead_id = $1 AND type = 'proposal_sent' LIMIT 1",
+      [id],
+    );
+    if (prior.rowCount === 0) {
+      await insertLeadEvent(client, {
+        leadId: id, type: 'proposal_sent', source,
+        summary: 'Propuesta enviada', occurredAt: new Date(),
+      });
+    }
+  }
 
   await client.query('UPDATE leads SET stage = $2 WHERE id = $1', [id, nextStage]);
 
@@ -1139,7 +1160,7 @@ export async function appendWhatsAppEvent(input: AppendWhatsAppEventInput): Prom
 // or source directly through their request body; this function is the only
 // place that decides both, same discipline as appendWhatsAppEvent.
 
-export type CommercialEventType = 'qualified' | 'appointment_booked' | 'appointment_completed' | 'converted' | 'disqualified';
+export type CommercialEventType = 'proposal_sent' | 'qualified' | 'appointment_booked' | 'appointment_completed' | 'converted' | 'disqualified';
 
 // Every commercial event's target stage. Incompatible transitions out of a
 // terminal stage are rejected before any event or field is written.
@@ -1150,6 +1171,7 @@ export type CommercialEventType = 'qualified' | 'appointment_booked' | 'appointm
 // funnel derives attendance from the appointment_completed EVENT, never from
 // stage — see lib/results.ts's maxReachedStageRank).
 const COMMERCIAL_EVENT_TARGET_STAGE: Record<CommercialEventType, LeadStage> = {
+  proposal_sent: 'proposal_sent',
   qualified: 'qualified',
   appointment_booked: 'appointment',
   appointment_completed: 'appointment',
@@ -1169,7 +1191,8 @@ const COMMERCIAL_STAGE_RANK: Partial<Record<LeadStage, number>> = {
   contacted: 1,
   qualified: 2,
   appointment: 3,
-  converted: 4,
+  proposal_sent: 4,
+  converted: 5,
   no_response: -1,
 };
 
@@ -1188,8 +1211,7 @@ export type AppendCommercialEventInput = {
   occurredAt?: string;
   /** Idempotency key for Make-reported events — the same (type,
    *  external_event_id) mechanism WhatsApp lifecycle V1 uses. Omitted for
-   *  manual UI actions, which are never deduped (an operator clicking a
-   *  quick action twice records two events, same as "Añadir nota"). */
+   *  manual UI actions. Proposal retries are also deduped per lead. */
   externalEventId?: string;
   /** Required (by the caller's own Zod schema) for appointment_booked only. */
   appointmentDate?: string;
@@ -1243,6 +1265,16 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
         if (event.leadId !== input.leadId) throw new CommercialEventIdempotencyConflictError();
         return { lead: existing, event, deduped: true };
       }
+    }
+
+    // Serialize manual double clicks using the same lead row lock. Make
+    // retains its explicit occurrence identity (type + externalEventId).
+    if (input.type === 'proposal_sent' && !input.externalEventId) {
+      const prior = await client.query<LeadEventRow>(
+        "SELECT * FROM lead_events WHERE lead_id = $1 AND type = 'proposal_sent' ORDER BY occurred_at, id LIMIT 1",
+        [input.leadId],
+      );
+      if (prior.rows[0]) return { lead: existing, event: rowToLeadEvent(prior.rows[0]), deduped: true };
     }
 
     const targetStage = COMMERCIAL_EVENT_TARGET_STAGE[input.type];

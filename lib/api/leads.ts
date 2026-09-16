@@ -135,13 +135,14 @@ export async function appendLeadEvent(id: string, input: { summary: string }): P
   return event;
 }
 
-export type CommercialEventType = 'qualified' | 'appointment_booked' | 'appointment_completed' | 'converted' | 'disqualified';
+export type CommercialEventType = 'proposal_sent' | 'qualified' | 'appointment_booked' | 'appointment_completed' | 'converted' | 'disqualified';
 
 // Mirrors ManualCommercialEventBodySchema exactly — no leadId (the URL
-// param), no externalEventId (manual actions are never deduped), no
+// param), no externalEventId (proposals are deduped per lead), no
 // stage/source (always server-controlled). See
 // app/api/leads/[id]/commercial-events/route.ts.
 export type AppendCommercialEventInput =
+  | { type: 'proposal_sent'; summary?: string }
   | { type: 'qualified'; summary?: string }
   | { type: 'appointment_booked'; appointmentDate: string; summary?: string }
   | { type: 'appointment_completed'; summary?: string }

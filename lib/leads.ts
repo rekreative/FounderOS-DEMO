@@ -17,6 +17,7 @@ export const LEAD_STAGE_OPTIONS = [
   { id: 'contacted', label: 'Contactado' },
   { id: 'qualified', label: 'Cualificado' },
   { id: 'appointment', label: 'Cita' },
+  { id: 'proposal_sent', label: 'Propuesta enviada' },
   { id: 'converted', label: 'Convertido' },
   { id: 'no_response', label: 'Sin respuesta' },
   { id: 'disqualified', label: 'Descartado' },
@@ -105,6 +106,7 @@ export type LeadEventType =
   | 'qualified'
   | 'appointment_booked'
   | 'appointment_completed'
+  | 'proposal_sent'
   | 'converted'
   | 'disqualified'
   | 'manual_note'

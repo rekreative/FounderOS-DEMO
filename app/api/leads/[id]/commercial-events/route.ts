@@ -13,6 +13,7 @@ import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 export const dynamic = 'force-dynamic';
 
 const DEFAULT_SUMMARY: Record<CommercialEventType, string> = {
+  proposal_sent: 'Propuesta enviada',
   qualified: 'Lead qualified',
   appointment_booked: 'Appointment booked',
   appointment_completed: 'Appointment completed',
@@ -25,8 +26,8 @@ const DEFAULT_SUMMARY: Record<CommercialEventType, string> = {
  * agendada / Cita realizada / Convertido / Descartado). Reuses the exact
  * same appendCommercialEvent primitive POST /api/leads/commercial-events
  * (Make) calls — only `source` differs ('manual' here, hardcoded, never
- * caller-supplied) and there's no externalEventId (manual actions are never
- * deduped — see appendCommercialEvent's doc comment). No bearer-token gate:
+ * caller-supplied) and there's no externalEventId (proposals are deduped
+ * per lead; other manual actions retain their existing behavior). No bearer-token gate:
  * same convention as the existing POST /api/leads/[id]/stage and
  * POST /api/leads/[id]/events routes this mirrors.
  */

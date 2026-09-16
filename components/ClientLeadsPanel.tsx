@@ -28,6 +28,7 @@ const STAGE_TONE: Record<LeadStage, BadgeTone> = {
   contacted: 'default',
   qualified: 'default',
   appointment: 'warn',
+  proposal_sent: 'accent',
   converted: 'ok',
   no_response: 'default',
   disqualified: 'err',

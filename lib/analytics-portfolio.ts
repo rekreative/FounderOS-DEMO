@@ -153,7 +153,7 @@ export function buildClientBenchmarkRows(
   perClientCounts: { clientId: string; counts: LeadFunnelCounts }[],
 ): ClientBenchmarkRow[] {
   const byClientId = new Map(perClientCounts.map((entry) => [entry.clientId, entry.counts]));
-  const emptyCounts: LeadFunnelCounts = { leads: 0, qualified: 0, appointments: 0, attended: 0, converted: 0 };
+  const emptyCounts: LeadFunnelCounts = { leads: 0, qualified: 0, appointments: 0, attended: 0, proposals: 0, converted: 0 };
 
   return clients.map((client) => {
     const counts = byClientId.get(client.id) ?? emptyCounts;

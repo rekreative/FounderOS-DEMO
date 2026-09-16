@@ -35,6 +35,7 @@ const STAGE_VISUAL: Record<LeadStage, { border: string; badge: string; dot: stri
   contacted: { border: 'border-l-[var(--funnel-s1)]', badge: 'border-[var(--funnel-s1)] text-os-text', dot: 'bg-[var(--funnel-s1)]' },
   qualified: { border: 'border-l-[var(--funnel-s2)]', badge: 'border-[var(--funnel-s2)] text-os-text', dot: 'bg-[var(--funnel-s2)]' },
   appointment: { border: 'border-l-[var(--funnel-s3)]', badge: 'border-[var(--funnel-s3)] text-os-text', dot: 'bg-[var(--funnel-s3)]' },
+  proposal_sent: { border: 'border-l-[var(--lead-proposal)]', badge: 'border-[var(--lead-proposal)] text-os-text', dot: 'bg-[var(--lead-proposal)]' },
   converted: { border: 'border-l-os-ok', badge: 'border-os-ok text-os-ok', dot: 'bg-os-ok' },
   no_response: { border: 'border-l-os-warn', badge: 'border-os-warn text-os-warn', dot: 'bg-os-warn' },
   disqualified: { border: 'border-l-os-err', badge: 'border-os-err text-os-err', dot: 'bg-os-err' },
@@ -156,6 +157,7 @@ function eventLabel(type: LeadEvent['type']): string {
     whatsapp_failed: 'WhatsApp no enviado',
     lead_replied: 'Lead respondió',
     commercial_contacted: 'Contacto comercial',
+    proposal_sent: 'Propuesta enviada',
     qualified: 'Cualificado',
     appointment_booked: 'Cita reservada',
     appointment_completed: 'Cita completada',
@@ -325,6 +327,7 @@ function LeadMobileCard({
       <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-os-border pt-3">
         <button type="button" disabled={!canQualify} onClick={() => onCommercialEvent('qualified')} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:cursor-not-allowed disabled:opacity-40">Cualificar</button>
         <button type="button" disabled={isTerminal} onClick={() => onCommercialEvent('disqualified')} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:cursor-not-allowed disabled:opacity-40">No cualificado</button>
+        <button type="button" disabled={isTerminal || lead.stage === 'proposal_sent'} onClick={() => onCommercialEvent('proposal_sent')} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:opacity-40">Propuesta enviada</button>
         <button type="button" disabled={services.length === 0 || lead.stage === 'disqualified'} onClick={openConversion} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:opacity-40">{lead.conversionSnapshot ? 'Editar conversión' : 'Registrar conversión'}</button>
         <button type="button" onClick={onAddNote} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-dim">Notas</button>
         <button type="button" onClick={onEdit} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted">Editar</button>
@@ -683,6 +686,14 @@ function LeadRow({
               </button>
               <button
                 type="button"
+                disabled={isTerminal || lead.stage === 'proposal_sent'}
+                onClick={() => onCommercialEvent('proposal_sent')}
+                className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:text-os-accent disabled:opacity-40"
+              >
+                Propuesta enviada
+              </button>
+              <button
+                type="button"
                 disabled={services.length === 0 || lead.stage === 'disqualified'}
                 onClick={openConversion}
                 className="border border-os-border px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-muted hover:border-os-border-strong hover:text-os-accent"
@@ -931,14 +942,14 @@ export default function LeadsPage() {
           conversionValue,
         });
         if (existing && existing.stage !== draft.stage) {
-          if (draft.stage === 'qualified' || draft.stage === 'disqualified') {
+          if (draft.stage === 'proposal_sent' || draft.stage === 'qualified' || draft.stage === 'disqualified') {
             await appendCommercialEvent(editingLeadId, { type: draft.stage });
           } else {
             await setLeadStage(editingLeadId, draft.stage);
           }
         }
       } else {
-        const semanticStage = draft.stage === 'qualified' || draft.stage === 'disqualified' ? draft.stage : null;
+        const semanticStage = draft.stage === 'proposal_sent' || draft.stage === 'qualified' || draft.stage === 'disqualified' ? draft.stage : null;
         const created = await createLead({
           scope,
           clientId,
@@ -967,7 +978,7 @@ export default function LeadsPage() {
 
   const handleStageChange = async (leadId: string, nextStage: LeadStage) => {
     try {
-      if (nextStage === 'qualified' || nextStage === 'disqualified') {
+      if (nextStage === 'proposal_sent' || nextStage === 'qualified' || nextStage === 'disqualified') {
         await appendCommercialEvent(leadId, { type: nextStage });
       } else {
         await setLeadStage(leadId, nextStage);
