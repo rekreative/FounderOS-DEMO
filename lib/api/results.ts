@@ -40,6 +40,8 @@ export type ResultsComputation = {
     close: number | null;
   };
   value: { total: number | null; average: number | null; count: number };
+  /** Actual collections in the selected period, distinct from agreements. */
+  collected: { total: number | null; count: number };
   trend: { granularity: TrendGranularity; points: TrendPoint[] };
   meta: ResultsAdMetrics;
 };

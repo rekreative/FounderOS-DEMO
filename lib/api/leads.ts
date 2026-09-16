@@ -9,6 +9,7 @@ import type {
   LeadStage,
 } from '@/lib/leads';
 import { apiFetch, nullOn404 } from './http';
+import type { LeadCollectionSummary } from '@/lib/commercial-finance';
 
 /**
  * Browser-facing HTTP client for the canonical PostgreSQL Leads/LeadEvents
@@ -37,6 +38,18 @@ export type Lead = LeadBase & {
   metaAdId: string | null;
   metaFormId: string | null;
   metaPageId: string | null;
+};
+
+export type LeadPayment = {
+  id: string;
+  leadId: string;
+  amount: number;
+  occurredAt: string;
+  source: 'manual' | 'conversion_initial' | 'stripe' | 'paypal';
+  externalEventId: string | null;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
 };
 
 export type CreateLeadInput = {
@@ -123,6 +136,21 @@ export async function setLeadStage(id: string, stage: LeadStage): Promise<{ lead
 export async function getLeadEvents(id: string): Promise<LeadEvent[]> {
   const { events } = await apiFetch<{ events: LeadEvent[] }>(`/api/leads/${encodeURIComponent(id)}/events`);
   return events;
+}
+
+export async function getLeadPayments(id: string): Promise<LeadPayment[]> {
+  const { payments } = await apiFetch<{ payments: LeadPayment[] }>(`/api/leads/${encodeURIComponent(id)}/payments`);
+  return payments;
+}
+
+export async function recordLeadPayment(
+  id: string,
+  input: { amount: number; occurredAt: string; notes?: string | null },
+): Promise<{ lead: Lead; payment: LeadPayment }> {
+  return apiFetch(`/api/leads/${encodeURIComponent(id)}/payments`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 }
 
 /** Manual note only — mirrors the server's public events POST, which never

@@ -93,6 +93,13 @@ export type ResultsAdMetrics = {
   cplCrm: number | null;
 };
 
+/** Cash actually received in the selected calendar period. Unlike `value`,
+ * this is event-time cashflow from the payment ledger, not a lead cohort. */
+export type CollectedRevenueSummary = {
+  total: number | null;
+  count: number;
+};
+
 export type ResultsComputation = {
   clientId: string | null;
   funnel: LeadFunnelCounts;
@@ -104,6 +111,7 @@ export type ResultsComputation = {
     close: number | null;
   };
   value: ConvertedValueSummary;
+  collected: CollectedRevenueSummary;
   trend: { granularity: TrendGranularity; points: TrendPoint[] };
   meta: ResultsAdMetrics;
 };
@@ -132,6 +140,7 @@ function computeCohortResult(
   eventsByLead: Map<string, LeadEvent[]>,
   period: ResolvedResultsPeriod,
   metaSummary: MetaSpendSummary | null,
+  collected: CollectedRevenueSummary,
 ): ResultsComputation {
   // Reconstructs the flat event list buildLeadFunnel/sumConvertedValue
   // expect — cheap (already in memory, no new query) and keeps those
@@ -149,7 +158,65 @@ function computeCohortResult(
   const granularity = resolveResultsTrendGranularity(period.preset, { start: period.start, end: period.end });
   const trend = { granularity, points: groupLeadsByPeriod(cohortLeads, granularity) };
   const meta = buildAdMetrics(metaSummary, funnel, value);
-  return { clientId, funnel, stages, rates, value, trend, meta };
+  return { clientId, funnel, stages, rates, value, collected, trend, meta };
+}
+
+async function getCollectedRevenue(options: {
+  clientId?: string;
+  scope?: LeadScope;
+  period: ResolvedResultsPeriod;
+}): Promise<CollectedRevenueSummary> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (options.clientId) {
+    params.push(options.clientId);
+    conditions.push(`l.client_id = $${params.length}`);
+  }
+  if (options.scope) {
+    params.push(options.scope);
+    conditions.push(`l.scope = $${params.length}`);
+  }
+  if (options.period.queryStart) {
+    params.push(options.period.queryStart);
+    conditions.push(`p.occurred_at >= $${params.length}`);
+  }
+  if (options.period.queryEndExclusive) {
+    params.push(options.period.queryEndExclusive);
+    conditions.push(`p.occurred_at < $${params.length}`);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const result = await query<{ total: string | null; count: string }>(
+    `SELECT SUM(p.amount) AS total, COUNT(*) AS count
+     FROM lead_payments p
+     JOIN leads l ON l.id = p.lead_id
+     ${where}`,
+    params,
+  );
+  const row = result.rows[0];
+  const count = Number(row?.count ?? 0);
+  return { total: count === 0 ? null : Number(row.total), count };
+}
+
+async function getCollectedRevenueByClient(period: ResolvedResultsPeriod): Promise<Map<string, CollectedRevenueSummary>> {
+  const conditions = ["l.scope = 'client'", 'l.client_id IS NOT NULL'];
+  const params: unknown[] = [];
+  if (period.queryStart) {
+    params.push(period.queryStart);
+    conditions.push(`p.occurred_at >= $${params.length}`);
+  }
+  if (period.queryEndExclusive) {
+    params.push(period.queryEndExclusive);
+    conditions.push(`p.occurred_at < $${params.length}`);
+  }
+  const result = await query<{ client_id: string; total: string; count: string }>(
+    `SELECT l.client_id, SUM(p.amount) AS total, COUNT(*) AS count
+     FROM lead_payments p
+     JOIN leads l ON l.id = p.lead_id
+     WHERE ${conditions.join(' AND ')}
+     GROUP BY l.client_id`,
+    params,
+  );
+  return new Map(result.rows.map((row) => [row.client_id, { total: Number(row.total), count: Number(row.count) }]));
 }
 
 export type ResultsQueryOptions = {
@@ -196,20 +263,22 @@ export async function getResults(options: ResultsQueryOptions): Promise<ResultsR
   const metaDateTo = period.end ?? undefined;
 
   if (options.clientId) {
-    const [{ leads, eventsByLead }, metaSummary] = await Promise.all([
+    const [{ leads, eventsByLead }, metaSummary, collected] = await Promise.all([
       loadCohort({ clientId: options.clientId, createdFrom, createdTo }),
       getMetaSpendSummary({ clientId: options.clientId, dateFrom: metaDateFrom, dateTo: metaDateTo }),
+      getCollectedRevenue({ clientId: options.clientId, period }),
     ]);
-    const computation = computeCohortResult(options.clientId, leads, eventsByLead, period, metaSummary);
+    const computation = computeCohortResult(options.clientId, leads, eventsByLead, period, metaSummary, collected);
     return { period, overall: computation, byClient: [computation] };
   }
 
   if (options.ownerScope === 'internal') {
-    const [{ leads, eventsByLead }, metaSummary] = await Promise.all([
+    const [{ leads, eventsByLead }, metaSummary, collected] = await Promise.all([
       loadCohort({ scope: 'internal', createdFrom, createdTo }),
       getMetaSpendSummary({ ownerScope: 'internal', dateFrom: metaDateFrom, dateTo: metaDateTo }),
+      getCollectedRevenue({ scope: 'internal', period }),
     ]);
-    const computation = computeCohortResult(null, leads, eventsByLead, period, metaSummary);
+    const computation = computeCohortResult(null, leads, eventsByLead, period, metaSummary, collected);
     return { period, overall: computation, byClient: [] };
   }
 
@@ -217,10 +286,12 @@ export async function getResults(options: ResultsQueryOptions): Promise<ResultsR
   // clientId null) never belong to a client cohort, same exclusion the
   // client-side computeClientResults already applied via `lead.clientId ===
   // clientId`; fetching only scope 'client' here is the SQL-side equivalent.
-  const [{ leads, eventsByLead }, overallMetaSummary, metaByClient] = await Promise.all([
+  const [{ leads, eventsByLead }, overallMetaSummary, metaByClient, collected, collectedByClient] = await Promise.all([
     loadCohort({ scope: 'client', createdFrom, createdTo }),
     getMetaSpendSummary({ ownerScope: 'client', dateFrom: metaDateFrom, dateTo: metaDateTo }),
     getMetaSpendSummaryByClient({ dateFrom: metaDateFrom, dateTo: metaDateTo }),
+    getCollectedRevenue({ scope: 'client', period }),
+    getCollectedRevenueByClient(period),
   ]);
 
   const leadsByClient = new Map<string, ServerLead[]>();
@@ -232,9 +303,9 @@ export async function getResults(options: ResultsQueryOptions): Promise<ResultsR
   }
 
   const byClient = [...leadsByClient.entries()].map(([clientId, clientLeads]) =>
-    computeCohortResult(clientId, clientLeads, eventsByLead, period, metaByClient.get(clientId) ?? null),
+    computeCohortResult(clientId, clientLeads, eventsByLead, period, metaByClient.get(clientId) ?? null, collectedByClient.get(clientId) ?? { total: null, count: 0 }),
   );
-  const overall = computeCohortResult(null, leads, eventsByLead, period, overallMetaSummary);
+  const overall = computeCohortResult(null, leads, eventsByLead, period, overallMetaSummary, collected);
   return { period, overall, byClient };
 }
 
@@ -246,11 +317,12 @@ export async function getResults(options: ResultsQueryOptions): Promise<ResultsR
  */
 export async function getInternalPerformanceSnapshot(): Promise<ResultsComputation> {
   const period = resolveResultsPeriod('all');
-  const [{ leads, eventsByLead }, metaSummary] = await Promise.all([
+  const [{ leads, eventsByLead }, metaSummary, collected] = await Promise.all([
     loadCohort({ scope: 'internal' }),
     getMetaSpendSummary({ ownerScope: 'internal' }),
+    getCollectedRevenue({ scope: 'internal', period }),
   ]);
-  return computeCohortResult(null, leads, eventsByLead, period, metaSummary);
+  return computeCohortResult(null, leads, eventsByLead, period, metaSummary, collected);
 }
 
 // ── Home (operational, current-activity — event-time semantics) ──────────

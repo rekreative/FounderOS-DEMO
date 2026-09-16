@@ -20,6 +20,7 @@ import {
   createLead,
   getLeadEvents,
   getLeads,
+  recordLeadPayment,
   setLeadStage,
   updateLead,
   type CommercialEventType,
@@ -162,11 +163,54 @@ function eventLabel(type: LeadEvent['type']): string {
     appointment_booked: 'Cita reservada',
     appointment_completed: 'Cita completada',
     converted: 'Convertido',
+    payment_received: 'Cobro registrado',
     disqualified: 'Descartado',
     manual_note: 'Nota manual',
     stage_changed: 'Etapa cambiada',
   };
   return map[type] ?? type;
+}
+
+function CommercialFinancePanel({
+  lead,
+  onRecordPayment,
+}: {
+  lead: Lead;
+  onRecordPayment: (input: { amount: number; occurredAt: string; notes?: string | null }) => Promise<void>;
+}) {
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [notes, setNotes] = useState('');
+  const [occurredAt, setOccurredAt] = useState(() => toDatetimeLocalValue(new Date().toISOString()));
+  const [savingPayment, setSavingPayment] = useState(false);
+
+  if (!lead.conversionSnapshot || lead.conversionValue == null || !lead.conversionCollection) return null;
+  const collection = lead.conversionCollection;
+  const isMonthly = lead.conversionSnapshot.billingType === 'monthly';
+
+  return (
+    <div className="mt-3 border border-os-border bg-os-surface2 p-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div><div className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Servicio contratado</div><div className="mt-1 text-[11px] text-os-text">{lead.conversionSnapshot.serviceName}</div></div>
+        <div><div className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Valor acordado</div><div className="mt-1 text-[11px] text-os-text">{lead.conversionValue.toLocaleString('es-ES')} €</div></div>
+        <div><div className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Dinero cobrado</div><div className="mt-1 text-[11px] text-os-ok">{collection.totalCollected.toLocaleString('es-ES')} €</div></div>
+        <div><div className="font-mono text-[9px] uppercase tracking-wide text-os-dim">{isMonthly ? 'Estado mensual' : 'Importe pendiente'}</div><div className="mt-1 text-[11px] text-os-text">{isMonthly ? (collection.status === 'active' ? 'Activo' : 'Pendiente') : `${(collection.outstandingAmount ?? 0).toLocaleString('es-ES')} €`}</div></div>
+      </div>
+      <div className="mt-3 flex justify-end border-t border-os-border pt-3">
+        <button type="button" onClick={() => setShowPaymentForm((current) => !current)} className="border border-os-ok px-2 py-1 font-mono text-[9.5px] uppercase tracking-wide text-os-ok hover:bg-os-ok/10">
+          Registrar cobro
+        </button>
+      </div>
+      {showPaymentForm && (
+        <div className="mt-3 grid grid-cols-1 gap-2 border-t border-os-border pt-3 sm:grid-cols-3">
+          <label><span className="font-mono text-[8.5px] uppercase text-os-dim">Importe cobrado</span><input type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-1.5 text-[11px] text-os-text" /></label>
+          <label><span className="font-mono text-[8.5px] uppercase text-os-dim">Fecha de cobro</span><input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-1.5 text-[11px] text-os-text" /></label>
+          <label><span className="font-mono text-[8.5px] uppercase text-os-dim">Nota</span><input type="text" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Opcional" className="mt-1 w-full border border-os-border bg-os-surface px-2 py-1.5 text-[11px] text-os-text placeholder:text-os-dim" /></label>
+          <div className="sm:col-span-3 flex justify-end gap-2"><button type="button" disabled={savingPayment} onClick={() => setShowPaymentForm(false)} className="border border-os-border px-2 py-1 font-mono text-[9px] uppercase text-os-muted disabled:opacity-40">Cancelar</button><button type="button" disabled={savingPayment} onClick={async () => { const parsedAmount = Number(amount); const date = fromDatetimeLocalValue(occurredAt); if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || !date) return; setSavingPayment(true); try { await onRecordPayment({ amount: parsedAmount, occurredAt: date, notes: notes.trim() || null }); setAmount(''); setNotes(''); setShowPaymentForm(false); } catch { /* The parent exposes the user-safe error banner. */ } finally { setSavingPayment(false); } }} className="border border-os-accent bg-os-accent px-2 py-1 font-mono text-[9px] uppercase text-os-bg disabled:opacity-40">{savingPayment ? 'Guardando…' : 'Guardar cobro'}</button></div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function LeadMobileCard({
@@ -182,6 +226,7 @@ function LeadMobileCard({
   onEdit,
   onAddNote,
   onCommercialEvent,
+  onRecordPayment,
 }: {
   lead: Lead;
   clients: { id: string; name: string }[];
@@ -195,6 +240,7 @@ function LeadMobileCard({
   onEdit: () => void;
   onAddNote: () => void;
   onCommercialEvent: (type: CommercialEventType, payload?: ConversionPayload) => void;
+  onRecordPayment: (input: { amount: number; occurredAt: string; notes?: string | null }) => Promise<void>;
 }) {
   const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
@@ -324,6 +370,8 @@ function LeadMobileCard({
         </div>
       )}
 
+      <CommercialFinancePanel lead={lead} onRecordPayment={onRecordPayment} />
+
       <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-os-border pt-3">
         <button type="button" disabled={!canQualify} onClick={() => onCommercialEvent('qualified')} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:cursor-not-allowed disabled:opacity-40">Cualificar</button>
         <button type="button" disabled={isTerminal} onClick={() => onCommercialEvent('disqualified')} className="border border-os-border px-2 py-1.5 font-mono text-[9.5px] uppercase tracking-wide text-os-muted disabled:cursor-not-allowed disabled:opacity-40">No cualificado</button>
@@ -336,7 +384,7 @@ function LeadMobileCard({
       {showConversion && selectedService && (
         <div className="mt-3 space-y-3 border border-os-border bg-os-surface2 p-3">
           <label className="block"><span className="font-mono text-[8.5px] uppercase text-os-dim">Servicio contratado</span><select value={serviceId} onChange={(event) => { const service = services.find((item) => item.id === event.target.value); if (!service) return; setServiceId(service.id); setAgreedValue(String(service.price)); setPaymentPlan(service.billingType === 'monthly' ? 'monthly' : service.allowTwoPayments ? 'two_payments' : 'full'); }} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-2 text-[12px] text-os-text">{services.map((service) => <option key={service.id} value={service.id}>{service.name} · {service.price.toLocaleString('es-ES')} €</option>)}</select></label>
-          <div className="grid grid-cols-2 gap-2"><label><span className="font-mono text-[8.5px] uppercase text-os-dim">Valor acordado</span><input type="number" min="0" step="0.01" value={agreedValue} onChange={(event) => setAgreedValue(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-2 text-[12px] text-os-text" /></label><label><span className="font-mono text-[8.5px] uppercase text-os-dim">Cobrado</span><input type="number" min="0" step="0.01" value={initialPayment} onChange={(event) => setInitialPayment(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-2 text-[12px] text-os-text" /></label></div>
+          <div className="grid grid-cols-2 gap-2"><label><span className="font-mono text-[8.5px] uppercase text-os-dim">Valor acordado</span><input type="number" min="0" step="0.01" value={agreedValue} onChange={(event) => setAgreedValue(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-2 text-[12px] text-os-text" /></label><label><span className="font-mono text-[8.5px] uppercase text-os-dim">Cobrado inicialmente</span><input type="number" min="0" step="0.01" value={initialPayment} disabled={lead.conversionSnapshot !== null} onChange={(event) => setInitialPayment(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-2 text-[12px] text-os-text disabled:opacity-50" /></label></div>
           <label className="block"><span className="font-mono text-[8.5px] uppercase text-os-dim">Modalidad</span><select value={paymentPlan} onChange={(event) => setPaymentPlan(event.target.value as ConversionPaymentPlan)} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-2 text-[12px] text-os-text">{selectedService.billingType === 'one_off' && <option value="full">Pago completo</option>}{selectedService.allowTwoPayments && <option value="two_payments">Dos pagos</option>}{selectedService.billingType === 'monthly' && <option value="monthly">Mensual</option>}<option value="custom">Personalizado</option></select></label>
           <div className="flex items-center justify-between"><span className="font-mono text-[9px] uppercase text-os-dim">Importe pendiente</span><span className="text-sm text-os-text">{Math.max(0, Number(agreedValue || 0) - Number(initialPayment || 0)).toLocaleString('es-ES')} €</span></div>
           <div className="flex justify-end gap-2"><button type="button" onClick={() => setShowConversion(false)} className="border border-os-border px-2 py-1.5 font-mono text-[9px] uppercase text-os-muted">Cancelar</button><button type="button" onClick={() => { const value = Number(agreedValue); const paid = Number(initialPayment); if (!Number.isFinite(value) || !Number.isFinite(paid) || value < 0 || paid < 0 || paid > value) return; onCommercialEvent('converted', { conversionValue: value, serviceId, paymentPlan, initialPayment: paid }); setShowConversion(false); }} className="border border-os-accent bg-os-accent px-2 py-1.5 font-mono text-[9px] uppercase text-os-bg">Confirmar</button></div>
@@ -360,6 +408,7 @@ function LeadRow({
   onEdit,
   onAddNote,
   onCommercialEvent,
+  onRecordPayment,
 }: {
   lead: Lead;
   clients: { id: string; name: string }[];
@@ -378,6 +427,7 @@ function LeadRow({
   onEdit: () => void;
   onAddNote: () => void;
   onCommercialEvent: (type: CommercialEventType, payload?: { appointmentDate?: string } | ConversionPayload) => void;
+  onRecordPayment: (input: { amount: number; occurredAt: string; notes?: string | null }) => Promise<void>;
 }) {
   const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
@@ -709,14 +759,7 @@ function LeadRow({
                 No cualificado
               </button>
             </div>
-            {lead.conversionSnapshot && lead.conversionValue != null && (
-              <div className="mt-3 grid grid-cols-2 gap-2 border border-os-border bg-os-surface2 p-3 sm:grid-cols-4">
-                <div><div className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Servicio contratado</div><div className="mt-1 text-[11px] text-os-text">{lead.conversionSnapshot.serviceName}</div></div>
-                <div><div className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Valor acordado</div><div className="mt-1 text-[11px] text-os-text">{lead.conversionValue.toLocaleString('es-ES')} €</div></div>
-                <div><div className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Cobrado inicialmente</div><div className="mt-1 text-[11px] text-os-text">{lead.conversionSnapshot.initialPayment.toLocaleString('es-ES')} €</div></div>
-                <div><div className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Importe pendiente</div><div className="mt-1 text-[11px] text-os-text">{Math.max(0, lead.conversionValue - lead.conversionSnapshot.initialPayment).toLocaleString('es-ES')} €</div></div>
-              </div>
-            )}
+            <CommercialFinancePanel lead={lead} onRecordPayment={onRecordPayment} />
             {showConversion && selectedService && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-label="Registrar conversión">
                 <div className="w-full max-w-xl border border-os-border-strong bg-os-surface p-4">
@@ -728,7 +771,7 @@ function LeadRow({
                     <label className="sm:col-span-2"><span className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Servicio contratado</span><select value={serviceId} onChange={(event) => { const service = services.find((item) => item.id === event.target.value); if (!service) return; setServiceId(service.id); setAgreedValue(String(service.price)); setPaymentPlan(service.billingType === 'monthly' ? 'monthly' : service.allowTwoPayments ? 'two_payments' : 'full'); }} className="mt-1 w-full border border-os-border bg-os-surface2 px-3 py-2 text-sm text-os-text outline-none">{services.map((service) => <option key={service.id} value={service.id}>{service.name} · {service.price.toLocaleString('es-ES')} €{service.billingType === 'monthly' ? '/mes' : ''}</option>)}</select></label>
                     <label><span className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Valor acordado</span><input type="number" min="0" step="0.01" value={agreedValue} onChange={(event) => setAgreedValue(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface2 px-3 py-2 text-sm text-os-text outline-none" /></label>
                     <label><span className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Modalidad de pago</span><select value={paymentPlan} onChange={(event) => setPaymentPlan(event.target.value as ConversionPaymentPlan)} className="mt-1 w-full border border-os-border bg-os-surface2 px-3 py-2 text-sm text-os-text outline-none">{selectedService.billingType === 'one_off' && <option value="full">Pago completo</option>}{selectedService.allowTwoPayments && <option value="two_payments">Dos pagos</option>}{selectedService.billingType === 'monthly' && <option value="monthly">Mensual</option>}<option value="custom">Personalizado</option></select></label>
-                    <label><span className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Cobrado inicialmente</span><input type="number" min="0" step="0.01" value={initialPayment} onChange={(event) => setInitialPayment(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface2 px-3 py-2 text-sm text-os-text outline-none" /></label>
+                    <label><span className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Cobrado inicialmente</span><input type="number" min="0" step="0.01" value={initialPayment} disabled={lead.conversionSnapshot !== null} onChange={(event) => setInitialPayment(event.target.value)} className="mt-1 w-full border border-os-border bg-os-surface2 px-3 py-2 text-sm text-os-text outline-none disabled:opacity-50" /></label>
                     <div><span className="font-mono text-[9px] uppercase tracking-wide text-os-dim">Importe pendiente</span><div className="mt-1 border border-os-border bg-os-surface2 px-3 py-2 text-sm text-os-text">{Math.max(0, Number(agreedValue || 0) - Number(initialPayment || 0)).toLocaleString('es-ES')} €</div></div>
                   </div>
                   {selectedService.secondPaymentTrigger && paymentPlan === 'two_payments' && <p className="mt-3 text-[11px] text-os-muted">Segundo pago: {selectedService.secondPaymentTrigger}</p>}
@@ -1029,6 +1072,20 @@ export default function LeadsPage() {
     }
   };
 
+  const handleRecordPayment = async (
+    leadId: string,
+    input: { amount: number; occurredAt: string; notes?: string | null },
+  ) => {
+    try {
+      const result = await recordLeadPayment(leadId, input);
+      setLeads((current) => current.map((lead) => (lead.id === leadId ? result.lead : lead)));
+      await refreshEventsForLead(leadId);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'No se pudo registrar el cobro.');
+      throw error;
+    }
+  };
+
   const handleAddManualNote = (leadId: string) => {
     setNoteLeadId(leadId);
     setNoteDraft('');
@@ -1168,6 +1225,7 @@ export default function LeadsPage() {
             onEdit={() => openEditForm(lead)}
             onAddNote={() => handleAddManualNote(lead.id)}
             onCommercialEvent={(type, payload) => handleCommercialEvent(lead.id, type, payload)}
+            onRecordPayment={(input) => handleRecordPayment(lead.id, input)}
           />
         ))}
       </div>
@@ -1218,6 +1276,7 @@ export default function LeadsPage() {
                   onEdit={() => openEditForm(lead)}
                   onAddNote={() => handleAddManualNote(lead.id)}
                   onCommercialEvent={(type, payload) => handleCommercialEvent(lead.id, type, payload)}
+                  onRecordPayment={(input) => handleRecordPayment(lead.id, input)}
                 />
               ))
             )}

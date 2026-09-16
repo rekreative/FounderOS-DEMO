@@ -60,11 +60,10 @@ export type ResultsKpiValues = {
   adSpend: number | null;
   crmLeads: number;
   converted: number;
-  /** Real: SUM(Lead.conversionValue) over converted leads in scope — "Valor
-   * generado", never "Ingresos" (conversionValue is commercial value
-   * associated with a conversion, not collected cash). Never mixed with
-   * RevenueRecord (lib/results.ts) — that stays a separate manual log. */
+  /** Sum of contractual conversion values. It is an agreement, never cash. */
   valueGenerated: number | null;
+  /** Actual money collected from the lead-payment ledger in this period. */
+  collected: number | null;
   /** Always null in V1 — depends on adSpend. */
   roas: number | null;
   /** Always null in V1 — depends on adSpend. */
@@ -73,12 +72,11 @@ export type ResultsKpiValues = {
 
 const META_UNAVAILABLE_LABEL = 'Sin datos de Meta';
 
-/** The approved six-KPI hierarchy, in the approved order — the one place
- * that order and formatting live, so /results and /clients/[clientId]/results
- * can never drift apart on it. */
+/** The agreed-value and collected-cash tiles are adjacent so an operator
+ * cannot mistake commercial value for real cash. */
 export function ResultsKpiStrip({ values }: { values: ResultsKpiValues }) {
   return (
-    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-7">
       <ResultsKpiTile
         label="Gasto publicitario"
         value={values.adSpend == null ? null : formatEUR(values.adSpend)}
@@ -86,9 +84,10 @@ export function ResultsKpiStrip({ values }: { values: ResultsKpiValues }) {
       />
       <ResultsKpiTile label="Leads CRM" value={String(values.crmLeads)} />
       <ResultsKpiTile label="Conversiones" value={String(values.converted)} />
-      <ResultsKpiTile label="Valor generado" value={values.valueGenerated == null ? null : formatEUR(values.valueGenerated)} />
+      <ResultsKpiTile label="Valor acordado" value={values.valueGenerated == null ? null : formatEUR(values.valueGenerated)} />
+      <ResultsKpiTile label="Dinero cobrado" value={values.collected == null ? null : formatEUR(values.collected)} />
       <ResultsKpiTile
-        label="ROAS"
+        label="ROAS acordado"
         value={values.roas == null ? null : formatRoas(values.roas)}
         unavailableLabel={META_UNAVAILABLE_LABEL}
       />

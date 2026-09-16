@@ -31,6 +31,7 @@ function translateActivitySummary(event: LeadEvent): string {
       return to ? `Etapa cambiada a ${getStageLabel(to as LeadStage)}` : event.summary;
     }
     case 'converted': return 'Lead convertido';
+    case 'payment_received': return 'Cobro registrado';
     case 'proposal_sent': return 'Propuesta enviada';
     case 'disqualified': return 'Lead descartado';
     case 'appointment_completed': return 'Cita completada';

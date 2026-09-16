@@ -44,6 +44,7 @@ describe('production data reset safety', () => {
       'client_meta_accounts',
       'meta_sync_runs',
       'lead_events',
+      'lead_payments',
       'leads',
       'revenue_records',
       'knowledge_entries',

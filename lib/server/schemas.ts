@@ -339,6 +339,17 @@ const commercialEventSharedFields = {
 
 export const ConversionPaymentPlanSchema = z.enum(['full', 'two_payments', 'monthly', 'custom']);
 
+/** Internal manual receipt against one converted lead. Provider-driven
+ * payments will use the same repository later, but never accept a provider
+ * source or external id from the browser. */
+export const CreateLeadPaymentBodySchema = z
+  .object({
+    amount: z.number().finite().positive(),
+    occurredAt: isoDateTime,
+    notes: z.string().trim().min(1).max(2000).nullable().optional(),
+  })
+  .strict();
+
 const conversionTermsFields = {
   conversionValue: z.number().finite().nonnegative().optional(),
   serviceId: z.string().trim().min(1).optional(),

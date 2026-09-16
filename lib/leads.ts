@@ -1,4 +1,5 @@
 import { getClients } from '@/lib/clients';
+import type { LeadCollectionSummary } from '@/lib/commercial-finance';
 
 // REKREATIVE is the agency's own internal acquisition, never a client —
 // scope distinguishes "REKREATIVE's own leads" (internal, clientId null)
@@ -75,6 +76,8 @@ export type Lead = {
   qualificationAnswers: Record<string, string> | null;
   appointmentDate: string | null;
   conversionValue: number | null;
+  /** Agreement and real collections are deliberately separate facts. */
+  conversionCollection?: LeadCollectionSummary;
   /** Operational projections only; neither field is a commercial stage. */
   whatsappStatus?: WhatsAppOperationalStatus;
   phoneQuality?: PhoneQuality;
@@ -108,6 +111,7 @@ export type LeadEventType =
   | 'appointment_completed'
   | 'proposal_sent'
   | 'converted'
+  | 'payment_received'
   | 'disqualified'
   | 'manual_note'
   | 'stage_changed';

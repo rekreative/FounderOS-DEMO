@@ -386,6 +386,7 @@ describe('migration file discovery', () => {
       '0014_qualification_v1.sql',
       '0015_data_quality_v1.sql',
       '0016_proposal_sent_v1.sql',
+      '0017_commercial_financial_truth_v1.sql',
     ]);
   });
 });

@@ -337,6 +337,7 @@ export function ClientResultsDashboard({ clientId }: { clientId: string }) {
             crmLeads: results?.funnel.leads ?? 0,
             converted: results?.funnel.converted ?? 0,
             valueGenerated: results?.value.total ?? null,
+            collected: results?.collected.total ?? null,
             roas: results?.meta.roas ?? null,
             cac: results?.meta.cac ?? null,
           }}

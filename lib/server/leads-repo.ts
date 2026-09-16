@@ -14,6 +14,7 @@ import {
 } from '@/lib/leads';
 import { query, withTransaction } from './db';
 import { assessPhoneQuality, normalizePhoneDigits } from '../phone';
+import { summarizeLeadCollection } from '../commercial-finance';
 import { resolveWhatsAppBusinessNumberOnClient } from './whatsapp-repo';
 
 /**
@@ -88,6 +89,12 @@ export class CommercialEventIdempotencyConflictError extends Error {
   constructor() {
     super('The commercial event identity is already associated with another lead');
     this.name = 'CommercialEventIdempotencyConflictError';
+  }
+}
+
+export class LeadPaymentValidationError extends Error {
+  constructor(message: string) {
+    super(message);
   }
 }
 
@@ -186,6 +193,7 @@ export type LeadRow = {
   conversion_initial_payment: string | null;
   conversion_second_payment_trigger: string | null;
   conversion_recorded_at: Date | null;
+  conversion_collected_total: string;
   ingestion_source: string | null;
   external_lead_id: string | null;
   ingest_delivery_id: string | null;
@@ -214,9 +222,55 @@ export type LeadEventRow = {
   whatsapp_business_number_id?: string | null;
 };
 
+export type LeadPaymentSource = 'manual' | 'conversion_initial' | 'stripe' | 'paypal';
+
+export type LeadPayment = {
+  id: string;
+  leadId: string;
+  amount: number;
+  occurredAt: string;
+  source: LeadPaymentSource;
+  externalEventId: string | null;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+};
+
+type LeadPaymentRow = {
+  id: string;
+  lead_id: string;
+  amount: string;
+  occurred_at: Date;
+  source: string;
+  external_event_id: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: Date;
+};
+
+function rowToLeadPayment(row: LeadPaymentRow): LeadPayment {
+  return {
+    id: row.id,
+    leadId: row.lead_id,
+    amount: Number(row.amount),
+    occurredAt: row.occurred_at.toISOString(),
+    source: row.source as LeadPaymentSource,
+    externalEventId: row.external_event_id,
+    notes: row.notes,
+    createdBy: row.created_by,
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
 export function rowToLead(row: LeadRow): ServerLead {
   const hasAiAnalysis =
     row.ai_intent !== null || row.ai_priority !== null || row.ai_summary !== null || row.ai_qualification !== null || row.ai_analyzed_at !== null;
+
+  const collection = summarizeLeadCollection({
+    agreedValue: row.conversion_value === null ? null : Number(row.conversion_value),
+    billingType: row.conversion_service_billing_type as 'one_off' | 'monthly' | null,
+    amounts: [Number(row.conversion_collected_total ?? 0)],
+  });
 
   return {
     id: row.id,
@@ -245,6 +299,10 @@ export function rowToLead(row: LeadRow): ServerLead {
     qualificationAnswers: row.qualification_answers,
     appointmentDate: row.appointment_date ? row.appointment_date.toISOString() : null,
     conversionValue: row.conversion_value === null ? null : Number(row.conversion_value),
+    conversionCollection:
+      row.conversion_value !== null || Number(row.conversion_collected_total ?? 0) > 0
+        ? collection
+        : undefined,
     conversionSnapshot:
       row.conversion_service_name && row.conversion_service_billing_type && row.conversion_service_standard_price !== null &&
       row.conversion_payment_plan && row.conversion_initial_payment !== null && row.conversion_recorded_at
@@ -307,6 +365,10 @@ function generateLeadId(): string {
 
 function generateEventId(): string {
   return `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function generateLeadPaymentId(): string {
+  return `payment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function nullableTrim(value: string | null | undefined): string | null {
@@ -437,6 +499,47 @@ async function insertLeadEventIdempotent(
   return { event: rowToLeadEvent(existing.rows[0]), deduped: true };
 }
 
+/** Inserts a real receipt, maintains the lead-level fast-read projection and
+ * puts the financial fact on the existing lead timeline. Always receives the
+ * caller's transaction client, so a conversion and its initial receipt can
+ * never partially commit. */
+async function insertLeadPaymentOnClient(
+  client: PoolClient,
+  input: {
+    leadId: string;
+    amount: number;
+    occurredAt: Date;
+    source: LeadPaymentSource;
+    notes?: string | null;
+    externalEventId?: string | null;
+    createdBy?: string | null;
+  },
+): Promise<LeadPayment> {
+  const id = generateLeadPaymentId();
+  const result = await client.query<LeadPaymentRow>(
+    `INSERT INTO lead_payments (id, lead_id, amount, occurred_at, source, external_event_id, notes, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING *`,
+    [id, input.leadId, input.amount, input.occurredAt, input.source, input.externalEventId ?? null, nullableTrim(input.notes), input.createdBy ?? null],
+  );
+
+  await client.query(
+    'UPDATE leads SET conversion_collected_total = conversion_collected_total + $2 WHERE id = $1',
+    [input.leadId, input.amount],
+  );
+
+  await insertLeadEvent(client, {
+    leadId: input.leadId,
+    type: 'payment_received',
+    source: input.source === 'manual' ? 'manual' : 'system',
+    summary: `Cobro registrado · ${input.amount.toLocaleString('es-ES')} €`,
+    details: { amount: input.amount, source: input.source, notes: nullableTrim(input.notes) },
+    occurredAt: input.occurredAt,
+  });
+
+  return rowToLeadPayment(result.rows[0]);
+}
+
 export async function listLeads(options: ListLeadsOptions = {}): Promise<ServerLead[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
@@ -509,6 +612,50 @@ export async function listLeadEvents(leadId: string): Promise<LeadEvent[]> {
     [leadId],
   );
   return result.rows.map(rowToLeadEvent);
+}
+
+/** Complete receipt history for one lead, newest first. This is a ledger,
+ * never inferred from stage changes or from the original agreed value. */
+export async function listLeadPayments(leadId: string): Promise<LeadPayment[]> {
+  const result = await query<LeadPaymentRow>(
+    'SELECT * FROM lead_payments WHERE lead_id = $1 ORDER BY occurred_at DESC, created_at DESC, id DESC',
+    [leadId],
+  );
+  return result.rows.map(rowToLeadPayment);
+}
+
+/** Manual internal receipt. A financial entry is legal only after an actual
+ * conversion, and remains distinct from changing the agreement itself. */
+export async function recordLeadPayment(input: {
+  leadId: string;
+  amount: number;
+  occurredAt: string;
+  notes?: string | null;
+  createdBy: string | null;
+}): Promise<{ lead: ServerLead; payment: LeadPayment }> {
+  return withTransaction(async (client) => {
+    const found = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1 FOR UPDATE', [input.leadId]);
+    if (found.rowCount === 0) throw new LeadNotFoundError(input.leadId);
+    const lead = rowToLead(found.rows[0]);
+    if (lead.stage !== 'converted') {
+      throw new LeadPaymentValidationError('a payment can only be recorded for a converted lead');
+    }
+
+    const occurredAt = new Date(input.occurredAt);
+    if (Number.isNaN(occurredAt.getTime())) {
+      throw new LeadPaymentValidationError('payment occurredAt must be a valid date');
+    }
+    const payment = await insertLeadPaymentOnClient(client, {
+      leadId: input.leadId,
+      amount: input.amount,
+      occurredAt,
+      source: 'manual',
+      notes: input.notes,
+      createdBy: input.createdBy,
+    });
+    const finalRow = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1', [input.leadId]);
+    return { lead: rowToLead(finalRow.rows[0]), payment };
+  });
 }
 
 /**
@@ -1297,6 +1444,9 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
       if (input.initialPayment > input.conversionValue) {
         throw new CommercialConversionValidationError('initial payment cannot exceed agreed value');
       }
+      if (existing.conversionSnapshot && input.initialPayment !== existing.conversionSnapshot.initialPayment) {
+        throw new CommercialConversionValidationError('the initial payment is immutable; record a separate payment instead');
+      }
       if (existing.scope !== 'internal') {
         throw new CommercialConversionValidationError('internal services can only be assigned to internal leads');
       }
@@ -1407,6 +1557,19 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
           occurredAt,
         ],
       );
+
+      // The agreed value is never a receipt. Only a first conversion creates
+      // the initial ledger row; editing the agreement later must not charge
+      // the same initial amount a second time.
+      if (existing.conversionSnapshot === null && (input.initialPayment ?? 0) > 0) {
+        await insertLeadPaymentOnClient(client, {
+          leadId: input.leadId,
+          amount: input.initialPayment as number,
+          occurredAt,
+          source: 'conversion_initial',
+          notes: 'Cobro inicial registrado al convertir el lead',
+        });
+      }
     }
 
     if (shouldApplyCommercialStage(existing.stage, targetStage)) {

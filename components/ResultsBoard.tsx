@@ -20,7 +20,7 @@ import { BarListChart, FunnelBars, ResultsKpiStrip } from '@/components/ResultsC
  * this page never swaps into a per-client detail mode itself.
  *
  * Every number on this page is real PostgreSQL (lib/server/results-repo.ts
- * via GET /api/results) — an acquisition-cohort funnel + "Valor generado"
+ * via GET /api/results) — an acquisition-cohort funnel + "Valor acordado"
  * (SUM Lead.conversionValue over converted leads), scoped by the selected
  * period and, per client, by clientId. Ad spend/ROAS/CAC (Meta Ads Real V1)
  * come from the same response's `meta` field — real once a client has an
@@ -189,6 +189,7 @@ export function ResultsBoard() {
             crmLeads: overall?.funnel.leads ?? 0,
             converted: overall?.funnel.converted ?? 0,
             valueGenerated: overall?.value.total ?? null,
+            collected: overall?.collected.total ?? null,
             roas: overall?.meta.roas ?? null,
             cac: overall?.meta.cac ?? null,
           }}
@@ -215,7 +216,7 @@ export function ResultsBoard() {
         </div>
         {resultScope === 'clients' && <div className="flex flex-col gap-4">
           <div className="border border-os-border bg-os-surface p-4">
-            <SectionHead label="Valor generado por cliente" />
+            <SectionHead label="Valor acordado por cliente" />
             <BarListChart rows={valueByClient} formatValue={formatEUR} emptyLabel="Sin conversiones con valor todavía." />
           </div>
           <div className="border border-os-border bg-os-surface p-4">
@@ -248,7 +249,7 @@ export function ResultsBoard() {
                       <div className="mt-0.5 font-mono text-[13px] text-os-text">{row.converted}</div>
                     </div>
                     <div className="col-span-2">
-                      <div className="font-mono text-[8.5px] uppercase tracking-[0.16em] text-os-dim">Valor generado</div>
+                      <div className="font-mono text-[8.5px] uppercase tracking-[0.16em] text-os-dim">Valor acordado</div>
                       <div className="mt-0.5 font-mono text-[13px] text-os-text">
                         {row.valueGenerated == null ? '—' : formatEUR(row.valueGenerated)}
                       </div>
