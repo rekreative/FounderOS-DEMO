@@ -52,6 +52,37 @@ export type ResultsResponse = {
   byClient: ResultsComputation[];
 };
 
+export type MetaLeadReconciliationCampaign = {
+  metaAdAccountId: string | null;
+  metaCampaignId: string;
+  campaignName: string;
+  metaLeads: number;
+  rekreosLeads: number;
+  difference: number;
+  whatsappSent: number;
+  whatsappFailed: number;
+  whatsappUnconfirmed: number;
+};
+
+export type MetaLeadReconciliation = {
+  metaLeads: number;
+  rekreosLeads: number;
+  difference: number;
+  unattributedRekreosLeads: number;
+  crmLeadsWithoutMetaMetric: number;
+  whatsappSent: number;
+  whatsappFailed: number;
+  whatsappUnconfirmed: number;
+  campaigns: MetaLeadReconciliationCampaign[];
+  coverage: { firstDate: string; lastDate: string; dayCount: number } | null;
+  lastSync: { finishedAt: string | null; startedAt: string; status: 'running' | 'success' | 'partial' | 'error' } | null;
+};
+
+export type MetaLeadReconciliationResponse = {
+  period: ResultsResponse['period'];
+  reconciliation: MetaLeadReconciliation;
+};
+
 export type GetResultsOptions = {
   clientId?: string;
   ownerScope?: 'internal' | 'client';
@@ -69,6 +100,16 @@ export async function getResults(options: GetResultsOptions = {}): Promise<Resul
   if (options.end) params.set('end', options.end);
   const qs = params.toString();
   return apiFetch<ResultsResponse>(`/api/results${qs ? `?${qs}` : ''}`);
+}
+
+/** Internal REKREATIVE only — a diagnostic, never a client-data endpoint. */
+export async function getInternalMetaLeadReconciliation(options: Pick<GetResultsOptions, 'preset' | 'start' | 'end'> = {}): Promise<MetaLeadReconciliationResponse> {
+  const params = new URLSearchParams();
+  if (options.preset) params.set('preset', options.preset);
+  if (options.start) params.set('start', options.start);
+  if (options.end) params.set('end', options.end);
+  const qs = params.toString();
+  return apiFetch<MetaLeadReconciliationResponse>(`/api/results/reconciliation${qs ? `?${qs}` : ''}`);
 }
 
 export type RecentConversion = { lead: Lead; convertedAt: string };

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowRight, ArrowUpRight, Bot, CalendarDays, CircleCheckBig, CircleDollarSign, Megaphone, Plus, Target, Users, Wifi, type LucideIcon } from 'lucide-react';
 import { useClientsRegistry } from '@/components/ClientsProvider';
 import { PageHeader } from '@/components/PageHeader';
+import { MetaLeadReconciliationPanel } from '@/components/MetaLeadReconciliationPanel';
 import { Badge, Dot, SectionHead } from '@/components/terminal';
 import { getMetaAdsCampaigns } from '@/lib/api/meta-ads';
 import { getLeads, type Lead } from '@/lib/api/leads';
@@ -287,6 +288,8 @@ export default function HomePage() {
         <StatTile href="/results" label="CPL CRM" value={internalPerformance?.meta.cplCrm == null ? '—' : formatPreciseEUR(internalPerformance.meta.cplCrm)} unit="por lead" detail="Gasto / leads REKREOS" icon={Users} />
         <StatTile href="/meta-ads" label="CTR Meta" value={internalPerformance?.meta.ctr == null ? '—' : `${(internalPerformance.meta.ctr * 100).toLocaleString('es-ES', { maximumFractionDigits: 2 })}%`} unit="tasa" detail="Clics / impresiones" icon={Megaphone} />
       </section>
+
+      <div className="mb-4"><MetaLeadReconciliationPanel compact /></div>
 
       <section className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
         <DashboardPanel className="xl:col-span-8">

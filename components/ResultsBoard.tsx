@@ -14,6 +14,7 @@ import {
 import { SectionHead } from '@/components/terminal';
 import { PageHeader } from '@/components/PageHeader';
 import { BarListChart, FunnelBars, ResultsKpiStrip } from '@/components/ResultsCharts';
+import { MetaLeadReconciliationPanel } from '@/components/MetaLeadReconciliationPanel';
 
 /** REKREATIVE Resultados — the executive portfolio overview. Selecting a
  * client navigates to its dedicated /clients/[clientId]/results dashboard;
@@ -195,6 +196,16 @@ export function ResultsBoard() {
           }}
         />
       </div>
+
+      {resultScope === 'internal' && (
+        <div className="mb-6">
+          <MetaLeadReconciliationPanel
+            preset={periodPreset}
+            start={periodPreset === 'custom' ? customRange.start : undefined}
+            end={periodPreset === 'custom' ? customRange.end : undefined}
+          />
+        </div>
+      )}
 
       {/* Visual portfolio summary — funnel + two client-comparison bars.
           Deliberately capped at three visualizations so the executive
