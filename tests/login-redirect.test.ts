@@ -12,18 +12,18 @@ import { describe, expect, it } from 'vitest';
  * proxy, and the real click-through is manual-QA territory.
  */
 describe('LoginForm redirect target', () => {
-  it('redirects to / on successful sign-in, never /me', () => {
+  it('redirects to the role-safe portal on successful sign-in, never /me', () => {
     const source = fs.readFileSync(path.join(process.cwd(), 'app', '(auth)', 'login', 'LoginForm.tsx'), 'utf8');
 
-    expect(source).toMatch(/router\.push\('\/'\)/);
+    expect(source).toMatch(/router\.push\('\/portal'\)/);
     expect(source).not.toMatch(/router\.push\('\/me'\)/);
     expect(source).toMatch(/router\.refresh\(\)/);
   });
 
-  it('an already-authenticated internal visitor to /login is redirected to /, per app/(auth)/login/page.tsx', () => {
+  it('an already-authenticated visitor to /login is routed by its server-side role', () => {
     const source = fs.readFileSync(path.join(process.cwd(), 'app', '(auth)', 'login', 'page.tsx'), 'utf8');
 
-    expect(source).toMatch(/redirect\('\/'\)/);
+    expect(source).toMatch(/user\.role === 'internal' \? '\/' : '\/portal'/);
     expect(source).not.toMatch(/redirect\('\/me'\)/);
   });
 });

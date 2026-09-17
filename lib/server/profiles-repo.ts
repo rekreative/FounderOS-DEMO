@@ -1,4 +1,5 @@
-import { query } from './db';
+import { query, withTransaction } from './db';
+import { getClientById, type ServerClient } from './clients-repo';
 
 /**
  * Server-only PostgreSQL repository for the profiles / user_client_access
@@ -40,4 +41,46 @@ export async function hasClientAccess(userId: string, clientId: string): Promise
     clientId,
   ]);
   return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Returns only the canonical client records granted to one client-role user.
+ * The canonical lookups keep the portal fail-closed when a stale grant somehow exists:
+ * a client that no longer exists is never rendered as an accessible tenant.
+ */
+export async function listAccessibleClients(userId: string): Promise<ServerClient[]> {
+  const grants = await query<{ client_id: string }>(
+    'SELECT client_id FROM user_client_access WHERE user_id = $1 ORDER BY created_at ASC',
+    [userId],
+  );
+
+  const clients = await Promise.all(grants.rows.map((grant) => getClientById(grant.client_id)));
+  return clients.filter((client): client is ServerClient => client !== null);
+}
+
+export class ClientAccessProvisionError extends Error {}
+
+/**
+ * Grants a Supabase identity access to exactly one client tenant. This is an
+ * application-side transaction: a pre-existing internal account is never
+ * down-graded to a client account, and a missing client is never granted.
+ */
+export async function provisionClientAccess(userId: string, clientId: string): Promise<void> {
+  await withTransaction(async (client) => {
+    const target = await client.query('SELECT 1 FROM clients WHERE id = $1', [clientId]);
+    if (target.rowCount === 0) throw new ClientAccessProvisionError('client not found');
+
+    const profile = await client.query<{ role: string }>('SELECT role FROM profiles WHERE user_id = $1 FOR UPDATE', [userId]);
+    if (profile.rowCount && profile.rows[0].role !== 'client') {
+      throw new ClientAccessProvisionError('an internal account cannot be converted into a client account');
+    }
+
+    if (profile.rowCount === 0) {
+      await client.query("INSERT INTO profiles (user_id, role) VALUES ($1, 'client')", [userId]);
+    }
+    await client.query(
+      'INSERT INTO user_client_access (user_id, client_id) VALUES ($1, $2) ON CONFLICT (user_id, client_id) DO NOTHING',
+      [userId, clientId],
+    );
+  });
 }

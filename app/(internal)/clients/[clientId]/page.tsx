@@ -38,6 +38,7 @@ import { ClientContentPanel } from '@/components/ClientContentPanel';
 import { ClientKnowledgePanel } from '@/components/ClientKnowledgePanel';
 import { ClientResultsPreview } from '@/components/ClientResultsPreview';
 import { ClientNotesPanel } from '@/components/ClientNotesPanel';
+import { ClientPortalInvite } from '@/components/ClientPortalInvite';
 import Link from 'next/link';
 
 type TabKey = 'overview' | 'meta-ads' | 'leads' | 'automations' | 'agents' | 'integrations' | 'content' | 'knowledge' | 'results' | 'notes';
@@ -362,6 +363,7 @@ export default function ClientDetailPage({ params }: { params: { clientId: strin
             <div className="break-words text-sm text-os-dim">{client.sector} · {client.service}</div>
           </div>
           <div className="flex max-w-full flex-wrap items-center gap-2 sm:shrink-0">
+            <ClientPortalInvite clientId={clientId} />
             <button
               onClick={() => setShowEditForm(true)}
               className="px-3 py-1 border border-os-border hover:bg-os-surface2 transition-colors"

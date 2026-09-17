@@ -36,7 +36,10 @@ export function LoginForm() {
       return;
     }
 
-    router.push('/');
+    // /portal redirects internal users back to / server-side, while client
+    // accounts remain outside the internal shell. This avoids a client
+    // briefly loading a forbidden internal route after sign-in.
+    router.push('/portal');
     router.refresh();
   }
 
@@ -44,7 +47,7 @@ export function LoginForm() {
     <form onSubmit={handleSubmit} className="w-full max-w-[360px] border border-os-border-strong bg-os-surface p-8">
       <div className="mb-6">
         <Badge tone="accent">REKREATIVE OS</Badge>
-        <h1 className="mt-3 font-mono text-[13px] font-bold uppercase tracking-[0.14em] text-os-text">Internal Login</h1>
+        <h1 className="mt-3 font-mono text-[13px] font-bold uppercase tracking-[0.14em] text-os-text">Acceso REKREOS</h1>
       </div>
 
       <label className="mb-4 block">

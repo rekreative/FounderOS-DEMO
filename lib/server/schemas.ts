@@ -123,6 +123,12 @@ export const CreateClientBodySchema = z
 
 export const UpdateClientBodySchema = CreateClientBodySchema.partial();
 
+/** Internal-only: the target client id always comes from the route path,
+ * never from this body, so an invite can't be pointed at another tenant. */
+export const InviteClientAccountBodySchema = z
+  .object({ email: z.string().trim().email().max(320) })
+  .strict();
+
 const leadAiAnalysisSchema = z
   .object({
     summary: z.string().nullable(),
