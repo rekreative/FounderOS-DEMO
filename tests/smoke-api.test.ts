@@ -116,6 +116,7 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
       'leads/[id]',
       'leads/[id]/events',
       'leads/[id]/payments',
+      'leads/[id]/meta-capi-events',
       'results',
       'results/home',
       'ops/status',

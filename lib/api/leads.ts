@@ -52,6 +52,27 @@ export type LeadPayment = {
   createdAt: string;
 };
 
+export type MetaCapiEventKind = 'qualified_lead' | 'appointment' | 'converted';
+export type MetaCapiDeliveryStatus = 'pending' | 'accepted' | 'failed';
+
+/** A server-audited Test Events delivery. The test code and every Meta token
+ * remain write-only on the server and are never returned here. */
+export type LeadMetaCapiDelivery = {
+  id: string;
+  leadId: string;
+  eventKind: MetaCapiEventKind;
+  metaEventName: 'Lead' | 'Schedule' | 'Purchase';
+  eventId: string;
+  deliveryMode: 'test';
+  status: MetaCapiDeliveryStatus;
+  attemptCount: number;
+  lastAttemptedAt: string | null;
+  acceptedAt: string | null;
+  errorCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CreateLeadInput = {
   scope: LeadScope;
   clientId?: string | null;
@@ -148,6 +169,23 @@ export async function recordLeadPayment(
   input: { amount: number; occurredAt: string; notes?: string | null },
 ): Promise<{ lead: Lead; payment: LeadPayment }> {
   return apiFetch(`/api/leads/${encodeURIComponent(id)}/payments`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getLeadMetaCapiDeliveries(id: string): Promise<LeadMetaCapiDelivery[]> {
+  const { deliveries } = await apiFetch<{ deliveries: LeadMetaCapiDelivery[] }>(
+    `/api/leads/${encodeURIComponent(id)}/meta-capi-events`,
+  );
+  return deliveries;
+}
+
+export async function sendLeadMetaCapiTestEvent(
+  id: string,
+  input: { kind: MetaCapiEventKind; testEventCode: string },
+): Promise<{ delivery: LeadMetaCapiDelivery; deduped: boolean }> {
+  return apiFetch(`/api/leads/${encodeURIComponent(id)}/meta-capi-events/test`, {
     method: 'POST',
     body: JSON.stringify(input),
   });

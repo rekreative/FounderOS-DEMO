@@ -98,6 +98,8 @@ export const LeadEventTypeSchema = z.enum([
   'appointment_completed',
   'proposal_sent',
   'converted',
+  'payment_received',
+  'meta_capi_test',
   'disqualified',
   'manual_note',
   'stage_changed',
@@ -347,6 +349,18 @@ export const CreateLeadPaymentBodySchema = z
     amount: z.number().finite().positive(),
     occurredAt: isoDateTime,
     notes: z.string().trim().min(1).max(2000).nullable().optional(),
+  })
+  .strict();
+
+/** Internal-only, controlled delivery to Meta's Test Events channel. The
+ * caller chooses a semantic CRM signal but never an arbitrary Meta event
+ * name, lead stage, owner, token, or source. */
+export const MetaCapiEventKindSchema = z.enum(['qualified_lead', 'appointment', 'converted']);
+
+export const CreateMetaCapiTestEventBodySchema = z
+  .object({
+    kind: MetaCapiEventKindSchema,
+    testEventCode: z.string().trim().min(1).max(512),
   })
   .strict();
 

@@ -8,6 +8,7 @@ export const POSTGRES_RESET_TARGETS = [
   { table: 'meta_campaign_daily_metrics', idExpression: 'id::text', where: 'TRUE' },
   { table: 'client_meta_accounts', idExpression: 'id::text', where: 'TRUE' },
   { table: 'meta_sync_runs', idExpression: 'id::text', where: 'TRUE' },
+  { table: 'lead_meta_capi_deliveries', idExpression: 'id::text', where: 'TRUE' },
   { table: 'lead_events', idExpression: 'id::text', where: 'TRUE' },
   { table: 'lead_payments', idExpression: 'id::text', where: 'TRUE' },
   { table: 'leads', idExpression: 'id::text', where: 'TRUE' },

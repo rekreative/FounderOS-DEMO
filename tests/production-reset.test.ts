@@ -43,6 +43,7 @@ describe('production data reset safety', () => {
       'meta_campaign_daily_metrics',
       'client_meta_accounts',
       'meta_sync_runs',
+      'lead_meta_capi_deliveries',
       'lead_events',
       'lead_payments',
       'leads',

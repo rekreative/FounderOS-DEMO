@@ -106,6 +106,18 @@ describe('representative internal-human APIs reject an unauthenticated request (
     expect(res.status).toBe(401);
   });
 
+  it('the Meta CAPI test sender is internal-human only, never a Make endpoint', async () => {
+    const { POST } = await import('@/app/api/leads/[id]/meta-capi-events/test/route');
+    const res = await POST(
+      new Request('http://x/api/leads/lead-1/meta-capi-events/test', {
+        method: 'POST',
+        body: JSON.stringify({ kind: 'qualified_lead', testEventCode: 'test' }),
+      }),
+      { params: { id: 'lead-1' } },
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('the M2M-bearer-keyed commercial-events route is UNCHANGED — still governed by its bearer key, not by this new auth layer', async () => {
     const originalKey = process.env.MAKE_EVENTS_API_KEY;
     process.env.MAKE_EVENTS_API_KEY = 'test-make-events-key';

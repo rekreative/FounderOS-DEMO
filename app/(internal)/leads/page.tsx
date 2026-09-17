@@ -18,15 +18,19 @@ import {
   appendCommercialEvent,
   appendLeadEvent,
   createLead,
+  getLeadMetaCapiDeliveries,
   getLeadEvents,
   getLeads,
   recordLeadPayment,
+  sendLeadMetaCapiTestEvent,
   setLeadStage,
   updateLead,
   type CommercialEventType,
   type ConversionPaymentPlan,
   type Lead,
+  type LeadMetaCapiDelivery,
   type LeadEvent,
+  type MetaCapiEventKind,
 } from '@/lib/api/leads';
 
 const STAGE_FILTERS = [{ id: 'all', label: 'Todos' }, ...LEAD_STAGE_OPTIONS];
@@ -164,6 +168,7 @@ function eventLabel(type: LeadEvent['type']): string {
     appointment_completed: 'Cita completada',
     converted: 'Convertido',
     payment_received: 'Cobro registrado',
+    meta_capi_test: 'Meta CAPI',
     disqualified: 'Descartado',
     manual_note: 'Nota manual',
     stage_changed: 'Etapa cambiada',
@@ -213,12 +218,84 @@ function CommercialFinancePanel({
   );
 }
 
+const META_CAPI_KIND_LABEL: Record<MetaCapiEventKind, string> = {
+  qualified_lead: 'Lead cualificado',
+  appointment: 'Cita',
+  converted: 'Conversión',
+};
+
+function MetaCapiTestPanel({
+  lead,
+  deliveries,
+  loading,
+  onSend,
+}: {
+  lead: Lead;
+  deliveries: LeadMetaCapiDelivery[];
+  loading: boolean;
+  onSend: (input: { kind: MetaCapiEventKind; testEventCode: string }) => Promise<void>;
+}) {
+  const allowedKinds = useMemo<MetaCapiEventKind[]>(() => {
+    if (lead.scope !== 'internal') return [];
+    if (lead.stage === 'converted') return ['qualified_lead', 'appointment', 'converted'];
+    if (lead.stage === 'appointment' || lead.stage === 'proposal_sent') return ['qualified_lead', 'appointment'];
+    if (lead.stage === 'qualified') return ['qualified_lead'];
+    return [];
+  }, [lead.scope, lead.stage]);
+  const [kind, setKind] = useState<MetaCapiEventKind>('qualified_lead');
+  const [testEventCode, setTestEventCode] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!allowedKinds.includes(kind)) setKind(allowedKinds[0] ?? 'qualified_lead');
+  }, [allowedKinds, kind]);
+
+  if (lead.scope !== 'internal' || allowedKinds.length === 0) return null;
+  const selectedDelivery = deliveries.find((delivery) => delivery.eventKind === kind);
+  const isAccepted = selectedDelivery?.status === 'accepted';
+  const statusStyle =
+    selectedDelivery?.status === 'accepted'
+      ? 'border-os-ok bg-os-ok/10 text-os-ok'
+      : selectedDelivery?.status === 'failed'
+        ? 'border-os-err bg-os-err/10 text-os-err'
+        : 'border-os-warn bg-os-warn/10 text-os-warn';
+  const statusLabel =
+    selectedDelivery?.status === 'accepted' ? 'Aceptada por Meta' : selectedDelivery?.status === 'failed' ? 'Error' : 'Pendiente';
+
+  return (
+    <section className="mt-3 border border-os-border bg-os-surface2 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-os-dim">Meta CAPI</div>
+          <p className="mt-1 text-[10.5px] text-os-muted">Prueba controlada. No cambia la etapa ni envía eventos reales de campaña.</p>
+        </div>
+        {selectedDelivery && (
+          <span className={`border px-1.5 py-0.5 font-mono text-[8.5px] uppercase ${statusStyle}`}>{statusLabel}</span>
+        )}
+      </div>
+      {loading ? (
+        <div className="mt-3 font-mono text-[10px] text-os-dim">Cargando estado CAPI…</div>
+      ) : (
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] sm:items-end">
+          <label className="block"><span className="font-mono text-[8.5px] uppercase text-os-dim">Señal CRM</span><select value={kind} onChange={(event) => setKind(event.target.value as MetaCapiEventKind)} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-1.5 text-[11px] text-os-text">{allowedKinds.map((item) => <option key={item} value={item}>{META_CAPI_KIND_LABEL[item]}</option>)}</select></label>
+          <label className="block"><span className="font-mono text-[8.5px] uppercase text-os-dim">Código de prueba de Meta</span><input type="text" value={testEventCode} onChange={(event) => setTestEventCode(event.target.value)} placeholder="Pegar solo para esta prueba" disabled={isAccepted || saving} className="mt-1 w-full border border-os-border bg-os-surface px-2 py-1.5 text-[11px] text-os-text placeholder:text-os-dim disabled:opacity-50" /></label>
+          <button type="button" disabled={!testEventCode.trim() || isAccepted || saving} onClick={async () => { setSaving(true); try { await onSend({ kind, testEventCode: testEventCode.trim() }); setTestEventCode(''); } finally { setSaving(false); } }} className="border border-os-accent bg-os-accent px-2 py-1.5 font-mono text-[9px] uppercase text-os-bg disabled:cursor-not-allowed disabled:opacity-40">{isAccepted ? 'Ya aceptada' : saving ? 'Enviando…' : 'Enviar prueba'}</button>
+        </div>
+      )}
+      {selectedDelivery?.status === 'failed' && <p className="mt-2 font-mono text-[9px] text-os-err">Meta no aceptó esta prueba. Revisa el código de prueba o los datos de contacto y vuelve a intentarlo.</p>}
+      {selectedDelivery && <p className="mt-2 font-mono text-[8.5px] text-os-dim">Último intento: {formatDateTime(selectedDelivery.lastAttemptedAt)} · {selectedDelivery.attemptCount} intento{selectedDelivery.attemptCount === 1 ? '' : 's'}</p>}
+    </section>
+  );
+}
+
 function LeadMobileCard({
   lead,
   clients,
   services,
   events,
   eventsLoading,
+  capiDeliveries,
+  capiLoading,
   showClient,
   expanded,
   onToggle,
@@ -227,12 +304,15 @@ function LeadMobileCard({
   onAddNote,
   onCommercialEvent,
   onRecordPayment,
+  onSendMetaCapiTest,
 }: {
   lead: Lead;
   clients: { id: string; name: string }[];
   services: InternalBusinessService[];
   events: LeadEvent[];
   eventsLoading: boolean;
+  capiDeliveries: LeadMetaCapiDelivery[];
+  capiLoading: boolean;
   showClient: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -241,6 +321,7 @@ function LeadMobileCard({
   onAddNote: () => void;
   onCommercialEvent: (type: CommercialEventType, payload?: ConversionPayload) => void;
   onRecordPayment: (input: { amount: number; occurredAt: string; notes?: string | null }) => Promise<void>;
+  onSendMetaCapiTest: (input: { kind: MetaCapiEventKind; testEventCode: string }) => Promise<void>;
 }) {
   const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
@@ -370,6 +451,7 @@ function LeadMobileCard({
         </div>
       )}
 
+      {expanded && <MetaCapiTestPanel lead={lead} deliveries={capiDeliveries} loading={capiLoading} onSend={onSendMetaCapiTest} />}
       <CommercialFinancePanel lead={lead} onRecordPayment={onRecordPayment} />
 
       <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-os-border pt-3">
@@ -400,6 +482,8 @@ function LeadRow({
   services,
   events,
   eventsLoading,
+  capiDeliveries,
+  capiLoading,
   showClientColumn,
   columnCount,
   expanded,
@@ -409,12 +493,15 @@ function LeadRow({
   onAddNote,
   onCommercialEvent,
   onRecordPayment,
+  onSendMetaCapiTest,
 }: {
   lead: Lead;
   clients: { id: string; name: string }[];
   services: InternalBusinessService[];
   events: LeadEvent[];
   eventsLoading: boolean;
+  capiDeliveries: LeadMetaCapiDelivery[];
+  capiLoading: boolean;
   /** REKREATIVE scope: every row is already known to be internal, so the
    * Cliente column is redundant — hidden there, shown as-is in CLIENTES scope. */
   showClientColumn: boolean;
@@ -428,6 +515,7 @@ function LeadRow({
   onAddNote: () => void;
   onCommercialEvent: (type: CommercialEventType, payload?: { appointmentDate?: string } | ConversionPayload) => void;
   onRecordPayment: (input: { amount: number; occurredAt: string; notes?: string | null }) => Promise<void>;
+  onSendMetaCapiTest: (input: { kind: MetaCapiEventKind; testEventCode: string }) => Promise<void>;
 }) {
   const clientName = getClientNameForLead(lead.clientId, clients);
   const aiIntent = lead.aiAnalysis?.intent ? AI_INTENT_LABEL[lead.aiAnalysis.intent] : '—';
@@ -760,6 +848,7 @@ function LeadRow({
               </button>
             </div>
             <CommercialFinancePanel lead={lead} onRecordPayment={onRecordPayment} />
+            <MetaCapiTestPanel lead={lead} deliveries={capiDeliveries} loading={capiLoading} onSend={onSendMetaCapiTest} />
             {showConversion && selectedService && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-label="Registrar conversión">
                 <div className="w-full max-w-xl border border-os-border-strong bg-os-surface p-4">
@@ -802,6 +891,8 @@ export default function LeadsPage() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [eventsByLeadId, setEventsByLeadId] = useState<Record<string, LeadEvent[]>>({});
   const [eventsLoadingId, setEventsLoadingId] = useState<Record<string, boolean>>({});
+  const [capiDeliveriesByLeadId, setCapiDeliveriesByLeadId] = useState<Record<string, LeadMetaCapiDelivery[]>>({});
+  const [capiLoadingId, setCapiLoadingId] = useState<Record<string, boolean>>({});
   const [showCreate, setShowCreate] = useState(false);
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
   const [noteLeadId, setNoteLeadId] = useState<string | null>(null);
@@ -864,6 +955,16 @@ export default function LeadsPage() {
     } catch {
       // Keep whatever timeline was already shown — a secondary refresh
       // failing isn't worth surfacing over the row's main content.
+    }
+  }, []);
+
+  const refreshMetaCapiForLead = useCallback(async (leadId: string) => {
+    try {
+      const deliveries = await getLeadMetaCapiDeliveries(leadId);
+      setCapiDeliveriesByLeadId((prev) => ({ ...prev, [leadId]: deliveries }));
+    } catch {
+      // CAPI is supplementary operational evidence. A temporary failure to
+      // load it must not hide the lead's existing commercial history.
     }
   }, []);
 
@@ -1046,6 +1147,11 @@ export default function LeadsPage() {
         .then((events) => setEventsByLeadId((prev) => ({ ...prev, [leadId]: events })))
         .catch(() => setEventsByLeadId((prev) => ({ ...prev, [leadId]: [] })))
         .finally(() => setEventsLoadingId((prev) => ({ ...prev, [leadId]: false })));
+      setCapiLoadingId((prev) => ({ ...prev, [leadId]: true }));
+      getLeadMetaCapiDeliveries(leadId)
+        .then((deliveries) => setCapiDeliveriesByLeadId((prev) => ({ ...prev, [leadId]: deliveries })))
+        .catch(() => setCapiDeliveriesByLeadId((prev) => ({ ...prev, [leadId]: [] })))
+        .finally(() => setCapiLoadingId((prev) => ({ ...prev, [leadId]: false })));
     }
   };
 
@@ -1082,6 +1188,26 @@ export default function LeadsPage() {
       await refreshEventsForLead(leadId);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : 'No se pudo registrar el cobro.');
+      throw error;
+    }
+  };
+
+  const handleMetaCapiTest = async (
+    leadId: string,
+    input: { kind: MetaCapiEventKind; testEventCode: string },
+  ) => {
+    try {
+      const result = await sendLeadMetaCapiTestEvent(leadId, input);
+      setCapiDeliveriesByLeadId((current) => {
+        const existing = current[leadId] ?? [];
+        const remaining = existing.filter((delivery) => delivery.id !== result.delivery.id);
+        return { ...current, [leadId]: [result.delivery, ...remaining] };
+      });
+      await refreshEventsForLead(leadId);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'No se pudo enviar la prueba de Meta CAPI.');
+      await refreshMetaCapiForLead(leadId);
+      await refreshEventsForLead(leadId);
       throw error;
     }
   };
@@ -1218,6 +1344,8 @@ export default function LeadsPage() {
             services={lead.scope === 'internal' ? services : []}
             events={eventsByLeadId[lead.id] ?? []}
             eventsLoading={Boolean(eventsLoadingId[lead.id])}
+            capiDeliveries={capiDeliveriesByLeadId[lead.id] ?? []}
+            capiLoading={Boolean(capiLoadingId[lead.id])}
             showClient={showClientColumn}
             expanded={Boolean(expanded[lead.id])}
             onToggle={() => handleToggle(lead.id)}
@@ -1226,6 +1354,7 @@ export default function LeadsPage() {
             onAddNote={() => handleAddManualNote(lead.id)}
             onCommercialEvent={(type, payload) => handleCommercialEvent(lead.id, type, payload)}
             onRecordPayment={(input) => handleRecordPayment(lead.id, input)}
+            onSendMetaCapiTest={(input) => handleMetaCapiTest(lead.id, input)}
           />
         ))}
       </div>
@@ -1268,6 +1397,8 @@ export default function LeadsPage() {
                   services={lead.scope === 'internal' ? services : []}
                   events={eventsByLeadId[lead.id] ?? []}
                   eventsLoading={Boolean(eventsLoadingId[lead.id])}
+                  capiDeliveries={capiDeliveriesByLeadId[lead.id] ?? []}
+                  capiLoading={Boolean(capiLoadingId[lead.id])}
                   showClientColumn={showClientColumn}
                   columnCount={columnCount}
                   expanded={Boolean(expanded[lead.id])}
@@ -1277,6 +1408,7 @@ export default function LeadsPage() {
                   onAddNote={() => handleAddManualNote(lead.id)}
                   onCommercialEvent={(type, payload) => handleCommercialEvent(lead.id, type, payload)}
                   onRecordPayment={(input) => handleRecordPayment(lead.id, input)}
+                  onSendMetaCapiTest={(input) => handleMetaCapiTest(lead.id, input)}
                 />
               ))
             )}

@@ -112,6 +112,7 @@ export type LeadEventType =
   | 'proposal_sent'
   | 'converted'
   | 'payment_received'
+  | 'meta_capi_test'
   | 'disqualified'
   | 'manual_note'
   | 'stage_changed';
