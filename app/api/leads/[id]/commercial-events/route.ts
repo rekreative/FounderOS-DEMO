@@ -9,6 +9,7 @@ import {
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { ManualCommercialEventBodySchema } from '@/lib/server/schemas';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { dispatchMetaCapiLiveEvent } from '@/lib/server/meta-capi-live';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,6 +54,23 @@ export async function POST(request: Request, { params }: { params: { id: string 
       paymentPlan: body.type === 'converted' ? body.paymentPlan : undefined,
       initialPayment: body.type === 'converted' ? body.initialPayment : undefined,
     });
+
+    if (body.type === 'qualified') {
+      await dispatchMetaCapiLiveEvent({ leadId: result.lead.id, kind: 'qualified_lead', occurredAt: new Date(result.event.occurredAt), createdBy: auth.user.id }).catch(() => undefined);
+    }
+    if (body.type === 'appointment_booked') {
+      await dispatchMetaCapiLiveEvent({ leadId: result.lead.id, kind: 'appointment', occurredAt: new Date(result.event.occurredAt), createdBy: auth.user.id }).catch(() => undefined);
+    }
+    if (body.type === 'converted' && (body.initialPayment ?? 0) > 0) {
+      await dispatchMetaCapiLiveEvent({
+        leadId: result.lead.id,
+        kind: 'converted',
+        occurredAt: new Date(result.event.occurredAt),
+        sourceIdentity: `conversion:${result.event.id}`,
+        purchaseValue: body.initialPayment,
+        createdBy: auth.user.id,
+      }).catch(() => undefined);
+    }
 
     return NextResponse.json({ lead: result.lead, event: result.event }, { status: 201 });
   } catch (error) {

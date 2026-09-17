@@ -388,6 +388,7 @@ describe('migration file discovery', () => {
       '0016_proposal_sent_v1.sql',
       '0017_commercial_financial_truth_v1.sql',
       '0018_meta_capi_test_v1.sql',
+      '0019_meta_capi_live_v2.sql',
     ]);
   });
 });

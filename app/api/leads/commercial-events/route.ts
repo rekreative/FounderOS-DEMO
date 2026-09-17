@@ -10,6 +10,7 @@ import {
 } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { CommercialEventBodySchema } from '@/lib/server/schemas';
+import { dispatchMetaCapiLiveEvent } from '@/lib/server/meta-capi-live';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,6 +74,22 @@ export async function POST(request: Request): Promise<Response> {
       paymentPlan: body.type === 'converted' ? body.paymentPlan : undefined,
       initialPayment: body.type === 'converted' ? body.initialPayment : undefined,
     });
+
+    if (body.type === 'qualified') {
+      await dispatchMetaCapiLiveEvent({ leadId: result.lead.id, kind: 'qualified_lead', occurredAt: new Date(result.event.occurredAt) }).catch(() => undefined);
+    }
+    if (body.type === 'appointment_booked') {
+      await dispatchMetaCapiLiveEvent({ leadId: result.lead.id, kind: 'appointment', occurredAt: new Date(result.event.occurredAt) }).catch(() => undefined);
+    }
+    if (body.type === 'converted' && (body.initialPayment ?? 0) > 0) {
+      await dispatchMetaCapiLiveEvent({
+        leadId: result.lead.id,
+        kind: 'converted',
+        occurredAt: new Date(result.event.occurredAt),
+        sourceIdentity: `conversion:${result.event.id}`,
+        purchaseValue: body.initialPayment,
+      }).catch(() => undefined);
+    }
 
     return NextResponse.json(
       { ok: true, leadId: result.lead.id, event: result.event, deduped: result.deduped },

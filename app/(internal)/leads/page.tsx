@@ -169,6 +169,7 @@ function eventLabel(type: LeadEvent['type']): string {
     converted: 'Convertido',
     payment_received: 'Cobro registrado',
     meta_capi_test: 'Meta CAPI',
+    meta_capi_live: 'Meta CAPI automático',
     disqualified: 'Descartado',
     manual_note: 'Nota manual',
     stage_changed: 'Etapa cambiada',
@@ -251,7 +252,8 @@ function MetaCapiTestPanel({
   }, [allowedKinds, kind]);
 
   if (lead.scope !== 'internal' || allowedKinds.length === 0) return null;
-  const selectedDelivery = deliveries.find((delivery) => delivery.eventKind === kind);
+  const selectedDelivery = deliveries.find((delivery) => delivery.eventKind === kind && delivery.deliveryMode === 'test');
+  const liveDeliveries = deliveries.filter((delivery) => delivery.deliveryMode === 'live');
   const isAccepted = selectedDelivery?.status === 'accepted';
   const statusStyle =
     selectedDelivery?.status === 'accepted'
@@ -284,6 +286,21 @@ function MetaCapiTestPanel({
       )}
       {selectedDelivery?.status === 'failed' && <p className="mt-2 font-mono text-[9px] text-os-err">Meta no aceptó esta prueba. Revisa el código de prueba o los datos de contacto y vuelve a intentarlo.</p>}
       {selectedDelivery && <p className="mt-2 font-mono text-[8.5px] text-os-dim">Último intento: {formatDateTime(selectedDelivery.lastAttemptedAt)} · {selectedDelivery.attemptCount} intento{selectedDelivery.attemptCount === 1 ? '' : 's'}</p>}
+      {liveDeliveries.length > 0 && (
+        <div className="mt-3 border-t border-os-border pt-2">
+          <div className="font-mono text-[8.5px] uppercase tracking-[0.16em] text-os-dim">Envíos automáticos reales</div>
+          <div className="mt-1.5 space-y-1">
+            {liveDeliveries.map((delivery) => (
+              <div key={delivery.id} className="flex flex-wrap items-center justify-between gap-2 font-mono text-[9px] text-os-muted">
+                <span>{META_CAPI_KIND_LABEL[delivery.eventKind]} · {delivery.metaEventName}</span>
+                <span className={delivery.status === 'accepted' ? 'text-os-ok' : delivery.status === 'failed' ? 'text-os-err' : 'text-os-warn'}>
+                  {delivery.status === 'accepted' ? 'Aceptado por Meta' : delivery.status === 'failed' ? 'Error' : 'Pendiente'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

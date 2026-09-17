@@ -9,6 +9,7 @@ import {
 import { CreateLeadPaymentBodySchema } from '@/lib/server/schemas';
 import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
 import { jsonError, unexpectedError } from '@/lib/server/http';
+import { dispatchMetaCapiLiveEvent } from '@/lib/server/meta-capi-live';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +39,14 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
   try {
     const result = await recordLeadPayment({ leadId: params.id, ...parsed.data, createdBy: auth.user.id });
+    await dispatchMetaCapiLiveEvent({
+      leadId: result.lead.id,
+      kind: 'converted',
+      occurredAt: new Date(result.payment.occurredAt),
+      sourceIdentity: `payment:${result.payment.id}`,
+      purchaseValue: result.payment.amount,
+      createdBy: auth.user.id,
+    }).catch(() => undefined);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof LeadNotFoundError) return jsonError(404, 'lead not found');

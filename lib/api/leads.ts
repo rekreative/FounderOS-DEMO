@@ -63,12 +63,14 @@ export type LeadMetaCapiDelivery = {
   eventKind: MetaCapiEventKind;
   metaEventName: 'Lead' | 'Schedule' | 'Purchase';
   eventId: string;
-  deliveryMode: 'test';
+  sourceIdentity: string;
+  deliveryMode: 'test' | 'live';
   status: MetaCapiDeliveryStatus;
   attemptCount: number;
   lastAttemptedAt: string | null;
   acceptedAt: string | null;
   errorCode: string | null;
+  eventOccurredAt: string | null;
   createdAt: string;
   updatedAt: string;
 };

@@ -250,12 +250,16 @@ export type LeadMetaCapiDelivery = {
   eventKind: MetaCapiEventKind;
   metaEventName: 'Lead' | 'Schedule' | 'Purchase';
   eventId: string;
-  deliveryMode: 'test';
+  sourceIdentity: string;
+  deliveryMode: 'test' | 'live';
   status: MetaCapiDeliveryStatus;
   attemptCount: number;
   lastAttemptedAt: string | null;
   acceptedAt: string | null;
   errorCode: string | null;
+  /** Original commercial signal time. Test V1 rows predate this field and
+   * legitimately expose null; live retries always retain their first time. */
+  eventOccurredAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -278,12 +282,14 @@ type LeadMetaCapiDeliveryRow = {
   event_kind: string;
   meta_event_name: string;
   event_id: string;
+  source_identity: string;
   delivery_mode: string;
   status: string;
   attempt_count: number;
   last_attempted_at: Date | null;
   accepted_at: Date | null;
   error_code: string | null;
+  event_occurred_at: Date | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -309,12 +315,14 @@ function rowToLeadMetaCapiDelivery(row: LeadMetaCapiDeliveryRow): LeadMetaCapiDe
     eventKind: row.event_kind as MetaCapiEventKind,
     metaEventName: row.meta_event_name as LeadMetaCapiDelivery['metaEventName'],
     eventId: row.event_id,
-    deliveryMode: 'test',
+    sourceIdentity: row.source_identity,
+    deliveryMode: row.delivery_mode as LeadMetaCapiDelivery['deliveryMode'],
     status: row.status as MetaCapiDeliveryStatus,
     attemptCount: row.attempt_count,
     lastAttemptedAt: row.last_attempted_at?.toISOString() ?? null,
     acceptedAt: row.accepted_at?.toISOString() ?? null,
     errorCode: row.error_code,
+    eventOccurredAt: row.event_occurred_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -749,6 +757,17 @@ function assertMetaCapiEligibility(lead: ServerLead, kind: MetaCapiEventKind): v
   }
 }
 
+/** Production delivery has a narrower boundary than the test panel. The
+ * configured dataset belongs to REKREATIVE, so client records and leads that
+ * did not originate from Meta Lead Ads must never become live optimization
+ * signals for it. */
+function assertMetaCapiLiveEligibility(lead: ServerLead, kind: MetaCapiEventKind): void {
+  assertMetaCapiEligibility(lead, kind);
+  if (lead.ingestionSource !== 'meta_lead_ads') {
+    throw new MetaCapiLeadValidationError('live Meta CAPI is only eligible for Meta Lead Ads leads');
+  }
+}
+
 export type PrepareMetaCapiTestDeliveryResult = {
   lead: ServerLead;
   delivery: LeadMetaCapiDelivery;
@@ -774,6 +793,7 @@ export async function prepareMetaCapiTestDelivery(input: {
     const existing = await client.query<LeadMetaCapiDeliveryRow>(
       `SELECT * FROM lead_meta_capi_deliveries
        WHERE lead_id = $1 AND event_kind = $2 AND delivery_mode = 'test'
+         AND source_identity = 'lead'
        FOR UPDATE`,
       [input.leadId, input.kind],
     );
@@ -806,9 +826,9 @@ export async function prepareMetaCapiTestDelivery(input: {
       const eventId = `rekreos-test-${input.leadId}-${input.kind}`;
       const inserted = await client.query<LeadMetaCapiDeliveryRow>(
         `INSERT INTO lead_meta_capi_deliveries (
-           id, lead_id, event_kind, meta_event_name, event_id, delivery_mode,
+           id, lead_id, event_kind, meta_event_name, event_id, source_identity, delivery_mode,
            status, attempt_count, last_attempted_at, created_by, created_at, updated_at
-         ) VALUES ($1, $2, $3, $4, $5, 'test', 'pending', 1, $6, $7, $6, $6)
+         ) VALUES ($1, $2, $3, $4, $5, 'lead', 'test', 'pending', 1, $6, $7, $6, $6)
          RETURNING *`,
         [id, input.leadId, input.kind, definition.eventName, eventId, now, input.createdBy],
       );
@@ -886,6 +906,136 @@ export async function settleMetaCapiTestDelivery(input: {
     // keep the local variable above to make that invariant explicit to a
     // reader and prevent accidental future removal of the lock query.
     void previous;
+    return delivery;
+  });
+}
+
+export type PrepareMetaCapiLiveDeliveryResult = {
+  lead: ServerLead;
+  delivery: LeadMetaCapiDelivery;
+  shouldSend: boolean;
+};
+
+/** Creates the live outbox identity before network I/O. The one live row per
+ * lead and signal doubles as our retry key and Meta event-id source, so a
+ * timeout can never create two optimization events. */
+export async function prepareMetaCapiLiveDelivery(input: {
+  leadId: string;
+  kind: MetaCapiEventKind;
+  occurredAt: Date;
+  sourceIdentity?: string;
+  createdBy?: string | null;
+}): Promise<PrepareMetaCapiLiveDeliveryResult> {
+  return withTransaction(async (client) => {
+    const found = await client.query<LeadRow>('SELECT * FROM leads WHERE id = $1 FOR UPDATE', [input.leadId]);
+    if (found.rowCount === 0) throw new LeadNotFoundError(input.leadId);
+    const lead = rowToLead(found.rows[0]);
+    assertMetaCapiLiveEligibility(lead, input.kind);
+
+    const existing = await client.query<LeadMetaCapiDeliveryRow>(
+      `SELECT * FROM lead_meta_capi_deliveries
+       WHERE lead_id = $1 AND event_kind = $2 AND delivery_mode = 'live'
+         AND source_identity = $3
+       FOR UPDATE`,
+      [input.leadId, input.kind, input.sourceIdentity ?? 'lead'],
+    );
+    const now = new Date();
+    if (existing.rowCount && existing.rowCount > 0) {
+      const prior = existing.rows[0];
+      const recentlyAttempted =
+        prior.status === 'pending' && prior.last_attempted_at !== null && now.getTime() - prior.last_attempted_at.getTime() < 60_000;
+      if (prior.status === 'accepted' || recentlyAttempted) {
+        return { lead, delivery: rowToLeadMetaCapiDelivery(prior), shouldSend: false };
+      }
+      const retried = await client.query<LeadMetaCapiDeliveryRow>(
+        `UPDATE lead_meta_capi_deliveries
+         SET status = 'pending', attempt_count = attempt_count + 1,
+             last_attempted_at = $2, error_code = NULL, updated_at = $2
+         WHERE id = $1
+         RETURNING *`,
+        [prior.id, now],
+      );
+      return { lead, delivery: rowToLeadMetaCapiDelivery(retried.rows[0]), shouldSend: true };
+    }
+
+    const definition = getMetaCapiEventDefinition(input.kind);
+    const id = generateMetaCapiDeliveryId();
+    const sourceIdentity = input.sourceIdentity ?? 'lead';
+    const eventId = `rekreos-live-${input.leadId}-${input.kind}-${sourceIdentity}`;
+    const inserted = await client.query<LeadMetaCapiDeliveryRow>(
+      `INSERT INTO lead_meta_capi_deliveries (
+         id, lead_id, event_kind, meta_event_name, event_id, source_identity, delivery_mode,
+         status, attempt_count, last_attempted_at, event_occurred_at, created_by, created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, 'live', 'pending', 1, $7, $8, $9, $7, $7)
+       RETURNING *`,
+      [id, input.leadId, input.kind, definition.eventName, eventId, sourceIdentity, now, input.occurredAt, input.createdBy ?? null],
+    );
+    const delivery = rowToLeadMetaCapiDelivery(inserted.rows[0]);
+    await insertLeadEventIdempotent(client, {
+      leadId: input.leadId,
+      type: 'meta_capi_live',
+      source: 'system',
+      summary: `Meta CAPI · Envío automático pendiente · ${definition.label}`,
+      details: {
+        deliveryId: delivery.id,
+        eventKind: delivery.eventKind,
+        metaEventName: delivery.metaEventName,
+        deliveryMode: delivery.deliveryMode,
+        status: delivery.status,
+        eventId: delivery.eventId,
+      },
+      occurredAt: now,
+      externalEventId: `meta-capi:live:${delivery.eventId}:pending`,
+    });
+    return { lead, delivery, shouldSend: true };
+  });
+}
+
+/** Persists the sanitized provider outcome and makes it visible in the lead
+ * timeline. Raw Graph diagnostics are deliberately discarded. */
+export async function settleMetaCapiLiveDelivery(input: {
+  deliveryId: string;
+  status: Exclude<MetaCapiDeliveryStatus, 'pending'>;
+  errorCode?: string | null;
+}): Promise<LeadMetaCapiDelivery> {
+  return withTransaction(async (client) => {
+    const current = await client.query<LeadMetaCapiDeliveryRow>(
+      'SELECT * FROM lead_meta_capi_deliveries WHERE id = $1 FOR UPDATE',
+      [input.deliveryId],
+    );
+    if (current.rowCount === 0) throw new Error('Meta CAPI delivery not found');
+    const now = new Date();
+    const settled = await client.query<LeadMetaCapiDeliveryRow>(
+      `UPDATE lead_meta_capi_deliveries
+       SET status = $2, accepted_at = CASE WHEN $2 = 'accepted' THEN $3 ELSE accepted_at END,
+           error_code = CASE WHEN $2 = 'failed' THEN $4 ELSE NULL END,
+           updated_at = $3
+       WHERE id = $1
+       RETURNING *`,
+      [input.deliveryId, input.status, now, input.errorCode ?? null],
+    );
+    const delivery = rowToLeadMetaCapiDelivery(settled.rows[0]);
+    const definition = getMetaCapiEventDefinition(delivery.eventKind);
+    await insertLeadEventIdempotent(client, {
+      leadId: delivery.leadId,
+      type: 'meta_capi_live',
+      source: 'system',
+      summary:
+        input.status === 'accepted'
+          ? `Meta CAPI · Envío automático aceptado · ${definition.label}`
+          : `Meta CAPI · Error en envío automático · ${definition.label}`,
+      details: {
+        deliveryId: delivery.id,
+        eventKind: delivery.eventKind,
+        metaEventName: delivery.metaEventName,
+        deliveryMode: delivery.deliveryMode,
+        status: delivery.status,
+        eventId: delivery.eventId,
+        ...(delivery.errorCode ? { errorCode: delivery.errorCode } : {}),
+      },
+      occurredAt: now,
+      externalEventId: `meta-capi:live:${delivery.eventId}:${input.status}`,
+    });
     return delivery;
   });
 }

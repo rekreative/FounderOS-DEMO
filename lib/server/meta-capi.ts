@@ -92,6 +92,31 @@ export type MetaCapiTestRequest = {
   };
 };
 
+/** A production CAPI request. It deliberately has no test-event field: live
+ * delivery is enabled only by the server-side flag below and never by a
+ * browser-controlled value. */
+export type MetaCapiLiveRequest = {
+  path: string;
+  body: {
+    data: Array<{
+      event_name: 'Lead' | 'Schedule' | 'Purchase';
+      event_time: number;
+      event_id: string;
+      action_source: 'system_generated';
+      user_data: MetaCapiUserData;
+      custom_data?: { currency: 'EUR'; value: number };
+    }>;
+  };
+};
+
+/** Live delivery is opt-in and server-only. Omitting this variable is the
+ * safe default for every new environment and client dataset. */
+export function isMetaCapiLiveEnabled(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  return env.META_CAPI_LIVE_ENABLED?.trim().toLowerCase() === 'true';
+}
+
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -119,6 +144,27 @@ export function buildMetaCapiTestRequest(input: {
   kind: MetaCapiEventKind;
   occurredAt: Date;
 }): MetaCapiTestRequest {
+  const event = buildMetaCapiEvent({
+    lead: input.lead,
+    kind: input.kind,
+    occurredAt: input.occurredAt,
+    eventId: `rekreos-test-${input.lead.id}-${input.kind}`,
+  });
+
+  const graphApiVersion = input.graphApiVersion ?? 'v24.0';
+  return {
+    path: `/${graphApiVersion}/${input.datasetId}/events`,
+    body: { data: [event], test_event_code: input.testEventCode },
+  };
+}
+
+function buildMetaCapiEvent(input: {
+  lead: MetaCapiRequestLead;
+  kind: MetaCapiEventKind;
+  occurredAt: Date;
+  eventId: string;
+  purchaseValue?: number;
+}): MetaCapiLiveRequest['body']['data'][number] {
   const email = normalizedEmail(input.lead.email);
   const phone = normalizedPhone(input.lead.whatsapp) ?? normalizedPhone(input.lead.phone);
   const userData: MetaCapiUserData = {
@@ -133,12 +179,12 @@ export function buildMetaCapiTestRequest(input: {
   const event = {
     event_name: definition.eventName,
     event_time: Math.floor(input.occurredAt.getTime() / 1000),
-    event_id: `rekreos-test-${input.lead.id}-${input.kind}`,
+    event_id: input.eventId,
     action_source: 'system_generated' as const,
     user_data: userData,
     ...(input.kind === 'converted'
       ? (() => {
-          const collected = input.lead.conversionCollection?.totalCollected ?? 0;
+          const collected = input.purchaseValue ?? input.lead.conversionCollection?.totalCollected ?? 0;
           if (!Number.isFinite(collected) || collected <= 0) {
             throw new MetaCapiPayloadValidationError('actual money collected is required for a conversion test');
           }
@@ -147,10 +193,32 @@ export function buildMetaCapiTestRequest(input: {
       : {}),
   };
 
+  return event;
+}
+
+/** Builds the exact same privacy-preserving payload used in Test Events,
+ * but intentionally omits test_event_code and uses the durable live ledger
+ * event id supplied by the caller. */
+export function buildMetaCapiLiveRequest(input: {
+  datasetId: string;
+  graphApiVersion?: string;
+  deliveryEventId: string;
+  lead: MetaCapiRequestLead;
+  kind: MetaCapiEventKind;
+  occurredAt: Date;
+  purchaseValue?: number;
+}): MetaCapiLiveRequest {
+  const event = buildMetaCapiEvent({
+    lead: input.lead,
+    kind: input.kind,
+    occurredAt: input.occurredAt,
+    eventId: input.deliveryEventId,
+    purchaseValue: input.purchaseValue,
+  });
   const graphApiVersion = input.graphApiVersion ?? 'v24.0';
   return {
     path: `/${graphApiVersion}/${input.datasetId}/events`,
-    body: { data: [event], test_event_code: input.testEventCode },
+    body: { data: [event] },
   };
 }
 
@@ -166,6 +234,23 @@ export type MetaCapiSendResult =
 export async function sendMetaCapiTestRequest(
   config: MetaCapiConfiguration,
   request: MetaCapiTestRequest,
+): Promise<MetaCapiSendResult> {
+  return sendMetaCapiRequest(config, request);
+}
+
+/** Sends a production request from the durable live ledger. It shares the
+ * same sanitized result handling as test delivery and never returns Meta's
+ * raw response body to REKREOS. */
+export async function sendMetaCapiLiveRequest(
+  config: MetaCapiConfiguration,
+  request: MetaCapiLiveRequest,
+): Promise<MetaCapiSendResult> {
+  return sendMetaCapiRequest(config, request);
+}
+
+async function sendMetaCapiRequest(
+  config: MetaCapiConfiguration,
+  request: MetaCapiTestRequest | MetaCapiLiveRequest,
 ): Promise<MetaCapiSendResult> {
   try {
     const response = await fetch(`https://graph.facebook.com${request.path}`, {
