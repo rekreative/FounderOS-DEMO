@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Badge } from '@/components/terminal';
@@ -20,6 +20,23 @@ export function LoginForm() {
   const [password, setPassword] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+
+    // A password-recovery email may land on the configured Site URL first.
+    // That request is redirected to this public login page by the server
+    // middleware, while Supabase preserves the recovery fragment for the
+    // browser client. Listen for the recovery event here and immediately
+    // move the user to the only page that can set a new password.
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        router.replace('/set-password');
+      }
+    });
+
+    return () => data.subscription.unsubscribe();
+  }, [router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
