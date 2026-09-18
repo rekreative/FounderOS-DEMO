@@ -30,9 +30,10 @@ import { M2M_PATHS } from '@/lib/server/m2m-routes';
  * a route (like GET /api/results) that is legitimately 100% tenant-scoped
  * and never imports the internal guard at all. So each exported HTTP method
  * is sliced out of the file and checked independently: every write method
- * (POST/PUT/PATCH/DELETE) must use requireInternalUserOrResponse; every GET
- * must use requireInternalUserOrResponse UNLESS its route is in the
- * TENANT_READ_ROUTES allowlist below, in which case it must use one of the
+ * (POST/PUT/PATCH/DELETE) must use requireInternalUserOrResponse unless the
+ * exact method+route is explicitly approved in TENANT_WRITE_METHODS. Every
+ * GET must use requireInternalUserOrResponse unless its route is in the
+ * TENANT_READ_ROUTES allowlist. Approved tenant methods must use one of the
  * tenant guards instead — never both, and never neither.
  */
 
@@ -59,6 +60,15 @@ const TENANT_READ_ROUTES: ReadonlySet<string> = new Set([
   '/api/meta-ads/accounts',
   '/api/ops/status/client/[clientId]',
   '/api/revenue-records',
+]);
+
+/** Reviewed client-portal mutations. Each handler authorizes against the
+ * parent lead's stored client_id and returns the same 404 for a missing or
+ * ungranted lead. No caller-supplied tenant id is trusted. */
+const TENANT_WRITE_METHODS: ReadonlySet<string> = new Set([
+  'POST /api/leads/[id]/stage',
+  'POST /api/leads/[id]/events',
+  'POST /api/leads/[id]/commercial-events',
 ]);
 
 /**
@@ -161,15 +171,17 @@ describe('every internal-human API route method is wired to the correct api-auth
   });
 
   it.each(methodCases.map((c) => [`${c.method} ${c.routePath}`, c] as const))('%s uses the correct api-auth guard', (_label, c) => {
-    const isTenantAware = c.method === 'GET' && TENANT_READ_ROUTES.has(c.routePath);
+    const isTenantAware =
+      (c.method === 'GET' && TENANT_READ_ROUTES.has(c.routePath)) ||
+      TENANT_WRITE_METHODS.has(`${c.method} ${c.routePath}`);
     const rel = path.relative(process.cwd(), c.file);
 
     if (isTenantAware) {
       const usesTenantGuard = TENANT_GUARDS.some((g) => fileImportsFromApiAuth(c.source, g) && c.body.includes(g));
-      expect(usesTenantGuard, `${c.method} ${c.routePath} (${rel}) is an approved tenant-read route but doesn't call a tenant guard`).toBe(true);
+      expect(usesTenantGuard, `${c.method} ${c.routePath} (${rel}) is an approved tenant-aware method but doesn't call a tenant guard`).toBe(true);
       expect(
         c.body.includes(INTERNAL_GUARD),
-        `${c.method} ${c.routePath} (${rel}) is an approved tenant-read route and must not also gate itself with requireInternalUserOrResponse()`,
+        `${c.method} ${c.routePath} (${rel}) is an approved tenant-aware method and must not also gate itself with requireInternalUserOrResponse()`,
       ).toBe(false);
     } else {
       const usesInternalGuard = fileImportsFromApiAuth(c.source, INTERNAL_GUARD) && c.body.includes(INTERNAL_GUARD);

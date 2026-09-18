@@ -4,11 +4,12 @@ import {
   LeadNotFoundError,
   LeadStageTransitionError,
   appendCommercialEvent,
+  getLeadById,
   type CommercialEventType,
 } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { ManualCommercialEventBodySchema } from '@/lib/server/schemas';
-import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { canAccessClientScopedObject, requireUserOrResponse } from '@/lib/server/api-auth';
 import { dispatchMetaCapiLiveEvent } from '@/lib/server/meta-capi-live';
 
 export const dynamic = 'force-dynamic';
@@ -28,12 +29,12 @@ const DEFAULT_SUMMARY: Record<CommercialEventType, string> = {
  * same appendCommercialEvent primitive POST /api/leads/commercial-events
  * (Make) calls — only `source` differs ('manual' here, hardcoded, never
  * caller-supplied) and there's no externalEventId (proposals are deduped
- * per lead; other manual actions retain their existing behavior). No bearer-token gate:
- * same convention as the existing POST /api/leads/[id]/stage and
- * POST /api/leads/[id]/events routes this mirrors.
+ * per lead; other manual actions retain their existing behavior). Session
+ * authorization is resolved from the lead's stored clientId, exactly like
+ * POST /api/leads/[id]/stage and POST /api/leads/[id]/events.
  */
 export async function POST(request: Request, { params }: { params: { id: string } }): Promise<Response> {
-  const auth = await requireInternalUserOrResponse();
+  const auth = await requireUserOrResponse();
   if ('response' in auth) return auth.response;
 
   const parsed = ManualCommercialEventBodySchema.safeParse(await request.json().catch(() => null));
@@ -43,6 +44,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const summary = body.summary ?? DEFAULT_SUMMARY[body.type];
 
   try {
+    const lead = await getLeadById(params.id);
+    if (!lead || !(await canAccessClientScopedObject(auth.user, lead.clientId))) return jsonError(404, 'lead not found');
     const result = await appendCommercialEvent({
       leadId: params.id,
       type: body.type,

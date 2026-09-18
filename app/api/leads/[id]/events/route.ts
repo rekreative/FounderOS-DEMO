@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { LeadNotFoundError, appendLeadEvent, getLeadById, listLeadEvents } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { AppendManualEventBodySchema } from '@/lib/server/schemas';
-import { canAccessClientScopedObject, requireInternalUserOrResponse, requireUserOrResponse } from '@/lib/server/api-auth';
+import { canAccessClientScopedObject, requireUserOrResponse } from '@/lib/server/api-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,13 +38,15 @@ export async function GET(_request: Request, { params }: { params: { id: string 
  * through this one.
  */
 export async function POST(request: Request, { params }: { params: { id: string } }): Promise<Response> {
-  const auth = await requireInternalUserOrResponse();
+  const auth = await requireUserOrResponse();
   if ('response' in auth) return auth.response;
 
   const parsed = AppendManualEventBodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return jsonError(400, 'invalid request body', { issues: parsed.error.flatten() });
 
   try {
+    const lead = await getLeadById(params.id);
+    if (!lead || !(await canAccessClientScopedObject(auth.user, lead.clientId))) return jsonError(404, 'lead not found');
     const event = await appendLeadEvent({
       leadId: params.id,
       type: 'manual_note',

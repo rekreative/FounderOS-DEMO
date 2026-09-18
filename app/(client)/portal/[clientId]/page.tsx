@@ -4,6 +4,7 @@ import { requireClientAccess } from '@/lib/server/auth';
 import { getClientById } from '@/lib/server/clients-repo';
 import { listLeads } from '@/lib/server/leads-repo';
 import { getResults } from '@/lib/server/results-repo';
+import { ClientPortalLeadManager } from '@/components/ClientPortalLeadManager';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,23 +53,7 @@ export default async function ClientWorkspacePage({ params }: { params: { client
         ))}
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[1.35fr_1fr]">
-        <section className="border border-os-border bg-os-surface p-4">
-          <h2 className="font-mono text-[11px] uppercase tracking-[0.16em] text-os-muted">Leads recientes</h2>
-          <div className="mt-3 divide-y divide-os-border">
-            {leads.slice(0, 8).map((lead) => (
-              <div key={lead.id} className="flex items-center justify-between gap-3 py-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{lead.name}</div>
-                  <div className="mt-0.5 truncate text-xs text-os-dim">{lead.email ?? lead.phone ?? 'Sin contacto'}</div>
-                </div>
-                <span className="shrink-0 border border-os-border px-2 py-1 font-mono text-[9px] uppercase text-os-muted">{lead.stage}</span>
-              </div>
-            ))}
-            {leads.length === 0 && <p className="py-5 text-sm text-os-dim">Aún no hay leads registrados.</p>}
-          </div>
-        </section>
-
+      <div className="mt-6">
         <section className="border border-os-border bg-os-surface p-4">
           <h2 className="font-mono text-[11px] uppercase tracking-[0.16em] text-os-muted">Próximas citas</h2>
           <div className="mt-3 divide-y divide-os-border">
@@ -80,10 +65,12 @@ export default async function ClientWorkspacePage({ params }: { params: { client
                 </div>
               </div>
             ))}
-            {upcoming.length === 0 && <p className="py-5 text-sm text-os-dim">No hay citas próximas.</p>}
+            {upcoming.length === 0 && <p className="py-3 text-sm text-os-dim">No hay citas próximas.</p>}
           </div>
         </section>
       </div>
+
+      <ClientPortalLeadManager clientId={client.id} initialLeads={leads} />
     </section>
   );
 }

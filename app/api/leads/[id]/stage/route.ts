@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { LeadStageTransitionError, setLeadStage } from '@/lib/server/leads-repo';
+import { LeadStageTransitionError, getLeadById, setLeadStage } from '@/lib/server/leads-repo';
 import { jsonError, unexpectedError } from '@/lib/server/http';
 import { StageChangeBodySchema } from '@/lib/server/schemas';
-import { requireInternalUserOrResponse } from '@/lib/server/api-auth';
+import { canAccessClientScopedObject, requireUserOrResponse } from '@/lib/server/api-auth';
 import { dispatchMetaCapiLiveEvent } from '@/lib/server/meta-capi-live';
 
 export const dynamic = 'force-dynamic';
@@ -11,13 +11,15 @@ export const dynamic = 'force-dynamic';
  *  stage, because it's the only path that atomically appends the matching
  *  stage_changed event too (see lib/server/leads-repo.ts's setLeadStage). */
 export async function POST(request: Request, { params }: { params: { id: string } }): Promise<Response> {
-  const auth = await requireInternalUserOrResponse();
+  const auth = await requireUserOrResponse();
   if ('response' in auth) return auth.response;
 
   const parsed = StageChangeBodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return jsonError(400, 'invalid request body', { issues: parsed.error.flatten() });
 
   try {
+    const lead = await getLeadById(params.id);
+    if (!lead || !(await canAccessClientScopedObject(auth.user, lead.clientId))) return jsonError(404, 'lead not found');
     const result = await setLeadStage(params.id, parsed.data.stage, 'manual');
     if (!result) return jsonError(404, 'lead not found');
     const kind = parsed.data.stage === 'qualified' ? 'qualified_lead' : parsed.data.stage === 'appointment' ? 'appointment' : null;

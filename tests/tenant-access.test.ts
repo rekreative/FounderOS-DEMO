@@ -323,13 +323,25 @@ describe('GET /api/leads/[id]/events — scoped by the parent lead\'s stored cli
     expect(listLeadEvents).not.toHaveBeenCalled();
   });
 
-  it('POST /api/leads/[id]/events remains internal-only: client role → 403', async () => {
-    asClient(true);
+  it('POST /api/leads/[id]/events is tenant-aware: no grant → 404 and no write', async () => {
+    asClient(false);
+    getLeadById.mockResolvedValue({ id: 'lead-1', clientId: 'client-acme' });
     const res = await postLeadEvent(new Request('http://x/api/leads/lead-1/events', { method: 'POST', body: '{"summary":"x"}' }), {
       params: { id: 'lead-1' },
     });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
     expect(appendLeadEvent).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/leads/[id]/events allows a granted client and keeps type/source server-controlled', async () => {
+    asClient(true);
+    getLeadById.mockResolvedValue({ id: 'lead-1', clientId: 'client-acme' });
+    appendLeadEvent.mockResolvedValue({ id: 'event-note' });
+    const res = await postLeadEvent(new Request('http://x/api/leads/lead-1/events', { method: 'POST', body: '{"summary":"x"}' }), {
+      params: { id: 'lead-1' },
+    });
+    expect(res.status).toBe(201);
+    expect(appendLeadEvent).toHaveBeenCalledWith(expect.objectContaining({ leadId: 'lead-1', type: 'manual_note', source: 'manual' }));
   });
 });
 
