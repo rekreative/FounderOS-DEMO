@@ -61,6 +61,14 @@ describe('PUBLIC', () => {
     const location = res.headers.get('location');
     if (location) expect(new URL(location).pathname).not.toBe('/login');
   });
+
+  it('unauthenticated /set-password is allowed so Supabase can establish the invite session in the browser', async () => {
+    mockSession(null);
+    const res = await middleware(req('/set-password'));
+    expect(res.headers.get('location')).toBeNull();
+    expect(res.status).not.toBe(307);
+    expect(res.status).not.toBe(308);
+  });
 });
 
 describe('INTERNAL PAGE — identity presence only, role NOT checked here', () => {

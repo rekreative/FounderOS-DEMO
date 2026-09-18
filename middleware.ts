@@ -37,9 +37,12 @@ import { M2M_PATHS } from '@/lib/server/m2m-routes';
  * FOUNDER_OS_ACCESS_TOKEN is configured.
  */
 
-// The one page middleware must never redirect away from, even with no
-// session: /login is genuinely public.
+// Authentication entry points that must render without an existing session.
+// /set-password is load-bearing for Supabase invitations: the first request
+// arrives before the browser has exchanged the invite URL fragment for a
+// session, so redirecting it would discard the invite credentials.
 const LOGIN_PATH = '/login';
+const PUBLIC_AUTH_PATHS: ReadonlySet<string> = new Set([LOGIN_PATH, '/set-password']);
 
 // Deployment status checks (see app/api/health/route.ts and
 // app/api/ready/route.ts) — exact match only, same discipline as
@@ -93,9 +96,9 @@ export async function middleware(req: NextRequest) {
   const { response, user } = await refreshMiddlewareSession(req);
 
   const isApiRoute = req.nextUrl.pathname.startsWith('/api/');
-  const isLoginPage = req.nextUrl.pathname === LOGIN_PATH;
+  const isPublicAuthPage = PUBLIC_AUTH_PATHS.has(req.nextUrl.pathname);
 
-  if (!user && !isApiRoute && !isLoginPage) {
+  if (!user && !isApiRoute && !isPublicAuthPage) {
     // Human page request, no session at all: redirect before rendering a
     // doomed page tree. Internal APIs are never redirected here — a
     // redirect would break their JSON-401 contract; requireInternalUserOrResponse()
