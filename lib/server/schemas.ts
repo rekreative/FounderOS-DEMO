@@ -576,6 +576,9 @@ export const IngestLeadBodySchema = z
     ingestionSource: z.string().trim().min(1),
     externalLeadId: z.string().trim().min(1).nullable().optional(),
     leadSource: z.string().trim().min(1),
+    // Original provider creation time. This lets an authenticated recovery
+    // preserve chronology instead of making an old lead look newly arrived.
+    receivedAt: isoDateTime.optional(),
     // Optional during the migration to canonical Meta form routing. When
     // metaFormId resolves to one active mapping, REKREOS derives ownership;
     // existing Make payloads may keep sending scope temporarily.

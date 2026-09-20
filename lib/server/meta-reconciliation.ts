@@ -19,6 +19,8 @@ export type MetaLeadReconciliationCampaign = {
   whatsappSent: number;
   whatsappFailed: number;
   whatsappUnconfirmed: number;
+  /** Leads created before REKREOS started recording WhatsApp outcomes. */
+  whatsappHistorical: number;
 };
 
 export type MetaLeadReconciliation = {
@@ -32,6 +34,7 @@ export type MetaLeadReconciliation = {
   whatsappSent: number;
   whatsappFailed: number;
   whatsappUnconfirmed: number;
+  whatsappHistorical: number;
   campaigns: MetaLeadReconciliationCampaign[];
   coverage: MetaMetricCoverage | null;
   lastSync: MetaSyncRun | null;
@@ -46,6 +49,7 @@ type CampaignRow = {
   whatsapp_sent: string;
   whatsapp_failed: string;
   whatsapp_unconfirmed: string;
+  whatsapp_historical: string;
 };
 
 type DiagnosticRow = {
@@ -57,7 +61,12 @@ type DiagnosticRow = {
  * own explicitly authorized reconciliation surface with client access. */
 export async function getInternalMetaLeadReconciliation(period: ResolvedResultsPeriod): Promise<MetaLeadReconciliation> {
   const metricConditions = ["account.owner_scope = 'internal'"];
-  const leadConditions = ["l.scope = 'internal'", "l.ingestion_source = 'meta_lead_ads'"];
+  const leadConditions = [
+    "l.scope = 'internal'",
+    "l.ingestion_source = 'meta_lead_ads'",
+    "LOWER(COALESCE(l.email, '')) <> 'test@meta.com'",
+    "l.name NOT ILIKE '<test lead:%'",
+  ];
   const params: unknown[] = [];
 
   if (period.start) {
@@ -80,7 +89,15 @@ export async function getInternalMetaLeadReconciliation(period: ResolvedResultsP
   const metricsWhere = metricConditions.join(' AND ');
   const leadsWhere = leadConditions.join(' AND ');
   const campaignResult = await query<CampaignRow>(
-    `WITH selected_campaigns AS (
+    `WITH whatsapp_tracking AS (
+       SELECT MIN(e.occurred_at) AS tracked_from
+       FROM lead_events e
+       JOIN leads tracked_lead ON tracked_lead.id = e.lead_id
+       WHERE tracked_lead.scope = 'internal'
+         AND LOWER(COALESCE(tracked_lead.email, '')) <> 'test@meta.com'
+         AND tracked_lead.name NOT ILIKE '<test lead:%'
+         AND e.type IN ('whatsapp_sent', 'whatsapp_delivered', 'whatsapp_failed', 'lead_replied')
+     ), selected_campaigns AS (
        SELECT
          m.meta_ad_account_id,
          m.meta_campaign_id,
@@ -94,8 +111,13 @@ export async function getInternalMetaLeadReconciliation(period: ResolvedResultsP
        SELECT
          l.id,
          l.meta_campaign_id,
-         COALESCE(wa.type, 'not_sent') AS whatsapp_state
+          CASE
+            WHEN wa.type IS NOT NULL THEN wa.type
+            WHEN tracking.tracked_from IS NOT NULL AND l.created_at < tracking.tracked_from THEN 'historical_untracked'
+            ELSE 'not_sent'
+          END AS whatsapp_state
        FROM leads l
+       CROSS JOIN whatsapp_tracking tracking
        LEFT JOIN LATERAL (
          SELECT e.type
          FROM lead_events e
@@ -115,7 +137,8 @@ export async function getInternalMetaLeadReconciliation(period: ResolvedResultsP
        COUNT(l.id) AS rekreos_leads,
        COUNT(*) FILTER (WHERE l.whatsapp_state IN ('whatsapp_sent', 'whatsapp_delivered', 'lead_replied')) AS whatsapp_sent,
        COUNT(*) FILTER (WHERE l.whatsapp_state = 'whatsapp_failed') AS whatsapp_failed,
-       COUNT(*) FILTER (WHERE l.id IS NOT NULL AND l.whatsapp_state NOT IN ('whatsapp_sent', 'whatsapp_delivered', 'lead_replied', 'whatsapp_failed')) AS whatsapp_unconfirmed
+       COUNT(*) FILTER (WHERE l.id IS NOT NULL AND l.whatsapp_state = 'not_sent') AS whatsapp_unconfirmed,
+       COUNT(*) FILTER (WHERE l.id IS NOT NULL AND l.whatsapp_state = 'historical_untracked') AS whatsapp_historical
      FROM selected_campaigns c
      LEFT JOIN crm_leads l ON l.meta_campaign_id = c.meta_campaign_id
      GROUP BY c.meta_ad_account_id, c.meta_campaign_id, c.campaign_name, c.meta_leads
@@ -153,6 +176,7 @@ export async function getInternalMetaLeadReconciliation(period: ResolvedResultsP
       whatsappSent: Number(row.whatsapp_sent),
       whatsappFailed: Number(row.whatsapp_failed),
       whatsappUnconfirmed: Number(row.whatsapp_unconfirmed),
+      whatsappHistorical: Number(row.whatsapp_historical),
     };
   });
   const diagnostics = diagnosticResult.rows[0];
@@ -170,6 +194,7 @@ export async function getInternalMetaLeadReconciliation(period: ResolvedResultsP
     whatsappSent: campaigns.reduce((total, row) => total + row.whatsappSent, 0),
     whatsappFailed: campaigns.reduce((total, row) => total + row.whatsappFailed, 0),
     whatsappUnconfirmed: campaigns.reduce((total, row) => total + row.whatsappUnconfirmed, 0),
+    whatsappHistorical: campaigns.reduce((total, row) => total + row.whatsappHistorical, 0),
     campaigns,
     coverage,
     lastSync,

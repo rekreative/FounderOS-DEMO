@@ -351,27 +351,44 @@ async function getPostgresHealth(databaseUrlConfigured: boolean): Promise<{ conf
 
 type WhatsAppIncidentRow = { whatsapp_failed: string; whatsapp_unconfirmed: string };
 
-/** Aggregate WhatsApp state across internal leads. A missing/quiet event is
- * visible as unconfirmed, while only an explicit whatsapp_failed event is a
- * failure. This keeps the incidents panel useful without pretending that a
- * provider-side timeout is observable from REKREATIVE OS. */
+/** Aggregate WhatsApp state across real internal leads. Synthetic Meta test
+ * records never become production incidents. Leads created before the first
+ * real WhatsApp outcome was recorded are historical data without telemetry,
+ * not actionable failures, so only later missing outcomes are unconfirmed. */
 async function getWhatsAppIncidentCounts(): Promise<{ whatsappFailed: number; whatsappUnconfirmed: number }> {
   try {
     const result = await query<WhatsAppIncidentRow>(
-      `WITH latest_whatsapp AS (
+      `WITH whatsapp_tracking AS (
+         SELECT MIN(e.occurred_at) AS tracked_from
+         FROM lead_events e
+         JOIN leads tracked_lead ON tracked_lead.id = e.lead_id
+         WHERE tracked_lead.scope = 'internal'
+           AND LOWER(COALESCE(tracked_lead.email, '')) <> 'test@meta.com'
+           AND tracked_lead.name NOT ILIKE '<test lead:%'
+           AND e.type IN ('whatsapp_sent', 'whatsapp_delivered', 'whatsapp_failed', 'lead_replied')
+       ), latest_whatsapp AS (
          SELECT DISTINCT ON (e.lead_id) e.lead_id, e.type
          FROM lead_events e
          JOIN leads l ON l.id = e.lead_id
          WHERE l.scope = 'internal'
+           AND LOWER(COALESCE(l.email, '')) <> 'test@meta.com'
+           AND l.name NOT ILIKE '<test lead:%'
            AND e.type IN ('whatsapp_sent', 'whatsapp_delivered', 'whatsapp_failed', 'lead_replied')
          ORDER BY e.lead_id, e.occurred_at DESC, e.created_at DESC, e.id DESC
        )
        SELECT
          COUNT(*) FILTER (WHERE latest.type = 'whatsapp_failed') AS whatsapp_failed,
-         COUNT(l.id) FILTER (WHERE latest.type IS NULL) AS whatsapp_unconfirmed
+         COUNT(l.id) FILTER (
+           WHERE latest.type IS NULL
+             AND tracking.tracked_from IS NOT NULL
+             AND l.created_at >= tracking.tracked_from
+         ) AS whatsapp_unconfirmed
        FROM leads l
+       CROSS JOIN whatsapp_tracking tracking
        LEFT JOIN latest_whatsapp latest ON latest.lead_id = l.id
-       WHERE l.scope = 'internal'`,
+       WHERE l.scope = 'internal'
+         AND LOWER(COALESCE(l.email, '')) <> 'test@meta.com'
+         AND l.name NOT ILIKE '<test lead:%'`,
     );
     const row = result.rows[0];
     return {

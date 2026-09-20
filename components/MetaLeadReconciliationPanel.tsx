@@ -37,13 +37,14 @@ function CampaignRow({ campaign }: { campaign: MetaLeadReconciliation['campaigns
         <div className="min-w-0"><p className="break-words text-[12px] font-semibold text-os-text">{campaign.campaignName}</p><p className="mt-0.5 font-mono text-[8.5px] text-os-dim">ID {campaign.metaCampaignId}</p></div>
         <Badge tone={differenceTone(campaign.difference)}>{differenceLabel(campaign.difference)}</Badge>
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-px bg-os-border sm:grid-cols-5">
+      <div className="mt-3 grid grid-cols-2 gap-px bg-os-border sm:grid-cols-6">
         {[
           ['Meta', campaign.metaLeads],
           ['REKREOS', campaign.rekreosLeads],
           ['Diferencia', campaign.difference],
           ['WP enviado', campaign.whatsappSent],
           ['WP pendiente', campaign.whatsappUnconfirmed],
+          ['Sin trazabilidad', campaign.whatsappHistorical],
         ].map(([label, value]) => (
           <div key={String(label)} className="min-w-0 bg-os-surface2 px-2 py-1.5"><p className="font-mono text-[7.5px] uppercase tracking-wide text-os-dim">{label}</p><p className="mt-0.5 font-mono text-[11px] text-os-text">{value}</p></div>
         ))}
@@ -87,6 +88,11 @@ export function MetaLeadReconciliationPanel({ preset = 'all', start, end, compac
               {data.unattributedRekreosLeads > 0 && <span>{data.unattributedRekreosLeads} lead(s) de REKREOS sin campaña atribuida. </span>}
               {data.crmLeadsWithoutMetaMetric > 0 && <span>{data.crmLeadsWithoutMetaMetric} sin métrica Meta en este periodo. </span>}
               {data.whatsappUnconfirmed > 0 && <span>{data.whatsappUnconfirmed} sin confirmación de WhatsApp.</span>}
+            </div>
+          )}
+          {data.whatsappHistorical > 0 && (
+            <div className="mt-2 border-l-2 border-os-border-strong bg-os-surface2 px-3 py-2 font-mono text-[9px] text-os-dim">
+              {data.whatsappHistorical} lead(s) anterior(es) al inicio de la trazabilidad de WhatsApp; no se consideran incidencias automáticas.
             </div>
           )}
           {!compact && <div className="mt-3 overflow-hidden border border-os-border">{data.campaigns.length === 0 ? <p className="px-3 py-5 text-center font-mono text-[10px] text-os-dim">No hay campañas Meta en el periodo seleccionado.</p> : data.campaigns.map((campaign) => <CampaignRow key={`${campaign.metaAdAccountId ?? 'account'}:${campaign.metaCampaignId}`} campaign={campaign} />)}</div>}

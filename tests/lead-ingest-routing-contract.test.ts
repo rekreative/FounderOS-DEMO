@@ -26,6 +26,17 @@ describe('Meta lead tenant-routing contract', () => {
     expect(IngestLeadBodySchema.safeParse({ ...base, stage: 'converted' }).success).toBe(false);
   });
 
+  it('accepts a provider timestamp for safe historical recovery and rejects invalid dates', () => {
+    expect(IngestLeadBodySchema.safeParse({ ...base, receivedAt: '2026-09-08T15:02:37.000Z' }).success).toBe(true);
+    expect(IngestLeadBodySchema.safeParse({ ...base, receivedAt: 'not-a-date' }).success).toBe(false);
+
+    const route = readFileSync(join(process.cwd(), 'app/api/ingest/leads/route.ts'), 'utf8');
+    const repo = readFileSync(join(process.cwd(), 'lib/server/leads-repo.ts'), 'utf8');
+    expect(route).toContain('receivedAt');
+    expect(repo).toContain('input.receivedAt');
+    expect(repo).toContain('receivedAt');
+  });
+
   it('requires an identified Meta page to resolve through a registered owner instead of caller scope', () => {
     const source = readFileSync(join(process.cwd(), 'lib/server/leads-repo.ts'), 'utf8');
     expect(source).toContain('SELECT DISTINCT owner_scope, client_id');

@@ -36,6 +36,8 @@ const AUTH_ERROR_MESSAGE: Record<IngestAuthFailureReason, string> = {
  * Lifecycle: Make can never choose a lead's stage — IngestLeadBodySchema
  * has no `stage` field at all (`.strict()` rejects one if sent), so every
  * ingested lead starts at the repository's own default.
+ * Historical recovery may provide `receivedAt`; it preserves the provider's
+ * original chronology and never triggers WhatsApp from this endpoint.
  */
 export async function POST(request: Request): Promise<Response> {
   const auth = checkIngestAuth(request);

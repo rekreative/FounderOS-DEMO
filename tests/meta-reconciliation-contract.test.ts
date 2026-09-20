@@ -26,4 +26,24 @@ describe('Meta lead reconciliation V1 contract', () => {
     expect(panel).toContain('sin campaña atribuida');
     expect(panel).toContain('WhatsApp fallido');
   });
+
+  it('excludes synthetic Meta tests and separates pre-tracking WhatsApp history from actionable incidents', () => {
+    const repo = read('lib/server/meta-reconciliation.ts');
+    const ops = read('lib/server/ops-status.ts');
+    const panel = read('components/MetaLeadReconciliationPanel.tsx');
+    const api = read('lib/api/results.ts');
+
+    for (const source of [repo, ops]) {
+      expect(source).toContain("test@meta.com");
+      expect(source).toContain("<test lead:%");
+      expect(source).toContain('MIN(e.occurred_at)');
+    }
+
+    expect(repo).toContain('historical_untracked');
+    expect(repo).toContain('whatsapp_historical');
+    expect(repo).toContain('whatsappHistorical');
+    expect(api).toContain('whatsappHistorical');
+    expect(panel).toContain('Sin trazabilidad');
+    expect(panel).toContain('no se consideran incidencias automáticas');
+  });
 });

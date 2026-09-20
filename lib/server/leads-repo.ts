@@ -1307,6 +1307,8 @@ export type IngestLeadInput = Omit<CreateLeadInput, 'scope' | 'clientId'> & {
   /** e.g. 'meta'. Paired with externalLeadId as idempotency key 2. */
   ingestionSource: string;
   externalLeadId?: string | null;
+  /** Original upstream creation time for authenticated historical recovery. */
+  receivedAt?: string;
   /** Meta Ads Real V1 — optional, ingestion-only structured attribution. */
   metaCampaignId?: string | null;
   metaAdsetId?: string | null;
@@ -1410,12 +1412,13 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
 
     const id = generateLeadId();
     const now = new Date();
+    const receivedAt = input.receivedAt ? new Date(input.receivedAt) : now;
     const source = input.source?.trim() || 'Manual';
     const campaign = nullableTrim(input.campaign);
     // Presence of the object at all — not any individual field being
     // populated — is what counts as "an AI analysis pass occurred". Make
     // never supplies analyzedAt (IngestLeadBodySchema has no such field);
-    // this server-stamped `now` is the only source of truth for it.
+    // it follows the authenticated provider timestamp when one is supplied.
     const hasAiAnalysis = input.aiAnalysis != null;
 
     let insertResult;
@@ -1449,7 +1452,7 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
           input.aiAnalysis?.priority ?? null,
           input.aiAnalysis?.summary ?? null,
           input.aiAnalysis?.qualification ? JSON.stringify(input.aiAnalysis.qualification) : null,
-          hasAiAnalysis ? now : null,
+          hasAiAnalysis ? receivedAt : null,
           input.qualificationAnswers ? JSON.stringify(input.qualificationAnswers) : null,
           input.appointmentDate ?? null,
           input.conversionValue ?? null,
@@ -1461,8 +1464,8 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
           nullableTrim(input.metaAdId),
           nullableTrim(input.metaFormId),
           nullableTrim(input.metaPageId),
-          now,
-          now,
+          receivedAt,
+          receivedAt,
         ],
       );
     } catch (error) {
@@ -1495,7 +1498,7 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
         metaFormId: input.metaFormId ?? null,
         metaPageId: input.metaPageId ?? null,
       },
-      occurredAt: now,
+      occurredAt: receivedAt,
     });
 
     // Only on this fresh-insert path — a deduped replay (either idempotency
@@ -1510,12 +1513,12 @@ export async function ingestLeadTransactional(input: IngestLeadInput): Promise<I
         source: 'openai',
         summary: `${input.name.trim()} was analyzed by AI qualification`,
         details: { intent: input.aiAnalysis?.intent ?? null, priority: input.aiAnalysis?.priority ?? null },
-        // +1ms, strictly after lead_received's `now` — both events land in
+        // +1ms, strictly after lead_received's occurrence — both events land in
         // the same transaction, so occurred_at (and often created_at too)
         // would otherwise tie and fall back to listLeadEvents' id-order
         // tiebreaker, which doesn't reflect business sequence. Does not
-        // affect ai_analyzed_at, which stays `now` on the lead row itself.
-        occurredAt: new Date(now.getTime() + 1),
+        // affect ai_analyzed_at, which uses the same provider chronology.
+        occurredAt: new Date(receivedAt.getTime() + 1),
       });
     }
 

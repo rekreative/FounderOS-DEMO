@@ -62,6 +62,7 @@ export type MetaLeadReconciliationCampaign = {
   whatsappSent: number;
   whatsappFailed: number;
   whatsappUnconfirmed: number;
+  whatsappHistorical: number;
 };
 
 export type MetaLeadReconciliation = {
@@ -73,6 +74,7 @@ export type MetaLeadReconciliation = {
   whatsappSent: number;
   whatsappFailed: number;
   whatsappUnconfirmed: number;
+  whatsappHistorical: number;
   campaigns: MetaLeadReconciliationCampaign[];
   coverage: { firstDate: string; lastDate: string; dayCount: number } | null;
   lastSync: { finishedAt: string | null; startedAt: string; status: 'running' | 'success' | 'partial' | 'error' } | null;
