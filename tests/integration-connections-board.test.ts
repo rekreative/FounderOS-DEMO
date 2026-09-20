@@ -18,6 +18,12 @@ const read = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
 describe('IntegrationConnectionsBoard — manual-records loading/error truth (Issue 3)', () => {
   const board = read('components/IntegrationConnectionsBoard.tsx');
 
+  test('renders the central incidents panel from server-derived OpsSnapshot incidents', () => {
+    expect(board).toContain('Panel central de incidencias');
+    expect(board).toMatch(/opsSnapshot\.incidents\.map\(\(incident\) =>/);
+    expect(board).toContain('No hay incidencias observadas');
+  });
+
   test('KPI/onboarding/connection-list/catalog content is gated behind the same connectionsError/connectionsLoading ternary that shows the error+retry or loading placeholder — never rendered alongside zero/empty results', () => {
     // The success branch's capture is anchored on the known text immediately
     // after its closing `</>` (the next JSX block, {showForm && (), rather

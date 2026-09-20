@@ -47,6 +47,7 @@ import {
 import { Badge, SectionHead, type BadgeTone } from '@/components/terminal';
 import { getOpsSnapshot as fetchOpsSnapshot } from '@/lib/api/ops-status';
 import { formatOpsRelativeTime, getOpsStatusLabel, OPS_STATUS_TONE, type OpsConnectionStatus, type OpsSnapshot } from '@/lib/ops-status';
+import type { OpsIncident } from '@/lib/ops-incidents';
 
 const CONFIGURATION_FILTERS = [{ id: 'all', label: 'Todas' }, ...INTEGRATION_CONFIGURATION_STATUS_OPTIONS];
 const VERIFICATION_FILTERS = [{ id: 'all', label: 'Todas' }, ...INTEGRATION_VERIFICATION_STATUS_OPTIONS];
@@ -581,6 +582,23 @@ function RealConnectionCard({ connection }: { connection: OpsConnectionStatus })
   );
 }
 
+function IncidentCard({ incident }: { incident: OpsIncident }) {
+  const tone = incident.severity === 'critical' ? 'err' : 'warn';
+  const category = incident.category === 'meta' ? 'Meta' : incident.category === 'whatsapp' ? 'WhatsApp' : 'Mappings';
+  return (
+    <div className="flex items-start justify-between gap-3 border border-os-border bg-os-surface px-3.5 py-3">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={tone}>{category}</Badge>
+          <span className="text-[12px] font-semibold text-os-text">{incident.title}</span>
+        </div>
+        <p className="mt-1.5 text-[10.5px] leading-snug text-os-muted">{incident.detail}</p>
+      </div>
+      <span className="shrink-0 font-mono text-[11px] font-semibold text-os-text">{incident.count}</span>
+    </div>
+  );
+}
+
 export function IntegrationConnectionsBoard({
   platformLogosLarge,
 }: {
@@ -1017,6 +1035,25 @@ export function IntegrationConnectionsBoard({
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
             {opsSnapshot.connections.map((connection) => (
               <RealConnectionCard key={connection.id} connection={connection} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mb-5">
+        <SectionHead label="Panel central de incidencias" count={opsSnapshot?.incidents.length ?? 0} />
+        {!opsSnapshot ? (
+          <div className="border border-dashed border-os-border px-3 py-5 text-center font-mono text-[10px] uppercase tracking-wide text-os-dim">
+            Cargando incidencias…
+          </div>
+        ) : opsSnapshot.incidents.length === 0 ? (
+          <div className="border border-os-ok/30 bg-os-ok/5 px-3 py-4 text-[11px] text-os-muted">
+            No hay incidencias observadas en la última comprobación. La ausencia de actividad externa no se interpreta como fallo.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+            {opsSnapshot.incidents.map((incident) => (
+              <IncidentCard key={incident.id} incident={incident} />
             ))}
           </div>
         )}

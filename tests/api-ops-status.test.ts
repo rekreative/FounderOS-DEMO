@@ -27,6 +27,7 @@ describe.runIf(Boolean(TEST_DATABASE_URL))('GET /api/ops/status (real PostgreSQL
     expect(body.agent).toBeDefined();
     expect(body.agent.id).toBe('lead_qualification_agent');
     expect(Array.isArray(body.attention)).toBe(true);
+    expect(Array.isArray(body.incidents)).toBe(true);
   });
 
   it('never returns DATABASE_URL, API keys, or any other secret value', async () => {

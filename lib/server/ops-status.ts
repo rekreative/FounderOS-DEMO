@@ -1,5 +1,8 @@
 import { query } from './db';
 import { getLatestSyncRun, listClientMetaAccounts, type MetaSyncRun } from './meta-repo';
+import { getInternalMetaLeadReconciliation } from './meta-reconciliation';
+import { resolveResultsPeriod } from './results-time';
+import { buildOpsIncidents, type OpsIncident } from '../ops-incidents';
 import {
   type OpsAgentStatus,
   type OpsAttentionItem,
@@ -346,6 +349,63 @@ async function getPostgresHealth(databaseUrlConfigured: boolean): Promise<{ conf
   }
 }
 
+type WhatsAppIncidentRow = { whatsapp_failed: string; whatsapp_unconfirmed: string };
+
+/** Aggregate WhatsApp state across internal leads. A missing/quiet event is
+ * visible as unconfirmed, while only an explicit whatsapp_failed event is a
+ * failure. This keeps the incidents panel useful without pretending that a
+ * provider-side timeout is observable from REKREATIVE OS. */
+async function getWhatsAppIncidentCounts(): Promise<{ whatsappFailed: number; whatsappUnconfirmed: number }> {
+  try {
+    const result = await query<WhatsAppIncidentRow>(
+      `WITH latest_whatsapp AS (
+         SELECT DISTINCT ON (e.lead_id) e.lead_id, e.type
+         FROM lead_events e
+         JOIN leads l ON l.id = e.lead_id
+         WHERE l.scope = 'internal'
+           AND e.type IN ('whatsapp_sent', 'whatsapp_delivered', 'whatsapp_failed', 'lead_replied')
+         ORDER BY e.lead_id, e.occurred_at DESC, e.created_at DESC, e.id DESC
+       )
+       SELECT
+         COUNT(*) FILTER (WHERE latest.type = 'whatsapp_failed') AS whatsapp_failed,
+         COUNT(l.id) FILTER (WHERE latest.type IS NULL) AS whatsapp_unconfirmed
+       FROM leads l
+       LEFT JOIN latest_whatsapp latest ON latest.lead_id = l.id
+       WHERE l.scope = 'internal'`,
+    );
+    const row = result.rows[0];
+    return {
+      whatsappFailed: Number(row?.whatsapp_failed ?? 0),
+      whatsappUnconfirmed: Number(row?.whatsapp_unconfirmed ?? 0),
+    };
+  } catch (error) {
+    console.error('[ops-status] WhatsApp incident lookup failed:', error);
+    return { whatsappFailed: 0, whatsappUnconfirmed: 0 };
+  }
+}
+
+/** Builds the central incident list from bounded, aggregate evidence only.
+ * Failures in one diagnostic source degrade to an empty list rather than
+ * taking down the complete operational snapshot. */
+async function getOperationalIncidents(): Promise<OpsIncident[]> {
+  try {
+    const [reconciliation, whatsapp] = await Promise.all([
+      getInternalMetaLeadReconciliation(resolveResultsPeriod('all')),
+      getWhatsAppIncidentCounts(),
+    ]);
+    return buildOpsIncidents({
+      metaDifference: reconciliation.difference,
+      metaSyncError: reconciliation.lastSync?.status === 'error' ? reconciliation.lastSync.errorMessage ?? 'La última sincronización terminó con error.' : null,
+      whatsappFailed: whatsapp.whatsappFailed || reconciliation.whatsappFailed,
+      whatsappUnconfirmed: whatsapp.whatsappUnconfirmed || reconciliation.whatsappUnconfirmed,
+      missingMappings: reconciliation.unattributedRekreosLeads + reconciliation.crmLeadsWithoutMetaMetric,
+    });
+  } catch (error) {
+    console.error('[ops-status] Operational incidents lookup failed:', error);
+    return [];
+  }
+}
+
 function buildAttention(
   databaseUrlConfigured: boolean,
   postgresStatus: OpsStatus,
@@ -450,7 +510,7 @@ function unavailableSnapshot(
     clients: [],
   };
 
-  return { postgres, connections, automations, agent, attention };
+  return { postgres, connections, automations, agent, attention, incidents: [] };
 }
 
 export async function getOpsSnapshot(): Promise<OpsSnapshot> {
@@ -467,7 +527,7 @@ export async function getOpsSnapshot(): Promise<OpsSnapshot> {
 
   const ingestMetaConfigured = Boolean(process.env.INGEST_META_API_KEY);
 
-  const [metaIntake, qualification, whatsappOut, whatsappIn, makeAny, commercialMake, metaAdsConnection] = await Promise.all([
+  const [metaIntake, qualification, whatsappOut, whatsappIn, makeAny, commercialMake, metaAdsConnection, incidents] = await Promise.all([
     getLatestEvidence({ eventTypes: ALL_LEAD_EVENT_TYPES_FOR_META, ingestionSourceIlike: '%meta%' }),
     getLatestEvidence({ eventTypes: AI_ANALYZED }),
     getLatestEvidence({ eventTypes: WHATSAPP_SENT }),
@@ -475,6 +535,7 @@ export async function getOpsSnapshot(): Promise<OpsSnapshot> {
     getLatestEvidence({ source: 'make' }),
     getLatestEvidence({ eventTypes: COMMERCIAL_TYPES, source: 'make' }),
     getMetaAdsConnectionStatus(ingestMetaConfigured),
+    getOperationalIncidents(),
   ]);
 
   const makeConfigured = ingestConfigured || makeEventsConfigured;
@@ -552,7 +613,7 @@ export async function getOpsSnapshot(): Promise<OpsSnapshot> {
 
   const agent: OpsAgentStatus = { ...deriveAgentStatus(qualification, ingestConfigured), clients: qualification.clients };
 
-  return { postgres, connections, automations, agent, attention };
+  return { postgres, connections, automations, agent, attention, incidents };
 }
 
 /**

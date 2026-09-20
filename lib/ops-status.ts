@@ -8,6 +8,8 @@
 // CONFIGURED != OPERATIONAL != ACTIVITY_OBSERVED. See lib/server/ops-status.ts
 // for exactly how each value is derived per integration/workflow/agent.
 
+import type { OpsIncident } from './ops-incidents';
+
 export const OPS_STATUS_OPTIONS = [
   { id: 'operational', label: 'Operativo' },
   { id: 'activity_observed', label: 'Actividad observada' },
@@ -89,6 +91,7 @@ export type OpsSnapshot = {
   automations: OpsAutomationStatus[];
   agent: OpsAgentStatus;
   attention: OpsAttentionItem[];
+  incidents: OpsIncident[];
 };
 
 /**
