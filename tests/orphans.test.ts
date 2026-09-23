@@ -9,6 +9,9 @@ const KNOWN_ORPHANS: string[] = [
   // REKREATIVE OS command center (app/page.tsx). Left in place rather than
   // deleted — legacy FounderOS code is preserved, not removed, in this pass.
   'HomeSocialGraph',
+  // Superseded by the current connections board, retained as legacy UI.
+  'ConnectionCard',
+  'IntegrationCategory',
 ];
 
 const ROOT = process.cwd();

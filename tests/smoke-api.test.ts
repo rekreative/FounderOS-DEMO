@@ -76,7 +76,8 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
     // skills/[slug] reads the local ~/.claude/skills dir at runtime (404 without
     // a slug on disk), so it is not a 200-required smoke route.
     // Backend V1's clients/leads routes, plus Results Real + Home Real V1's
-    // results routes, read real PostgreSQL, not the throwaway SQLite temp db
+    // results routes, including results/reconciliation, read real PostgreSQL,
+    // not the throwaway SQLite temp db
     // this file uses - they have their own full 200-path integration
     // coverage against a real Postgres test database (see
     // tests/helpers/pg-test-env.ts - requires an explicit TEST_DATABASE_URL,
@@ -119,6 +120,7 @@ describe('platform smoke — every GET API route answers 200 with JSON', () => {
       'leads/[id]/meta-capi-events',
       'results',
       'results/home',
+      'results/reconciliation',
       'ops/status',
       'ops/status/client/[clientId]',
       'meta-ads/accounts',

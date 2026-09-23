@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { POST } from '@/app/api/lead-magnets/route';
 import { PATCH, DELETE } from '@/app/api/lead-magnets/[id]/route';
+import { getDb } from '@/lib/data';
 
 /**
  * Rounding out the panel a register you can only add to
@@ -18,6 +19,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  getDb().close();
   delete process.env.FOUNDER_OS_DB;
   fs.rmSync(dir, { recursive: true, force: true });
 });

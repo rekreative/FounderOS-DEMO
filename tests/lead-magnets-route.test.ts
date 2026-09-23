@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { GET, POST } from '@/app/api/lead-magnets/route';
+import { getDb } from '@/lib/data';
 
 /** POST /api/lead-magnets is how a lead magnet gets registered from inside the
  *  OS: the create form on /content/lead-magnets and a content pipeline both
@@ -16,6 +17,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  getDb().close();
   delete process.env.FOUNDER_OS_DB;
   fs.rmSync(dir, { recursive: true, force: true });
 });
