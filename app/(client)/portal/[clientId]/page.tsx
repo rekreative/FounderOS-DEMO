@@ -29,26 +29,27 @@ export default async function ClientWorkspacePage({ params }: { params: { client
     .slice(0, 5);
 
   return (
-    <section className="mx-auto max-w-6xl">
+    <section className="mx-auto min-w-0 max-w-6xl">
       <header className="flex flex-col gap-3 border-b border-os-border pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-os-accent">REKREATIVE · CLIENTE</p>
           <h1 className="mt-2 text-2xl font-semibold">{client.name}</h1>
-          <p className="mt-1 text-sm text-os-dim">{client.service}</p>
+          <p className="mt-1 text-sm text-os-muted">{client.service}</p>
         </div>
-        <Link href="/portal" className="text-sm text-os-dim hover:text-os-text">Cambiar cuenta</Link>
+        <Link href="/portal" className="text-sm text-os-muted hover:text-os-text">Cambiar cuenta</Link>
       </header>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          ['Leads', String(results.overall.funnel.leads)],
-          ['Cualificados', String(results.overall.funnel.qualified)],
-          ['Citas', String(results.overall.funnel.appointments)],
-          ['Valor generado', formatMoney(results.overall.value.total)],
-        ].map(([label, value]) => (
+          ['Leads', String(results.overall.funnel.leads), null],
+          ['Cualificados', String(results.overall.funnel.qualified), 'Histórico; incluye quienes avanzaron'],
+          ['Citas registradas', String(results.overall.funnel.appointments), 'Histórico; no es la etapa actual'],
+          ['Valor generado', formatMoney(results.overall.value.total), null],
+        ].map(([label, value, detail]) => (
           <div key={label} className="border border-os-border bg-os-surface p-4">
-            <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-os-dim">{label}</div>
-            <div className="mt-2 text-xl font-semibold">{value}</div>
+            <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-os-muted">{label}</div>
+            <div className="mt-2 text-2xl font-semibold">{value}</div>
+            {detail && <div className="mt-1 text-xs text-os-muted">{detail}</div>}
           </div>
         ))}
       </div>
@@ -60,12 +61,12 @@ export default async function ClientWorkspacePage({ params }: { params: { client
             {upcoming.map((lead) => (
               <div key={lead.id} className="py-3">
                 <div className="text-sm font-medium">{lead.name}</div>
-                <div className="mt-0.5 text-xs text-os-dim">
+                <div className="mt-0.5 text-sm text-os-muted">
                   {new Date(lead.appointmentDate as string).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' })}
                 </div>
               </div>
             ))}
-            {upcoming.length === 0 && <p className="py-3 text-sm text-os-dim">No hay citas próximas.</p>}
+            {upcoming.length === 0 && <p className="py-3 text-sm text-os-muted">No hay citas próximas.</p>}
           </div>
         </section>
       </div>
