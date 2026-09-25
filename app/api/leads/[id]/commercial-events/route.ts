@@ -19,6 +19,9 @@ const DEFAULT_SUMMARY: Record<CommercialEventType, string> = {
   qualified: 'Lead qualified',
   appointment_booked: 'Appointment booked',
   appointment_completed: 'Appointment completed',
+  appointment_confirmed: 'Cita confirmada',
+  appointment_cancelled: 'Cita cancelada',
+  appointment_no_show: 'No acudió a la cita',
   converted: 'Lead converted',
   disqualified: 'Lead disqualified',
 };

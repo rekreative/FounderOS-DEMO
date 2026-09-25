@@ -96,6 +96,9 @@ export const LeadEventTypeSchema = z.enum([
   'qualified',
   'appointment_booked',
   'appointment_completed',
+  'appointment_confirmed',
+  'appointment_cancelled',
+  'appointment_no_show',
   'proposal_sent',
   'converted',
   'payment_received',
@@ -337,6 +340,9 @@ export const CommercialEventTypeSchema = z.enum([
   'qualified',
   'appointment_booked',
   'appointment_completed',
+  'appointment_confirmed',
+  'appointment_cancelled',
+  'appointment_no_show',
   'proposal_sent',
   'converted',
   'disqualified',
@@ -410,7 +416,19 @@ function validateConversionTerms(
  * appointmentDate/conversionValue are required/optional exactly where the
  * domain rules need them (see appendCommercialEvent).
  */
+const appointmentOutcomeFields = {
+  leadId: z.string().trim().min(1),
+  externalEventId: z.string().trim().min(1),
+  appointmentDate: isoDateTime,
+  occurredAt: isoDateTime.optional(),
+  details: z.record(z.unknown()).optional(),
+  ...commercialEventSharedFields,
+};
+
 export const CommercialEventBodySchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('appointment_confirmed'), ...appointmentOutcomeFields }).strict(),
+  z.object({ type: z.literal('appointment_cancelled'), ...appointmentOutcomeFields }).strict(),
+  z.object({ type: z.literal('appointment_no_show'), ...appointmentOutcomeFields }).strict(),
   z
     .object({
       type: z.literal('qualified'),
@@ -458,6 +476,7 @@ export const CommercialEventBodySchema = z.discriminatedUnion('type', [
       leadId: z.string().trim().min(1),
       externalEventId: z.string().trim().min(1),
       ...conversionTermsFields,
+      collectedAmount: z.number().finite().positive().optional(),
       occurredAt: isoDateTime.optional(),
       details: z.record(z.unknown()).optional(),
       ...commercialEventSharedFields,
@@ -474,7 +493,15 @@ export const CommercialEventBodySchema = z.discriminatedUnion('type', [
     })
     .strict(),
 ]).superRefine((value, ctx) => {
-  if (value.type === 'converted') validateConversionTerms(value, ctx);
+  if (value.type === 'converted') {
+    validateConversionTerms(value, ctx);
+    if (value.collectedAmount !== undefined && (
+      value.conversionValue === undefined || value.collectedAmount > value.conversionValue ||
+      value.serviceId !== undefined || value.paymentPlan !== undefined || value.initialPayment !== undefined
+    )) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['collectedAmount'], message: 'client receipt requires an agreed value and cannot mix internal service terms' });
+    }
+  }
 });
 
 /**

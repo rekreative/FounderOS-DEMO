@@ -1692,7 +1692,7 @@ export async function appendWhatsAppEvent(input: AppendWhatsAppEventInput): Prom
 // or source directly through their request body; this function is the only
 // place that decides both, same discipline as appendWhatsAppEvent.
 
-export type CommercialEventType = 'proposal_sent' | 'qualified' | 'appointment_booked' | 'appointment_completed' | 'converted' | 'disqualified';
+export type CommercialEventType = 'proposal_sent' | 'qualified' | 'appointment_booked' | 'appointment_completed' | 'appointment_confirmed' | 'appointment_cancelled' | 'appointment_no_show' | 'converted' | 'disqualified';
 
 // Every commercial event's target stage. Incompatible transitions out of a
 // terminal stage are rejected before any event or field is written.
@@ -1702,11 +1702,16 @@ export type CommercialEventType = 'proposal_sent' | 'qualified' | 'appointment_b
 // there is deliberately no separate "appointment completed" stage (Results'
 // funnel derives attendance from the appointment_completed EVENT, never from
 // stage — see lib/results.ts's maxReachedStageRank).
-const COMMERCIAL_EVENT_TARGET_STAGE: Record<CommercialEventType, LeadStage> = {
+const COMMERCIAL_EVENT_TARGET_STAGE: Record<CommercialEventType, LeadStage | null> = {
   proposal_sent: 'proposal_sent',
   qualified: 'qualified',
   appointment_booked: 'appointment',
   appointment_completed: 'appointment',
+  // Appointment outcomes are facts, not lead disqualification/conversion.
+  // In particular, a late cancellation must never undo a sale.
+  appointment_confirmed: null,
+  appointment_cancelled: null,
+  appointment_no_show: null,
   converted: 'converted',
   disqualified: 'disqualified',
 };
@@ -1753,6 +1758,8 @@ export type AppendCommercialEventInput = {
   serviceId?: string;
   paymentPlan?: ConversionPaymentPlan;
   initialPayment?: number;
+  /** Explicit client receipt; value-only conversions remain non-cash. */
+  collectedAmount?: number;
 };
 
 export type AppendCommercialEventResult = {
@@ -1810,10 +1817,25 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
     }
 
     const targetStage = COMMERCIAL_EVENT_TARGET_STAGE[input.type];
-    assertStageTransitionAllowed(existing.stage, targetStage);
+    if (targetStage !== null) assertStageTransitionAllowed(existing.stage, targetStage);
+
+    const isAppointmentOutcome = ['appointment_confirmed', 'appointment_cancelled', 'appointment_no_show'].includes(input.type);
+    if (isAppointmentOutcome && (!input.appointmentDate || Number.isNaN(Date.parse(input.appointmentDate)))) {
+      throw new CommercialConversionValidationError('appointment occurrence date is required');
+    }
+    if (input.collectedAmount !== undefined && (
+      input.type !== 'converted' || existing.scope !== 'client' || !Number.isFinite(input.collectedAmount) ||
+      input.collectedAmount <= 0 || input.conversionValue === undefined || input.collectedAmount > input.conversionValue ||
+      input.serviceId !== undefined || input.paymentPlan !== undefined || input.initialPayment !== undefined ||
+      (existing.conversionCollection?.totalCollected ?? 0) > 0
+    )) {
+      throw new CommercialConversionValidationError('invalid client receipt; existing receipts require a separate payment');
+    }
 
     const occurredAt = input.occurredAt ? new Date(input.occurredAt) : new Date();
     let eventDetails = input.details ?? null;
+    if (isAppointmentOutcome) eventDetails = { ...eventDetails, appointmentDate: input.appointmentDate };
+    if (input.collectedAmount !== undefined) eventDetails = { ...eventDetails, collectedAmount: input.collectedAmount };
     let serviceSnapshot: {
       id: string;
       name: string;
@@ -1913,8 +1935,25 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
     if (input.type === 'appointment_booked' && input.appointmentDate) {
       await client.query('UPDATE leads SET appointment_date = $2 WHERE id = $1', [input.leadId, input.appointmentDate]);
     }
+    if (input.type === 'appointment_cancelled' || input.type === 'appointment_no_show') {
+      // Compare the occurrence, not just the lead. A delayed update for an
+      // old booking must not erase a newer/rescheduled appointment.
+      await client.query('UPDATE leads SET appointment_date = NULL WHERE id = $1 AND appointment_date = $2::timestamptz', [input.leadId, input.appointmentDate]);
+    }
     if (input.type === 'converted' && input.conversionValue !== undefined) {
       await client.query('UPDATE leads SET conversion_value = $2 WHERE id = $1', [input.leadId, input.conversionValue]);
+    }
+    if (input.type === 'converted' && input.collectedAmount !== undefined) {
+      await insertLeadPaymentOnClient(client, {
+        leadId: input.leadId,
+        amount: input.collectedAmount,
+        occurredAt,
+        source: 'conversion_initial',
+        externalEventId: input.externalEventId ? `client-conversion:${input.leadId}:${input.externalEventId}` : null,
+        notes: 'Cobro confirmado por el responsable del cliente',
+      });
+      // The receipt timestamp lives in lead_payments. Do not create a
+      // partial internal-service snapshot on a client lead.
     }
     if (input.type === 'converted' && serviceSnapshot) {
       await client.query(
@@ -1957,7 +1996,7 @@ export async function appendCommercialEvent(input: AppendCommercialEventInput): 
       }
     }
 
-    if (shouldApplyCommercialStage(existing.stage, targetStage)) {
+    if (targetStage !== null && shouldApplyCommercialStage(existing.stage, targetStage)) {
       await setLeadStageOnClient(client, input.leadId, targetStage, input.source);
     }
 

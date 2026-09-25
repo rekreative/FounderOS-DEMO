@@ -33,6 +33,9 @@ const DEFAULT_SUMMARY: Record<CommercialEventType, string> = {
   qualified: 'Lead qualified',
   appointment_booked: 'Appointment booked',
   appointment_completed: 'Appointment completed',
+  appointment_confirmed: 'Cita confirmada',
+  appointment_cancelled: 'Cita cancelada',
+  appointment_no_show: 'No acudió a la cita',
   converted: 'Lead converted',
   disqualified: 'Lead disqualified',
 };
@@ -68,11 +71,12 @@ export async function POST(request: Request): Promise<Response> {
       summary,
       details: body.details ?? null,
       occurredAt: body.occurredAt,
-      appointmentDate: body.type === 'appointment_booked' ? body.appointmentDate : undefined,
+      appointmentDate: 'appointmentDate' in body ? body.appointmentDate : undefined,
       conversionValue: body.type === 'converted' ? body.conversionValue : undefined,
       serviceId: body.type === 'converted' ? body.serviceId : undefined,
       paymentPlan: body.type === 'converted' ? body.paymentPlan : undefined,
       initialPayment: body.type === 'converted' ? body.initialPayment : undefined,
+      collectedAmount: body.type === 'converted' ? body.collectedAmount : undefined,
     });
 
     if (body.type === 'qualified') {
